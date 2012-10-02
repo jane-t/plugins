@@ -1,0 +1,79 @@
+--[[
+@Title: Create Pages for FHUG Knowledge Base from Downloads File.
+@Author: Jane Taubman
+@LastUpdated: January 2011
+@Description: Create Pages for FHUG Knowledge Base from Downloads File.
+]]
+--- Process Queries from Downloads
+function string:split(sep)
+        local sep, fields = sep or ":", {}
+        local pattern = string.format("([^%s]+)", sep)
+        self:gsub(pattern, function(c) fields[#fields+1] = c end)
+        return fields
+end
+-- Saves a string to file
+function writefile(filename, value)
+  if (value) then
+    local file = io.open(filename,"w")
+    file:write(value)
+    file:close()
+  end
+end
+--- Clean Out Common Words
+function cleantags(s)
+local common = {to=true,the=true,individual=true,query=true,a=true,at=true,of=true,fhq=true}
+    words = {}
+    string.gsub(s, "(%a+)", function (w)
+	  if not common[w] then
+      table.insert(words, w)
+	  end
+    end)
+return string.lower(table.concat(words,' '))
+end
+
+template = [[
+====== F2  ======
+===== Description =====
+F4
+
+Produced by F6 (F5)
+===== Installation Instructions =====
+Click on the links below and double click to install to Family Historian.
+
+===== Download =====
+<<F3|F2>>
+===== Related Pages =====
+{{backlinks>.}}
+
+===== Tags and Keywords =====
+{{tag> upgrades F10}}
+
+<sub>Section <<fhugdownloads:index|fhugdownloads>></sub>
+
+]]
+filename = 'd:\\temp\\downloads\\upgrades.dat'
+destination = 'd:\\temp\\downloads\\upgrades\\'
+for line in io.lines(filename) do	
+	fields = line:split('|')
+	fields[2] = string.gsub(fields[2],'.fhq','')
+	tags = cleantags(fields[2])
+	newfile = string.lower(string.gsub(fields[2]..'.txt',' ','_'))
+	newfile = string.gsub(newfile,'[\?\(\),]','')
+	print(newfile)
+-- merge into template
+outfile = template
+outfile = string.gsub(outfile,'F2',fields[2])
+outfile = string.gsub(outfile,'F3',fields[3])
+outfile = string.gsub(outfile,'F4',fields[4])
+outfile = string.gsub(outfile,'F5',fields[5])
+outfile = string.gsub(outfile,'F6',fields[6])
+outfile = string.gsub(outfile,'<br>','\n\n')
+outfile = string.gsub(outfile,'<BR>','\n\n')
+outfile = string.gsub(outfile,'&quot;','"')
+outfile = string.gsub(outfile,'<<','[[')
+outfile = string.gsub(outfile,'>>',']]')
+outfile = string.gsub(outfile,'F10',tags)
+file = destination..newfile
+print(file)
+writefile(file,outfile)
+end 

@@ -1,0 +1,382 @@
+--[[
+@Title: Convert File Links 
+@Author: Jane Taubman
+@LastUpdated: 21 May 2012
+@Version: 1.4
+@Description: Converts all object links to portable ones, creating cut out images for multimedia objects which have partial links.
+
+
+It will only work on an "exported" gedcom file with full media paths, to prevent accidentally converting a project.
+
+The resulting file can be imported to a variety of programs including Rootsmagic or uploaded to web supporting software like TNG.
+
+Note: When the file is converted, FH will not display the media until the file is reloaded.
+
+V1.1  Added progress display and converted after removal of fhGetItemText function.
+V1.2  Handle Crop Rectangles which end outside the frame, tidy debug prints.
+V1.3 Add options to support copy of non image files.
+V1.4 Handle non-image & missing media, more cropping fixes, other minor updates (with thanks to Mike Tate).
+]]
+ProgressDisplay = {
+
+	Start = function(strTitle)
+		cancelflag = false
+		local cancelbutton = iup.button {
+			title = "Cancel",
+			size = "100x15",
+			action=function()
+				cancelflag = true
+				return iup.CLOSE
+			end
+		}
+		gaugeProgress = iup.progressbar{size = "250x12"}
+		messageline   = iup.label{expand="HORIZONTAL",title=" ",alignment="ACENTER",gap=10} 
+		dlgProgress = iup.dialog{
+			title = strTitle,
+			dialogframe = "YES", border = "YES",
+			iup.vbox {
+				messageline,
+				gaugeProgress,
+				cancelbutton,
+				alignment="ACENTER",gap="10",margin="8x8"
+			}
+		}
+		dlgProgress.menubox = "NO"  --  Remove Windows close button and menu.
+		dlgProgress.close_cb = cancelbutton.action
+		dlgProgress:showxy(iup.CENTER, iup.CENTER)  --  Put up Progress Display
+	end,
+
+	Step = function(iStep)
+		gaugeProgress.value = gaugeProgress.value + iStep
+		local value = tonumber(gaugeProgress.value)
+		if value >= 1 then
+			gaugeProgress.value  = 0
+		end
+		iup.LoopStep()
+	end,
+
+	Close = function()
+		dlgProgress:destroy()
+	end,
+
+	Cancel = function()
+		return cancelflag
+	end,
+
+	SetMessage = function(strMessage)
+		messageline.title = strMessage
+	end,
+
+	Reset = function()
+		gaugeProgress.value = 0
+	end
+}
+
+function CopyMediaFile(strSource,strTarget)
+	local fileSource = assert(io.open(strSource,"rb"))
+	local fileTarget = assert(io.open(strTarget,"wb"))
+	fileTarget:write(fileSource:read("*all"))				-- Copy entire file contents
+	assert(fileSource:close())
+	assert(fileTarget:close())
+end
+
+function ProcessImageFile(orgfile,destfile,y1,x1,y2,x2,maxheight,maxwidth)
+	local ya,yb
+	image, err = im.FileImageLoad(orgfile)
+	if (err and err ~= im.ERR_NONE) then
+		local TblError = {}
+		TblError[im.ERR_OPEN]		= "Error while opening the file."
+		TblError[im.ERR_ACCESS]	= "Error while accessing the file."
+		TblError[im.ERR_FORMAT]	= "Invalid or unrecognized file format."
+		TblError[im.ERR_DATA]		= "Invalid or unsupported data."
+		TblError[im.ERR_COMPRESS]	= "Invalid or unsupported compression."
+		TblError[im.ERR_MEM]		= "Insuficient memory."
+		fhMessageBox("File Image Load: "..TblError[err].."\n\nCopying image file without cropping:\n\n"..orgfile)
+		dlgProgress.bringfront = "YES"
+		CopyMediaFile(orgfile,destfile)
+		return
+	end
+	local w=image:Width()
+	local h=image:Height()
+	local a=y1 or 0
+	local b=x1 or 0
+	local c=y2 or 0
+	local d=x2 or 0
+
+	if y1 == nil then
+		-- Full image copy no Crops
+		x1, x2, ya, yb = 0, w-1, 0, h-1
+	else
+		-- bottom up for Y
+		ya = h - y2
+		yb = h - y1 - 1
+	end
+	-- Check for Crops outside of the range
+	if x1 < 0 then x1 = 0 end
+	if x2 < 0 then x2 = 0 end
+	if x1 >= w then x1 = w-1 end
+	if x2 >= w then x2 = w-1 end
+	if yb >= h then yb = h-1 end
+	if ya >= h then ya = h-1 end
+	if ya < 0 then ya = 0 end
+	if yb < 0 then yb = 0 end
+
+	isOK, new_image = pcall(im.ProcessCropNew, image, x1, x2, ya, yb)
+	if isOK then
+		if maxwidth ~= nil or maxheight ~= nil then
+			if (new_image:Height() > maxwidth) or (new_image:Width() > maxwidth) then
+				new_image = resize(new_image,maxwidth,maxheight)
+			end
+		end
+		new_image:Save(destfile, "JPEG")
+		new_image:Destroy()
+		image:Destroy()
+	else
+		-- Report error message held in 'new_image' with other diagnostic details
+		fhMessageBox("Process Crop Error\n\nImage File: "..orgfile.."\n\nImage _AREA {"..a..","..b..","..c..","..d.."}\n\n"..new_image.."\n\nArgs  #2: "..x1.."  #3: "..x2.."  #4: "..ya.."  #5: "..yb.."  width: "..w.."  height: "..h)
+		dlgProgress.bringfront = "YES"
+	end
+end
+
+function resize(image,maxwidth,maxheight)
+	local w = maxwidth
+	local h = maxheight
+
+	for i = 1, 4 do
+		local img_w = image:Width()
+		local img_h = image:Height()
+		local aspect = maxwidth / maxheight
+		if (img_w ~= w or h ~= h) then
+			local rz_w, rz_h, img_aspect
+
+			img_aspect = img_w/img_h
+
+			-- keep image aspect ratio
+			if (img_aspect ~= aspect) then
+				if (img_aspect < aspect) then
+					rz_h = h
+					rz_w = math.floor(rz_h * img_aspect)
+				else
+					rz_w = w
+					rz_h = math.floor(rz_w / img_aspect)
+				end
+			else
+				rz_w = w
+				rz_h = h
+			end
+
+			if (img_w ~= rz_w or img_h ~= rz_h) then
+				resize_image = im.ImageCreate(rz_w, rz_h, image:ColorSpace(), image:DataType())
+				im.ProcessResize(image, resize_image, 1) -- do bilinear interpolation
+				image:Destroy()
+				image = resize_image
+			end
+		end
+	end
+	return image
+end
+
+function string.starts(String,Start)
+	return string.sub(String,1,string.len(Start))==Start
+end
+
+function splitfilename(strfilename)
+	return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+
+function DoAllItems(strType,tblClass,action)
+	-- strType: Main Item Type (eg text)
+	-- strClass:  Keyworded Array of Classes
+	-- action:    function to perform
+	local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+	-- Loop through Record Types
+	local ii = 0
+	local ptr = fhNewItemPtr()
+	local tmpptr = fhNewItemPtr()
+	for ii =1,iCount do
+		strRecType = fhGetRecordTypeTag(ii)
+		ptr:MoveToFirstRecord(strRecType)
+		while ptr:IsNotNull() do
+			strDataClass = fhGetDataClass(ptr)
+			if fhGetTag(ptr) == strType and tblClass[fhGetDataClass(ptr)] == true then
+				action(ptr)
+			end
+			ptr:MoveNextSpecial()
+		end
+	end
+end
+
+function replaceObj(ptr)	
+	ProgressDisplay.SetMessage(fhGetDisplayText(ptr))
+	ProgressDisplay.Step(iStep)
+	if ProgressDisplay.Cancel() then
+		-- Quit Logic
+		error('Process Cancelled')
+	end
+	local key
+	local rcdPtr = fhNewItemPtr()
+	local linkPtr = fhNewItemPtr()
+	local parentPtr = fhNewItemPtr()
+	local newObjPtr = fhNewItemPtr()
+	local newFieldPtr = fhNewItemPtr()
+	rcdPtr = fhGetValueAsLink(ptr)
+	linkPtr:MoveTo(ptr,'~._ASID')
+	strASID = fhGetValueAsText(linkPtr)
+	if strASID == nil or strASID == '' then
+		strASID = '0'
+	end
+	parentPtr:MoveToParentItem(ptr) 
+	if rcdPtr:IsNotNull() then
+		-- Found record link OBJECT
+		key = fhGetRecordId(rcdPtr)..'-'..strASID
+		object = tblFileList[key]
+		if object == nil then
+			error('No Object Data Found')
+		end
+		--- Add New Direct Object
+		newObjPtr = fhCreateItem('OBJE2',parentPtr)
+		fhSetValueAsText(newObjPtr,'')
+		newFieldPtr:MoveTo(newObjPtr,'~.FORM')
+		if newFieldPtr:IsNull() then
+			newFieldPtr = fhCreateItem('FORM',newObjPtr)
+		end
+		fhSetValueAsText(newFieldPtr,object.form)
+		newFieldPtr:MoveTo(newObjPtr,'~.FILE')
+		if newFieldPtr:IsNull() then
+			newFieldPtr = fhCreateItem('FILE',newObjPtr)
+		end
+		fhSetValueAsText(newFieldPtr,object.filename)
+		newFieldPtr = fhCreateItem('TITL',newObjPtr)
+		fhSetValueAsText(newFieldPtr,object.title)
+		table.insert(tblObjList,ptr:Clone())
+	end
+end
+
+function trim(s)
+	return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+function CountMedia()
+	local ptrCount = fhNewItemPtr()
+	local count = 0
+	ptrCount:MoveToFirstRecord('OBJE')
+	while ptrCount:IsNotNull() do
+		count = count + 1
+		ptrCount:MoveNext()
+	end
+	-- Return as reciprical to step the gaugeProgress
+	return count
+end
+
+--------------------------------------------------------- Main Code
+require "lfs"
+require "imlua"
+require "imlua_process"
+context = fhGetContextInfo('CI_APP_MODE')
+if context ~= 'Gedcom Mode' then
+	fhMessageBox('Please export your Project using the Export Option first'..
+	' and open the exported Gedcom before running this plugin')
+	return
+end
+exportFolder = splitfilename(fhGetContextInfo('CI_GEDCOM_FILE'))
+bOk,exportFolder,maxheight,maxwidth = iup.GetParam('Export Image Options',iup.NULL,
+	'Please select the folder for the media %t \n'..
+	'Media Folder %f[DIR||'..exportFolder..'] \n'..
+	'Maximum Height %i \n'..
+	'Maximum Width %i \n',
+	exportFolder,600,600
+	)
+if bOk == false then
+	return
+end
+-- IUP sometimes adds white space and new lines so trim them and ensure one and only one backslash.
+exportFolder = trim(exportFolder)..'\\'
+exportFolder = exportFolder:gsub('\\\\','\\')
+lfs.mkdir(exportFolder)
+tblFileList = {}
+ptrRecord = fhNewItemPtr()
+ptrField  = fhNewItemPtr()
+tblObjList = {}
+
+------------------------------------------ Stage One Process All Attached Images
+ProgressDisplay.Start('Converting Images')
+iStep = 1 / CountMedia()
+ptrRecord:MoveToFirstRecord('OBJE')
+ptrWork = fhNewItemPtr()
+while ptrRecord:IsNotNull() do
+	rcdId = fhGetRecordId(ptrRecord)
+	ptrWork:MoveTo(ptrRecord,'~._FILE')
+	strFileName = fhGetValueAsText(ptrWork)
+	strRecord = fhGetRecordId(ptrRecord)
+	ptrWork:MoveTo(ptrRecord,'~.FORM')
+	strForm = fhGetValueAsText(ptrWork)
+	ptrWork:MoveTo(ptrRecord,'~.TITL')
+	strTitle = fhGetValueAsText(ptrWork)
+	local path,name,ext = splitfilename(strFileName)
+	name = name or ""
+	ptrField:MoveTo(ptrRecord,'~.NOTE2')
+	ProgressDisplay.SetMessage(name:gsub("&","&&"))
+	ProgressDisplay.Step(iStep)
+	if ProgressDisplay.Cancel() then
+		error('Process Cancelled')
+	end
+	-- Check whether Multimedia Object is an image format file
+	local strFormat = string.lower(strForm)
+	local isImage = false
+	for i, strType in ipairs({"bmp","gif","ico","jpg","jpeg","pcx","png","tif","tga","tiff"}) do
+		if string.match(strFormat,strType) then
+			isImage = true
+			break
+		end
+	end
+	while ptrField:IsNotNull() do
+		ptrWork:MoveTo(ptrField,'~._ASID')
+		strASID = fhGetValueAsText(ptrWork)
+		ProgressDisplay.SetMessage(name:gsub("&","&&")..' '..strASID)
+		ptrWork:MoveTo(ptrField,'~._AREA')
+		strArea = fhGetValueAsText(ptrWork)
+		if strFileName:starts('Media\\') then
+			fhMessageBox('File contains Project file links please ensure export done with Full Paths - Process Aborted')
+			return
+		end
+		a,b,c,d = string.match(strArea,'{(.-),(.-),(.-),(.-)}')
+		if a == nil then fASID = '0' else fASID = strASID end	
+		outFile = exportFolder..'O'..rcdId..'-'..fASID..'-'..name
+		if lfs.attributes(strFileName,"mode") == "file" then	-- File exists
+			if isImage then
+				ProcessImageFile(strFileName,outFile,tonumber(a),tonumber(b),tonumber(c),tonumber(d),200,200)
+			else -- Audio/Video/Word-processor file
+				CopyMediaFile(strFileName,outFile)
+			end
+		else
+			if strFileName ~= "" then
+				fhMessageBox("Skipping missing multimedia file:\n\n"..strFileName)
+				dlgProgress.bringfront = "YES"
+			end
+		end
+		tblFileList[rcdId..'-'..strASID] = {recordId=rcdID,asid=fASID,filename=outFile,form=strForm,title=strTitle}
+		ptrField:MoveNext('SAME_TAG')
+	end
+	outFile = exportFolder..'O'..rcdId..'-0-'..name
+	if lfs.attributes(strFileName,"mode") == "file"	-- Input file exists
+	and not lfs.attributes(outFile,"mode") then		-- Output file missing
+		if isImage then ProcessImageFile(strFileName,outFile,nil,nil,nil,nil,200,200) end
+	end
+	tblFileList[rcdId..'-0'] = {recordId=rcdID,asid='0',filename=outFile,form=strForm,title=strTitle}
+	table.insert(tblObjList,ptrRecord:Clone())
+	ptrRecord:MoveNext()
+end
+ProgressDisplay.Reset()
+ProgressDisplay.Close()
+
+------------------------------------------ Stage two convert all File Links to Local Links
+ProgressDisplay.Start('Remaping Images')
+iStep = 1 / #tblFileList
+DoAllItems('OBJE',{link=true},replaceObj)
+ProgressDisplay.Reset()
+ProgressDisplay.Close()
+
+------------------------------------------ Stage 4 delete all object records
+for k,ptr in pairs(tblObjList) do
+	fhDeleteItem(ptr)
+end

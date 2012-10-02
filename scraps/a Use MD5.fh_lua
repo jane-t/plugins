@@ -1,0 +1,3 @@
+require "md5"
+print(md5.sumhexa('Hello World Message'))
+print(md5.sumhexa('Hello World Message 2012'))

@@ -1,0 +1,37 @@
+--[[
+@Title: Rename Media to Match Title Field
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: March 2011 
+@Description: 
+Renames Selected Media Files to the Name in the Title 
+excluding characters not allowed in file names.
+]]
+function splitfilename(strfilename)
+-- Returns the Path Filename and extension as 3 values
+return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+------------------------------------------------------------ Main Code
+tblPtrList  = fhPromptUserForRecordSel('OBJE')
+strMediaDir = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+ptrFile = fhNewItemPtr()
+if #tblPtrList == 0 then
+    fhMessageBox('User cancelled')
+else
+	for _,ptr in pairs(tblPtrList) do
+			ptrFile:MoveTo(ptr,'~._FILE')
+			id = fhGetRecordId(ptr)
+path,file,ext = splitfilename(fhGetItemText(ptrFile,'~'))
+newfile = 'O'..id..'_'..string.gsub(fhGetItemText(ptr,'~.TITL'),'[_%W]','_')..'.'..ext
+        print(fhGetDisplayText(ptr),id, path, file, newfile)
+		if string.sub(path,1,5) == 'Media' then
+			-- File in Media Folder so extend path
+			path2 = strMediaDir..'\\'..path
+		else
+			path2 = path
+		end
+        print(fhGetDisplayText(ptr),id, path2, file, newfile, string.sub(path,1,5))
+			fhSetValueAsText(ptrFile,path..newfile)
+			os.rename(path2..file,path2..newfile)
+    end
+end

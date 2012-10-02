@@ -1,0 +1,129 @@
+--[[
+@title: Surname Case Convert
+@author: Calico Pie
+@lastupdated: July 2011
+@version: 1.2
+@description:
+Process all Surnames, tidying the capitalisation for Surnames recorded in the file in ALL CAPS.
+Special Cases for Mac,Mc,de' and O' have been included more can be added in the capitalise
+function, also allows over-ride at runtime by prompting the converted surnames for confirmation.
+@changes:
+1.2 Added result set showing changed records.
+1.1 Fixed Problem with records with a blank name field. 
+]]
+
+-- Set first letter to capital and the rest to lower case.
+function tchelper(first, rest)
+    return first:upper()..rest:lower()
+end
+-- Set change the "middle" letter to upper case (eg McMull).
+function upperspecial (start,middle,rest)
+    return start..middle:upper()..rest:lower()
+end
+-- Set change the first letter(s) to lower case (eg de'Watt).
+function lowerspecial (start,middle,rest)
+    return start:lower()..middle:upper()..rest:lower()
+end
+-- captialise string
+function captialise(str)
+    str = str:gsub("(%a)([%w_]*)", tchelper)
+    -- Add Special Cases Here
+    str = str:gsub("(Mac)(%a)([%w_]*)", upperspecial)
+    str = str:gsub("(Mc)(%a)([%w_]*)", upperspecial)
+    str = str:gsub("(De')(%a)([%w_]*)", lowerspecial)
+    str = str:gsub("(O')(%a)([%w_]*)", upperspecial)
+    return(str)
+end
+
+-- Extract all Surnames currently in all captials.
+tblSurnames = {}     -- Define array for Surnames
+pi = fhNewItemPtr()  -- declare pointer
+pName = fhNewItemPtr()
+pi:MoveToFirstRecord("INDI")    -- set the first to point to the first Source record
+while not pi:IsNull() do
+    -- For each person add any captial surnames to the list
+    pName:MoveTo(pi,'~.NAME')
+    while pName:IsNotNull() do
+        strSurname =  string.match(fhGetValueAsText(pName),"%b//")
+        if strSurname ~= nil then
+            strSurname =  string.gsub(strSurname,'/','')
+            -- Fix only surnames which are all captials
+            if strSurname == strSurname:upper() then
+                strSurname = strSurname:upper()
+                if (tblSurnames[strSurname] == nil) then
+                    tblSurnames[strSurname] = 1
+                else
+                    tblSurnames[strSurname] = tblSurnames[strSurname] + 1
+                end
+            end
+        end
+        pName:MoveNext('SAME_TAG')
+    end
+    pi:MoveNext()
+end
+-- Reformat Surnames to upper and lower case and prompt user to correct them as required.
+-- Build Tables containing Table for Names and convert to mixed case.
+tblSurname = {}
+ii = 0  -- line counter
+for strSurname, iQty in pairs(tblSurnames) do
+    ii = ii + 1
+    tblSurname[ii]  = captialise(strSurname)
+end
+if ii == 0 then
+    fhMessageBox('No uppercase surnames found','MB_OK','MB_ICONINFORMATION')
+    return
+end
+-- Sort alphabetically
+table.sort(tblSurname)
+-- Call iup text prompt with the contents of the array, concatinated with new lines.
+strList = iup.GetText('Please check the Case on the Surnames Below', table.concat(tblSurname,'\n'))
+if strList == nil then
+    -- Cancel Pressed
+else
+    tblSurname2 = {}  -- Replacement Names
+    tblOldName = {}
+    tblNewName = {}
+    tblRecord = {}
+    strButton = fhMessageBox('Please confirm all Captialised Surnames to be replaced with Mixed Case Ones','MB_YESNO')
+    if strButton == 'Yes' then
+        -- User has confirmed process
+        -- rebuild the table after edit
+        for line in strList:gmatch("[^\r\n]+") do
+            tblSurname2['/'..line:upper()..'/']  = '/'..line..'/'
+        end
+        -- Loop through the file again and update the Surnames to match
+        pi:MoveToFirstRecord("INDI")
+        while not pi:IsNull() do
+            -- Update the Surname
+            pName:MoveTo(pi,'~.NAME')
+            while pName:IsNotNull() do
+                oldname = fhGetValueAsText(pName)
+                -- gsub matches the surname between the // and looks up the replacement in the table.
+                strName = string.gsub(oldname,"%b//",tblSurname2)
+                if strName ~= oldname then
+                    table.insert(tblOldName,oldname)
+                    table.insert(tblNewName,strName)
+                    table.insert(tblRecord,pi:Clone())
+                    fhSetValueAsText(pName,strName)
+                end
+                    pName:MoveNext('SAME_TAG')
+
+					end
+
+                pi:MoveNext()
+            end
+            if #tblOldName > 0 then
+                -- Output Result Set
+                fhOutputResultSetTitles("Capitalisation Changes", "Capitalisation Changes", "Date: %#x")
+                fhOutputResultSetColumn("Old Name", "text", tblOldName, #tblRecord, 180, "align_left")
+                fhOutputResultSetColumn("New Name", "text", tblNewName, #tblRecord, 180, "align_left")
+                fhOutputResultSetColumn("Individual", "item", tblRecord, #tblRecord, 180, "align_left")
+                
+            else
+                fhMessageBox('No Records Required Updated')
+            end
+            
+        else
+            fhMessageBox('Update Aborted')
+        end
+    end

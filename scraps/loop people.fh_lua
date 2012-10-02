@@ -1,0 +1,32 @@
+pi = fhNewItemPtr()  -- declare pointer 
+pi:MoveToFirstRecord("INDI") -- and set to the first record.
+-- Initialising all the count values ensures they exist at the end.
+iCount = 0
+iNoSex = 0
+iMale  = 0
+iFemale = 0
+iOther = 0
+
+while not pi:IsNull() do
+	iCount = iCount + 1
+	ptrSex = fhGetItemPtr(pi,'INDI.SEX')
+	if ptrSex:IsNull() then  --Check for the Sex item if none add to NoSex Count.
+		iNoSex = iNoSex + 1
+	else
+		strSex = fhGetValueAsText(ptrSex) -- Get the Sex Value and add to the count based on the value.
+		if strSex == 'Male' then
+			iMale = iMale + 1
+		elseif strSex == 'Female' then
+			iFemale = iFemale + 1
+		else
+			iOther = iOther + 1
+		end
+	end
+   	pi:MoveNext()
+end
+fhMessageBox('There are '..iCount..' people in the project\n'..
+'There are '..iMale..' men in the project\n'..
+iFemale..' women in the project\n'..
+iOther..' other in the project\n'..
+iNoSex..' people with a missing sex value in the project\n'
+)

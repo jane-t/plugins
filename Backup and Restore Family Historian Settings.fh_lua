@@ -1,0 +1,1567 @@
+--[[
+@Title:			Backup and Restore Family Historian Settings
+@Author:			Mike Tate
+@LastUpdated:	14 June 2012
+@Version:			1.6
+@Description:	Backup and Restore the Family Historian Custom & Preference Settings using any folder.
+@V1.6:				New disallow RESTORE Registry Data Keys option, migrate FH 5.0 Beta option removed,
+					allow RESTORE to create folders & report failures, omit file paths from HKLM Registry Keys,
+					introductory IMPORTANT PLEASE READ message, convert filename "&" to "&&" in GUI titles,
+					function doCopyFile 'Restore Old File' WARNING adapted for 'Backup Old File' too,
+					delete redundant image file backups.
+@V1.5:				Migrate adapted for disabled FH 5.0 Beta.
+@V1.4:				Added FHUG Help and Advice pages.
+@V1.3:				Handles 1 hour time difference on Migrate Beta to Full V5, hides Restore Data buttons as they are used.
+@V1.2:				REG QUERY /V /S reduced to REG QUERY /S for XP, Batch script timeout longer, Copy File tries all Write modes,
+					also saves duplicate external images only once, and skips those in Program Data folders.
+@V1.1:				Migrate FH 5.0 Beta Backup to FH V5.0, backup external image files, plus other minor updates. 
+@V1.0:				First version.
+]]
+--[=[
+Windows Registry Management Notes
+
+1)	Virtualisation for HKLM on Windows 7 & Vista (but not XP) allows Standard User to 'write' to HKLM keys.
+	See http://msdn.microsoft.com/en-us/library/windows/desktop/aa965884%28v=vs.85%29.aspx
+
+2)	Migrating 64/32 bit using %WinDir%\SysWOW64\reg.exe to avoid "HKLM\Software\wow6432node\..." problem.
+	See http://csi-windows.com/blog/all/27-csi-news-general/266-scripting-migrating-and-managing-registry-data-in-64-bit-windows
+	In following command %WinDir%\SysWOW64\REG.EXE actually exports from "HKLM\Software\Wow6432Node\Calico Pie\Family Historian" but hides \Wow6432Node\
+	IF EXIST	%WinDir%\SysWOW64\REG.EXE (
+				%WinDir%\SysWOW64\REG.EXE EXPORT "HKLM\Software\Calico Pie\..." "HKLM.reg"	/Y
+	) ELSE (
+											REG	 EXPORT "HKLM\Software\Calico Pie\..." "HKLM.reg"	/Y
+	)
+
+3)	Actual testing suggests none of the above is necessary. Plain REG works OK and \Wow6432Node\ disregarded. The /Y option is not allowed on XP.
+	The HKEY_LOCAL_MACHINE\SOFTWARE\[Wow6432Node]\Calico Pie\Family Historian... keys grant Everyone permission for Full Control.
+	This explains why any user account can write to those keys. 
+
+]=]
+
+	require "iuplua"								-- To access GUI window builder
+	require "lfs"									-- To access LUA filing system
+	require "iupluaole"								-- To access OLE subsystem
+	require "luacom"								-- To access COM subsystem
+
+-- Global Data Constants Definition --
+function PresetGlobalConstants()
+
+	-- GUI Global Constants
+
+	StrPlugin			= "Backup and Restore Family Historian Settings"
+	StrIssue			= " V1.6 "					-- Plugin title & version
+	StrRed				= "255 000 000"				-- Color attributes
+	StrAmber			= "190 110 000"
+	StrGreen			= "000 120 000"
+	StrBlue			= "000 000 255"
+	StrGray			= "120 120 120"
+	StrBlack			= "000 000 000"
+	StrGap 			= "8"							-- Gap & Margin & Size attributes
+	StrMinMargin		= "4x4"
+	StrBigMargin		= "8x8"
+	StrMinSize		= "800x400"
+	IntTabBackup		= 0
+	IntTabRestore	= 1
+	IntTabOptions	= 2
+
+	StrFontSetTitle	= "Set Interface Font"
+	IntFontPlain		= 1								-- Font Face & Style values for IntFontSet
+	IntFontBold		= 2
+	IntArialPlain	= 3
+	IntArialBold		= 4
+	IntTahomaPlain	= 5
+	IntTahomaBold	= 6
+	StrFontFace		= string.gsub(iup.GetGlobal("DEFAULTFONT"),",.*","")
+
+	IntFontSet		= IntFontPlain				-- Font Face & Style default
+
+	-- Filename Global Constants
+
+	StrComputerName = os.getenv("COMPUTERNAME")
+
+	StrStickyFile = fhGetPluginDataFileName()
+	-- Allow plugins with variant filenames to use same plugin data files
+	StrStickyFile = string.gsub(StrStickyFile,"\\"..StrPlugin..".+%.[D,d][A,a][T,t]$","\\"..StrPlugin..".dat")
+	if StrStickyFile == "" then
+		-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
+		StrStickyFile = fhGetContextInfo("CI_GEDCOM_FILE")
+		StrStickyFile = string.gsub(StrStickyFile, "%.[G,g][E,e][D,d]", ".fh_data")
+		lfs.mkdir(StrStickyFile)
+		StrStickyFile = StrStickyFile.."\\Plugin Data"
+		lfs.mkdir(StrStickyFile)
+		StrStickyFile = StrStickyFile.."\\"..StrPlugin..".dat"
+	end
+
+	-- Plugin data folder path name
+	StrPluginPath = string.gsub(StrStickyFile,"\\"..StrPlugin.."%.[D,d][A,a][T,t]$","")
+
+	-- Plugin data file root name
+	StrPluginRoot = StrPluginPath.."\\"..StrPlugin
+
+	-- Public data folder path name
+	StrPublicPath = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")
+	if StrPublicPath == "" then StrPublicPath = StrPluginPath end
+
+	-- Program Data Calico Pie path name
+	StrCalicoPie = fhGetContextInfo("CI_APP_DATA_FOLDER"):gsub("\\Calico Pie\\.*","\\Calico Pie")
+
+	-- Default Backup & Restore folder path
+	StrBackupDir = ""
+	-- FH Preferences Backup folder path
+	StrBackupKey = ""
+
+	-- Family Historian Programs & Versions
+	TblProgram = {}
+	TblVersion = {}
+
+end -- function PresetGlobalConstants
+
+-- Global Functions --
+
+-- Split a string using separator --
+function string:split(sep)
+	local sep = sep or ":"
+	local fields = {}
+	local pattern = string.format("([^%s]+)", sep)
+	self:gsub(pattern, function(c) fields[#fields+1] = c end)
+	return fields
+end -- function string:split
+
+-- Split a string into numbers using separators space or comma or x --
+function string:SplitNumbers()
+	local tblNum = {}
+	self:gsub("([^%s,x]+)", function(c) tblNum[#tblNum+1] = c end)
+	for i=1, #tblNum do
+		tblNum[i] = tonumber(tblNum[i])
+	end
+	return tblNum
+end -- function string:SplitNumbers
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+end -- function FlgFileExists
+
+-- Check if folder exists --
+function FlgFolderExists(strFolderName)
+	if lfs.attributes(strFolderName,"mode") == "directory" then
+		return true
+	else
+		return false
+	end
+end -- function FlgFolderExists
+
+-- Check if folder writable --
+function FlgFolderWrite(strFolderName)
+	if FlgFolderExists(strFolderName) then
+		local fileHandle, strError = io.open(strFolderName.."\\xyz.xyz","w")
+		if fileHandle ~= nil then
+			fileHandle:close()
+			os.remove(strFolderName.."\\xyz.xyz")
+			return true
+		end
+	end
+	return false
+end -- function FlgFolderWrite
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if not fileHandle then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+	local fileHandle = OpenFile(strFileName,"r")
+	local strString = fileHandle:read("*all")
+	assert(fileHandle:close())
+	return strString
+end -- function StrLoadFromFile
+
+-- Delete file if it exists --
+function DeleteFile(strFileName)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(string.gsub(strError,strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
+		end
+	end
+end -- function DeleteFile
+
+-- Return the Path, Filename, and extension as 3 values
+function SplitFilename(strFilename)
+	return string.match(strFilename, "(.-)([^\\]-([^%.]+))$")
+end -- function SplitFilename
+
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+	if string.sub(strDir, -1) == "/" then
+		strDir = string.sub(strDir, 1, -2)		-- Remove trailing "/"
+	end
+    
+	local function doYieldTree(strDir)
+		for strEntry in lfs.dir(strDir) do
+			if strEntry ~= "." and strEntry ~= ".." then
+				strEntry = strDir.."\\"..strEntry
+				local tblAttr = lfs.attributes(strEntry)
+				coroutine.yield(strEntry,tblAttr)
+				if tblAttr.mode == "directory" then
+					doYieldTree(strEntry)
+				end
+			end
+		end
+	end -- local function doYieldTree
+
+	return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+
+-- Invoke FH Shell Execute API --
+function DoExecute(strExecutable, strParameter)
+	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable, strParameter)
+	if not isOK then
+		GUI_ModeDialogue("Shell Execute Error","ERROR: "..tostring(strErrorText).." ("..tostring(intErrorCode)..") :\n"..strExecutable.."\n"..strParameter.."\n\n","OK")
+	end
+end -- function DoExecute
+
+-- Inhibit Regular Expression magic characters ^$()%.[]*+-?)
+function StrPlainText(strText)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
+	return strText:gsub("(%W)","%%%1")
+end -- function StrPlainText
+
+-- Reset Sticky Settings to Default Values --
+function ResetDefaultSettings()
+	IntMainX		= iup.CENTER						-- GUI Main window position X & Y co-ordinate and rastersize
+	IntMainY		= iup.CENTER
+	StrMainS		= StrMinSize
+	IntHelpX		= iup.CENTER						-- GUI Help window position X & Y co-ordinate and rastersize
+	IntHelpY		= iup.CENTER
+	StrHelpS		= "1030x730"
+	IntModeX		= iup.CENTER						-- GUI Mode window position X & Y co-ordinate
+	IntModeY		= iup.CENTER
+	StrRegistry	= "OFF"							-- Allow RESTORE Registry Data: OFF
+end -- function ResetDefaultSettings
+
+-- Load Sticky Settings from File --
+function LoadSettings(strFileName)
+
+	local tblStickyData = {}
+
+	-- Load Local Parameter for this PC --
+	local function strLoadLocal(strParam,strDefault)
+		return tblStickyData[StrComputerName.."-"..strParam] or strDefault
+	end
+
+	-- Load Global Parameter for all PC --
+	local function strLoadGlobal(strParam,strDefault)
+		return tblStickyData[strParam] or strDefault
+	end
+
+	-- Ensure Window Position is on Screen --
+	local function intintCheckPosition(x,y)
+		local tblScrn = iup.GetGlobal("VIRTUALSCREEN"):SplitNumbers()
+		-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+		if tonumber(x) == nil then
+			x = iup.CENTER
+		elseif tonumber(x) > tblScrn[3] then
+			x = iup.CENTER
+		end
+		if tonumber(y) == nil then
+			y = iup.CENTER
+		elseif tonumber(y) > tblScrn[4] then
+			y = iup.CENTER
+		end
+		return tonumber(x),tonumber(y)
+	end -- local function intintCheckPosition
+
+	if FlgFileExists(strFileName) then
+		-- Load Settings File in table lines with key & val fields
+		local tblField = {}
+		for strLine in io.lines(strFileName) do
+			tblField = strLine:split("=")
+			tblStickyData[tblField[1]] = tblField[2]
+		end
+		IntMainX = tonumber(strLoadLocal("MainX",IntMainX))
+		IntMainY = tonumber(strLoadLocal("MainY",IntMainY))
+		StrMainS = strLoadLocal			("MainS",StrMainS)
+		IntHelpX = tonumber(strLoadLocal("HelpX",IntHelpX))
+		IntHelpY = tonumber(strLoadLocal("HelpY",IntHelpY))
+		StrHelpS = strLoadLocal			("HelpS",StrHelpS)
+		IntModeX = tonumber(strLoadLocal("ModeX",IntModeX))
+		IntModeY = tonumber(strLoadLocal("ModeY",IntModeY))
+		StrBackupDir = strLoadLocal("Backup",StrBackupDir)
+		StrRegistry = strLoadGlobal("Registry",StrRegistry)
+		IntFontSet = tonumber(strLoadGlobal("FontSet",IntFontSet))
+	end
+	IntMainX,IntMainY = intintCheckPosition(IntMainX,IntMainY)
+	IntHelpX,IntHelpY = intintCheckPosition(IntHelpX,IntHelpY)
+	IntModeX,IntModeY = intintCheckPosition(IntModeX,IntModeY)
+	GUI_FontDialogue(IntFontSet) 							-- Assign font set
+	SaveSettings(strFileName)									-- Save sticky data settings
+end -- function LoadSettings
+
+-- Save Sticky Settings to File --
+function SaveSettings(strFileName)
+
+	local tblStickyData = {}
+
+	-- Save Local Parameter for this PC --
+	local function doSaveLocal(strParam,param)
+		tblStickyData[StrComputerName.."-"..strParam] = param
+	end
+
+	-- Save Global Parameter for all PC --
+	local function doSaveGlobal(strParam,param)
+		tblStickyData[strParam] = param
+	end
+
+	doSaveLocal("MainX",IntMainX)
+	doSaveLocal("MainY",IntMainY)
+	doSaveLocal("MainS",StrMainS)
+	doSaveLocal("HelpX",IntHelpX)
+	doSaveLocal("HelpY",IntHelpY)
+	doSaveLocal("HelpS",StrHelpS)
+	doSaveLocal("ModeX",IntModeX)
+	doSaveLocal("ModeY",IntModeY)
+	doSaveLocal("Backup",StrBackupDir)
+	doSaveGlobal("Registry",StrRegistry)
+	doSaveGlobal("FontSet",IntFontSet)
+
+	local fileHandle = OpenFile(strFileName,"w")
+	for strKey,strVal in pairs(tblStickyData) do
+		fileHandle:write(strKey.."="..strVal.."\n")
+	end
+	assert(fileHandle:close())
+end -- function SaveSettings
+
+-- Flag if GUI Window is Normal rather than Minimised or Maximised --
+function IsNormalWindow(dialogGUI)
+	-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+	local tblPosn = dialogGUI.screenposition:SplitNumbers()
+	local intPosX = tblPosn[1]
+	local intPosY = tblPosn[2]
+	if intPosX < 0 and intPosY < 0 then						-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
+		return false												-- then is Maximised or Minimised
+	end
+	return true
+end -- function IsNormalWindow
+
+-- GUI Font Face & Style Dialogue --
+function GUI_FontDialogue(intFontSet)
+
+	-- Note: Pixel sizes -21 = -20 & -17 = -16 & -14 = -13 and pixel sizes -22, -18 & -13 have no point size equivalent.
+	local tblFontSet = {}			-- Lookup table for StrFontHead and StrFontBody font sets
+	tblFontSet[IntFontPlain]		=	{ Head=StrFontFace..", Bold -16",	Body=StrFontFace..",      -16", }
+	tblFontSet[IntFontBold]		=	{ Head=StrFontFace..", Bold -16",	Body=StrFontFace..", Bold -15", }
+	tblFontSet[IntArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
+	tblFontSet[IntArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
+	tblFontSet[IntTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
+	tblFontSet[IntTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
+
+	-- Assign font set global variables
+	local function doAssignFontSet(intFontSet)
+		IntFontSet = intFontSet
+		StrFontHead = tblFontSet[intFontSet]["Head"] -- Font for all GUI dialog header text
+		StrFontBody = tblFontSet[intFontSet]["Body"] -- Font for all GUI dialog body text
+	end -- local function doAssignFontSet
+
+	-- If parameter exists, simply set it as current font set
+	if intFontSet then doAssignFontSet(intFontSet) return end
+
+	local strAnswer = "Change"
+
+	local strFontPlainTitle	= StrFontFace.." Plain"
+	local strFontBoldTitle		= StrFontFace.." Bold"
+	local strArialPlainTitle	= "Arial Plain"
+	local strArialBoldTitle	= "Arial Bold"
+	local strTahomaPlainTitle	= "Tahoma Plain"
+	local strTahomaBoldTitle	= "Tahoma Bold"
+
+	-- Create each GUI label and button with title and tooltip
+	local	lblHeadName		= iup.label	{ title=" Name :"				, tip="Names of the available Fonts"				, }
+	local	lblHeadPlain		= iup.label	{ title=" Plain :"				, tip="Plain versions of the Fonts"					, }
+	local	lblHeadBold		= iup.label	{ title=" Bold :"				, tip="Bold versions of the Fonts"					, }
+	local	lblFontName		= iup.label	{ title="Font "..StrFontFace	, tip="Default Windows fontface"					, }
+	local	btnFontPlain		= iup.button	{ title=strFontPlainTitle		, tip="Choose "..strFontPlainTitle.." style"		, }
+	local	btnFontBold		= iup.button	{ title=strFontBoldTitle		, tip="Choose "..strFontBoldTitle.." style"		, }
+	local	lblArialName		= iup.label	{ title="Font Arial"			, tip="Arial alternative fontface"					, }
+	local	btnArialPlain	= iup.button	{ title=strArialPlainTitle	, tip="Choose "..strArialPlainTitle.." style"	, }
+	local	btnArialBold		= iup.button	{ title=strArialBoldTitle		, tip="Choose "..strArialBoldTitle.." style"		, }
+	local	lblTahomaName	= iup.label	{ title="Font Tahoma"			, tip="Tahoma alternative fontface"					, }
+	local	btnTahomaPlain	= iup.button	{ title=strTahomaPlainTitle	, tip="Choose "..strTahomaPlainTitle.." style"	, }
+	local	btnTahomaBold	= iup.button	{ title=strTahomaBoldTitle	, tip="Choose "..strTahomaBoldTitle.." style"	, }
+	local	lblChoose			= iup.label	{ title="Choose your interface font style or"										, }
+	local	btnClose			= iup.button	{ title="Close"					, tip="Close this Font Style window"				, }
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local	dialogFont		= iup.dialog { title=StrPlugin.." Font Style", dialogframe="YES", startfocus=btnClose,
+										iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
+											iup.frame { font=StrFontHead, fgcolor=StrBlack, active="YES", title="Font Style",
+												iup.vbox { margin=StrMinMargin,
+													iup.hbox { homogeneous="YES", lblHeadName,	lblHeadPlain,	lblHeadBold,		},
+													iup.hbox { homogeneous="YES", lblFontName,	btnFontPlain,	btnFontBold,		},
+													iup.hbox { homogeneous="YES", lblArialName,	btnArialPlain,	btnArialBold,	},
+													iup.hbox { homogeneous="YES", lblTahomaName,	btnTahomaPlain,	btnTahomaBold,	},
+													iup.hbox { lblChoose, btnClose, },
+												},
+											},
+										},
+										move_cb	= function(self,x,y) IntModeX=x IntModeY=y end,
+										close_cb	= function() strAnswer="Ignore" return iup.CLOSE end,
+									}
+
+	-- Assign font styles for GUI labels and buttons
+	local strFontPlain		= tblFontSet	[IntFontPlain]	["Body"]
+	local strFontBold		= tblFontSet	[IntFontBold]	["Body"]
+	local strArialPlain		= tblFontSet	[IntArialPlain]	["Body"]
+	local strArialBold		= tblFontSet	[IntArialBold]	["Body"]
+	local strTahomaPlain	= tblFontSet	[IntTahomaPlain]["Body"]
+	local strTahomaBold		= tblFontSet	[IntTahomaBold]	["Body"]
+
+	-- Set other GUI attributes for labels and buttons
+	for iupName, tblAttr in pairs( {
+		-- Control		=	1~fgcolor	, 2~font			, 3~FontSet		, 4~action function()
+		[lblHeadName]	= { StrBlack	, StrFontBody	, false			, false	},
+		[lblHeadPlain]	= { StrBlack	, strFontPlain	, false			, false	},
+		[lblHeadBold]	= { StrBlack	, strFontBold	, false			, false	},
+		[lblFontName]	= { StrBlack	, strFontPlain	, false			, false	},
+		[btnFontPlain]	= { StrGreen	, strFontPlain	, IntFontPlain	, false	},
+		[btnFontBold]	= { StrGreen	, strFontBold	, IntFontBold	, false	},
+		[lblArialName]	= { StrBlack	, strArialPlain	, false			, false	},
+		[btnArialPlain]	= { StrGreen	, strArialPlain	, IntArialPlain	, false	},
+		[btnArialBold]	= { StrGreen	, strArialBold	, IntArialBold	, false	},
+		[lblTahomaName]	= { StrBlack	, strTahomaPlain, false			, false	},
+		[btnTahomaPlain]= { StrGreen	, strTahomaPlain, IntTahomaPlain, false	},
+		[btnTahomaBold]	= { StrGreen	, strTahomaBold	, IntTahomaBold	, false	},
+		[lblChoose]		= { StrBlack	, StrFontBody	, false			, false	},
+		[btnClose]		= { StrRed	, StrFontBody	, false			, dialogFont.close_cb },
+		} ) do
+		iupName.expand	= "YES"
+		iupName.fgcolor	= tblAttr[1]
+		iupName.font		= tblAttr[2]
+		if tblAttr[3] then
+			if tblAttr[3] == IntFontSet then iupName.active = "NO" end	-- Disable button for currently selected font
+			iupName.action = function() doAssignFontSet(tblAttr[3]) return iup.CLOSE end
+		end
+		if tblAttr[4] then iupName.action = tblAttr[4] end
+	end
+
+	dialogFont:popup(IntModeX,IntModeY)
+
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+
+	return strAnswer
+end -- function GUI_FontDialogue
+
+-- GUI Help & Advice Dialogue --
+function GUI_HelpDialogue(strOrigin)
+
+	local function doActivateMainHelpButton()
+		if BtnMainHelp then BtnMainHelp.active = "YES" end
+	end -- local function doActivateMainHelpButton
+
+	-- create the WebBrowser based on its ProgID and connect it to LuaCOM
+	local	oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+			oleControl:CreateLuaCOM()
+
+	-- Create each GUI button with title and tooltip
+	local	btnIntro		= iup.button	{ title="Introduction"		, tip="Introduction Page for Help and Advice", }
+	local	btnBackup		= iup.button	{ title="Backup"			, tip="Backup tab Help and Advice"				, }
+	local	btnRestore	= iup.button	{ title="Restore"			, tip="Restore tab Help and Advice"				, }
+	local	btnOptions	= iup.button	{ title="Options"			, tip="Options tab Help and Advice"				, }
+	local	btnClose		= iup.button	{ title="Close Window"		, tip="Close this Help and Advice window"		, }
+
+	-- The following controls are global to allow Main GUI to alter font and restore default position
+	HboxHelp		=	iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnIntro, btnBackup, btnRestore, btnOptions, btnClose, }
+	DialogHelp	=	iup.dialog { title=StrPlugin.." Help & Advice", startfocus=btnClose, rastersize=StrHelpS,
+							iup.vbox { alignment="ACENTER", margin=StrBigMargin, expandchildren="YES",
+								oleControl,
+								HboxHelp,
+							},
+							move_cb	= function(self,x,y) if IsNormalWindow(self) then IntHelpX=x IntHelpY=y end end,
+							resize_cb	= function(self) if IsNormalWindow(self) then StrHelpS=self.rastersize end end,
+							close_cb	= function() doActivateMainHelpButton() end,
+						}
+
+	local strFHUG = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:backup_and_restore_family_historian_settings:"
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control	=	1~fgcolor	, 2~Navigate URL	, 3~action function()
+		[btnIntro]	= { StrGreen	, "backup_and_restore_family_historian_settings"	, false },
+		[btnBackup]	= { StrGreen	, "backup"			, false },
+		[btnRestore]	= { StrGreen	, "restore"			, false },
+		[btnOptions]	= { StrGreen	, "options"			, false },
+		[btnClose]	= { StrRed	, false				, function() DialogHelp:destroy() doActivateMainHelpButton() end }
+		} ) do
+		iupName.expand	= "HORIZONTAL"
+		iupName.size		= "x12"
+		iupName.fgcolor	= tblAttr[1]
+		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(strFHUG..tblAttr[2]) end end
+		if tblAttr[3] then iupName.action = tblAttr[3] end
+	end
+
+	DialogHelp:showxy(IntHelpX,IntHelpY)		-- Show Help GUI window
+	DialogHelp.rastersize=nil						-- Allow window to be resized	nil = iup.NULL
+
+	if not strOrigin then strOrigin = "backup_and_restore_family_historian_settings" end
+
+	oleControl.com:Navigate(strFHUG..strOrigin)
+
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+
+end -- function GUI_HelpDialogue
+
+-- GUI Mode Prompt Dialogue --
+function GUI_ModeDialogue(strHead,strText,...)
+	local strAnswer = ""										-- Name of Button pressed
+	local btnAnswer = iup.button{}
+	local iupHbox = iup.hbox{ margin=StrMinMargin, homogeneous="YES", }
+	for intButton, strButton in ipairs( arg ) do			-- Set or hide each GUI Button according to Button arguments
+		local strVisible = "YES"
+		local strActive = "YES"
+		local strColor = StrGreen
+		if strButton == "" then strVisible = "NO" strActive = "NO" end
+		if strButton:match("Registry Data") and StrRegistry == "OFF" then strActive = "NO" end
+		if strButton:match("Skip") then strColor = StrRed end
+		local btnButton = iup.button{ title=strButton, expand="YES", size="x10", visible=strVisible, active=strActive, fgcolor=strColor, action=function() strAnswer=strButton return iup.CLOSE end }
+		iup.Append(iupHbox,btnButton)
+		if intButton == #arg then
+			btnAnswer = btnButton								-- Right-hand button gets focus and sets Default/Close strAnswer
+			strAnswer = strButton
+		end
+	end
+	for intArg = 1, 4 - #arg do								-- Pad with up to 4 hidden buttons to maintain a tidy layout
+		local btnButton = iup.button{ title="", expand="YES", size="x10", visible="NO", active="NO", }
+		iup.Insert(iupHbox,nil,btnButton)
+	end
+	local tblSize = StrMainS:SplitNumbers()				-- Adjust Mode GUI width to main GUI width
+	local strSize = (tblSize[1] - 20)
+	local strColor = StrGreen									-- Set text message colour appropriately
+	if strText:match("WARNING:")	then strColor = StrAmber end
+	if strText:match("ERROR:")	then strColor = StrRed end
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local	dialogMode = iup.dialog { title=StrPlugin.."  "..strHead, dialogframe="YES", startfocus=btnAnswer, bringfront="YES",
+								iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrMinMargin,
+									iup.frame { font=StrFontHead, fgcolor=strColor, title=strHead,
+										iup.vbox { font=StrFontBody, fgcolor=strColor,
+											iup.label { title=strText, tip="Operational message", wordwrap="YES", rastersize=strSize, },
+											iupHbox,
+										},
+									},
+								},
+							}
+	local intModeY = IntMainY + tblSize[2] - 50			-- Place Mode GUI near bottom of Main GUI
+	if iup.MainLoopLevel() == 0 then						-- Called from outside Main GUI, so must use showxy() instead of popup()
+		dialogMode:showxy(IntMainX,intModeY)
+	else
+		dialogMode:popup(IntMainX,intModeY)
+	end
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+	dialogMode:destroy()
+	return strAnswer
+end -- function GUI_ModeDialogue
+
+-- GUI Main Dialogue --
+function GUI_MainDialogue()
+
+	local strButtonTitle = " all Family Historian Custom && Preference Settings"
+
+	-- Create the Main Dialogue Common controls with title/value and tooltip, etc
+	local	btnBackup		= iup.button	{ title="BACKUP"..strButtonTitle		, tip="Backup all Program Data and Registry custom settings, preferences, etc...", font=StrFontHead, }
+	local	btnRestore	= iup.button	{ title="RESTORE"..strButtonTitle		, tip="Restore all Program Data and Registry custom settings, preferences, etc...", font=StrFontHead, }
+	local	btnDefault	= iup.button	{ title="Restore Defaults"				, tip="Restore default Settings for Window positions and sizes", }
+	local	btnFontSet	= iup.button	{ title=StrFontSetTitle					, tip="Choose user interface window font style", }
+	local	btnFolder		= iup.button	{ title="Choose Backup Folder"			, tip="Choose backup data folder path", }
+	local	tglRegistry	= iup.toggle	{ title="Allow RESTORE Registry Data:"	, tip="Allow RESTORE of Windows Registry Data Keys settings", value=StrRegistry, rightbutton="YES", }
+	local	labBackup		= iup.label	{ title="Backup Data:"						, tip="Backup data folder path", }
+	local	lblBackup		= iup.label	{ title=StrBackupDir						, tip="Backup data folder path", }
+	local	labProgData	= iup.label	{ title="Program Data:"					, tip="Program data folder path", }
+	local	lblProgData	= iup.label	{ title=StrCalicoPie						, tip="Program data folder path", }
+	local	labProgram	= iup.label	{ title="FH Program:"						, tip="Family Historian program version", }
+	local	lblProgram	= iup.label	{ title=""									, tip="Family Historian program version", }
+	local	labFilename	= iup.label	{ title="Data Filename:"					, tip="Current data filename", }
+	local	lblFilename	= iup.label	{ title=" "									, tip="Current data filename", }
+	local	labStatus		= iup.label	{ title="Status:"							, tip="Status and progress messages", }
+	local	lblStatus		= iup.label	{ title=" "									, tip="Status and progress messages", }
+			BtnMainHelp	= iup.button	{ title="   Help && Advice"				, tip="Obtain online Help and Advice from the FHUG Knowledge Base", }
+	local	btnClose		= iup.button	{ title="Close Plugin"						, tip="Close the Plugin", }
+
+	local	strRight	= "ARIGHT:ABOTTOM"
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control		=	1~fgcolor	, 2~alignment, 3~rastersz	, 4~active		Main Dialogue Common controls
+		[btnBackup]		= { StrGreen	, false		, false		, false	},
+		[btnRestore]		= { StrRed	, false		, false		, false	},
+		[btnDefault]		= { StrGreen	, false		, false		, false	},
+		[btnFontSet]		= { StrGreen	, false		, false		, false	},
+		[btnFolder]		= { StrGreen	, false		, false		, false	},
+		[tglRegistry]	= { StrRed	, "ACENTER"	, "240"		, false	},
+		[labBackup]		= { StrBlack	, strRight	, "110"		, false	},
+		[lblBackup]		= { StrGreen	, "ALEFT"		, false		, false	},
+		[labProgData]	= { StrBlack	, strRight	, "110"		, false	},
+		[lblProgData]	= { StrGreen	, "ALEFT"		, false		, false	},
+		[labProgram]		= { StrBlack	, strRight	, "110"		, false	},
+		[lblProgram]		= { StrGreen	, "ALEFT"		, false		, false	},
+		[labFilename]	= { StrBlack	, strRight	, "110"		, false	},
+		[lblFilename]	= { StrGreen	, "ALEFT"		, false		, false	},
+		[labStatus]		= { StrBlack	, strRight	, "110"		, false	},
+		[lblStatus]		= { StrGreen	, "ALEFT"		, false		, false	},
+		[BtnMainHelp]	= { StrGreen	, false		, false		, false	},
+		[btnClose]		= { StrRed	, false		, false		, false	},
+		} ) do
+		iupName.fgcolor	= tblAttr[1]
+		if tblAttr[2] then iupName.alignment	= tblAttr[2] end
+		if tblAttr[3] then iupName.rastersize	= tblAttr[3] else iupName.expand = "YES" end
+		if tblAttr[4] then iupName.active		= tblAttr[4] end
+	end
+
+	-- Create the Backup box
+	local	vboxBackup	=	iup.vbox { font=StrFontBody, alignment="ACENTER",
+									iup.hbox { iup.label { fgcolor=StrGreen, title="This lets you Backup your Family Historian Custom && Preference settings to a backup folder.\nRun it on old PC before moving to new PC, and get help from FHUG on how to use the data.", }, },
+									iup.hbox { gap=StrGap, btnBackup, homogeneous="YES", },
+								}
+
+	-- Create the Restore box
+	local	vboxRestore	=	iup.vbox { font=StrFontBody, alignment="ACENTER",
+									iup.hbox { iup.label { fgcolor=StrRed, title="This mode Restores the Family Historian Custom && Preference settings from a backup folder.\nAre you fully aware of the risks of a Restore?  Have you a Backup of the current settings data?", }, },
+									iup.hbox { gap=StrGap, btnRestore, homogeneous="YES", },
+								}
+
+	-- Create the Options box
+	local	vboxOptions	=	iup.vbox { font=StrFontBody, alignment="ACENTER",
+									iup.hbox { iup.label { fgcolor=StrBlack, title="This mode allows various optional settings to be adjusted.", }, },
+									iup.hbox { gap=StrGap, btnDefault, btnFontSet, btnFolder, homogeneous="YES", },
+									iup.hbox { gap=StrGap, tglRegistry, },
+								}
+
+	-- Create the Tab controls
+	local	tabControls	=	iup.tabs { padding="10x7", tip="Choose between Backup, Restore, and Options",
+									vboxBackup,	tabtitle0=" Backup  ",
+									vboxRestore,	tabtitle1=" Restore ",
+									vboxOptions,	tabtitle2=" Options ",
+								}
+
+	-- Create the Status frame
+	local	vboxStatus	=	iup.vbox { font=StrFontBody, alignment="ACENTER",
+									iup.hbox { gap=StrGap	, labBackup	, lblBackup	, },
+									iup.hbox { gap=StrGap	, labProgData, lblProgData, },
+									iup.hbox { gap=StrGap	, labProgram	, lblProgram	, },
+									iup.hbox { gap=StrGap	, labFilename, lblFilename, },
+									iup.hbox { gap=StrGap	, labStatus	, lblStatus	, },
+									iup.hbox { gap=StrGap	, BtnMainHelp, btnClose, homogeneous="YES", },
+								}
+	local	frameStatus	= 	iup.frame { font=StrFontHead, fgcolor=StrBlack, title=" Status ", vboxStatus, }
+
+	-- Create the Main dialogue
+	local	vboxMain		=	iup.vbox { font=StrFontHead, fgcolor=StrBlack, alignment="ACENTER", margin=StrMinMargin, expandchildren="YES",
+									tabControls,
+									frameStatus,
+								}
+	local	dialogMain	=	iup.dialog { title=StrPlugin..StrIssue, defaultenter=btnClose, minsize=StrMinSize, shrink="YES", rastersize=StrMainS, vboxMain,
+									move_cb	= function(self,x,y) if IsNormalWindow(self) then IntMainX=x IntMainY=y end end,
+									resize_cb	= function(self) if IsNormalWindow(self) then StrMainS=self.rastersize end end,
+								}
+
+	-- Backup and Restore Data Functions
+
+	local function doCopyFile(strSourceFile,strTargetFile,strFunction)					-- Conditionally copy a File and set its Date-Time-Stamps
+		local tblSourceAttr = lfs.attributes(strSourceFile)									-- Get the Source file size and modified date
+		local intSourceSize = tblSourceAttr["size"]
+		local intSourceDate = tblSourceAttr["modification"]
+		local intTargetSize = -1
+		local intTargetDate = -1
+		local tblTargetAttr = lfs.attributes(strTargetFile)									-- Get the Target file size and modified date
+		if tblTargetAttr then
+			intTargetSize = tblTargetAttr["size"]
+			intTargetDate = tblTargetAttr["modification"]
+		end
+--[==[
+		if intSourceSize == intTargetSize
+		and intSourceDate > intTargetDate then													-- Check if FH 5.0 Beta source exactly one hour later than FH V5.0 target
+			local intDifferDate = intSourceDate - intTargetDate	
+			if ( intSourceDate - intTargetDate ) == 3600
+			and strSourceFile:match("\\Family Historian 5%.0 Beta\\")
+			and strTargetFile:match("\\Calico Pie\\Family Historian\\") then
+--				GUI_ModeDialogue("Migrate 1 Hour Different","ADVICE: Backup Data File modified "..os.date(nil,intSourceDate).." is 1 hour\nlater than Program Data File modified "..os.date(nil,intTargetDate)..".\nTherefore it will not be copied.","OK")
+				return
+			end
+		end	
+]==]		
+		if intSourceSize ~= intTargetSize
+		or intSourceDate ~= intTargetDate then													-- Only need to copy file with different size & date 
+			local strButton = "Copy"
+			if intSourceDate < intTargetDate then
+				if StrButton then
+					strButton = StrButton
+				else
+					local strSourceData = "Program Data"										-- Adjust dialogue for Backup or Restore function
+					local strTargetData = "Backup Data"
+					if strFunction == "Restore" then
+						strSourceData = "Backup Data"
+						strTargetData = "Program Data"
+					end
+					strButton = GUI_ModeDialogue(strFunction.." Old File","WARNING: "..strSourceData.." File modified "..os.date(nil,intSourceDate).." is\nolder than "..strTargetData.." File modified "..os.date(nil,intTargetDate)..".\nEither copy old "..strSourceData.." File over newer "..strTargetData.." File, or keep the newer "..strTargetData.." File?","Copy Old "..strSourceData.." File","Keep New "..strTargetData.." File","Copy All Old Files","Keep All New Files")
+					if strButton:match("All %u%l%l Files") then
+						StrButton = strButton														-- Remember Copy/Keep All Files option 
+					end
+				end
+			end
+			if strButton:match("Copy") then
+				local fileSource = assert(io.open(strSourceFile,"rb"))
+				local fileTarget, strError = io.open(strTargetFile,"wb")					-- Try mode Write Binary (this sometimes asserts a failure, so try other modes)
+				if not fileTarget then
+					fileTarget, strError = io.open(strTargetFile,"w+b")						-- Try mode Write Update Binary
+					if not fileTarget then
+						fileTarget, strError = io.open(strTargetFile,"w+")					-- Try mode Write Update
+						if not fileTarget then
+							fileTarget, strError = io.open(strTargetFile,"w")				-- Try mode Write
+							if not fileTarget then
+								error("\n Copy File is unable to open target file in \"wb\" or \"w+b\" or \"w+\" or \"w\" mode. \n\n "..strTargetFile.." \n\n "..tostring(strError).." \n")
+							end
+						end
+					end
+				end
+				fileTarget:write(fileSource:read("*all"))										-- Copy entire file contents
+				assert(fileSource:close())
+				assert(fileTarget:close())
+				lfs.touch(strTargetFile,tblSourceAttr["access"],intSourceDate)			-- Copy access & modification date-times
+	--			print("Source later than Target or wants copy. Date: "..os.date(nil,intSourceDate).." Size: "..intSourceSize.." File: "..strSourceFile)	-- Diagnostic
+			else
+	--			print("Source older than Target so not copied. Date: "..os.date(nil,intSourceDate).." Size: "..intSourceSize.." File: "..strSourceFile)	-- Diagnostic
+			end
+		else
+	--			print("Source same as Target so is not copied. Date: "..os.date(nil,intSourceDate).." Size: "..intSourceSize.." File: "..strSourceFile)	-- Diagnostic
+		end
+	end -- local function doCopyFile
+
+	local function isNotRoot(strPath,strRoot)													-- Return true if strPath folder is not strRoot folder
+		return strPath:match("^"..StrPlainText(strRoot).."\\.*\\.*")
+	end -- local function isNotRoot
+
+	local function intCopyFiles(strSourceDir,strTargetDir,strProgName,strFunction)	-- Copy all Files from Source to Target folder for chosen Program
+		local intFileCount = 0
+		for strSourceFile, tblAttr in DirTree(strSourceDir) do
+			if tblAttr.mode == "file" and isNotRoot(strSourceFile,strSourceDir) then
+				intFileCount = intFileCount + 1													-- Count the Source files to be copied (exclude root folder)
+			end
+		end
+		if intFileCount < 150 then
+			GUI_ModeDialogue("Too Few Data Files","ERROR: "..strFunction.." has NOT been performed because only "..intFileCount.." data files found in:\n"..strSourceDir.."\n","OK")
+			return 0
+		end
+		if not lfs.attributes(strTargetDir) then												-- Must create any missing folders in Target folder
+			local isOK, strError = lfs.mkdir(strTargetDir)
+			if not isOK then
+				GUI_ModeDialogue("Cannot Make Folder","ERROR: Cannot make "..strFunction.." "..strProgName.." folder. "..tostring(strError)..".\n"..strTargetDir.."\n"..strFunction.." operation cancelled.\n","OK")
+				return -1
+			end
+		end
+		intFileCount = 0
+		lblStatus.title = ""
+		StrButton = nil																				-- Used to remember Copy/Keep All Files option within doCopyFile
+		for strSourceFile, tblAttr in DirTree(strSourceDir) do
+			local strTargetFile = strSourceFile:gsub(StrPlainText(strSourceDir),StrPlainText(strTargetDir))
+			lblFilename.title = strSourceFile:gsub(StrPlainText(strSourceDir).."\\",""):gsub("&","&&")
+			if tblAttr.mode == "directory" then
+				if not lfs.attributes(strTargetFile) then										-- Must create any missing folders in Target folder
+					local isOK, strError = lfs.mkdir(strTargetFile)
+					if not isOK then
+						GUI_ModeDialogue("Cannot Make Folder","ERROR: Cannot make "..strFunction.." "..strProgName.." folder. "..tostring(strError)..".\n"..strTargetFile.."\n"..strFunction.." operation cancelled.\n","OK")
+						return -1
+					end
+				end
+			else
+				if tblAttr.mode == "file" and isNotRoot(strSourceFile,strSourceDir) then
+					if not strSourceFile:match("~fh.*tmp$") then
+						doCopyFile(strSourceFile,strTargetFile,strFunction)					-- Copy each valid Source file to Target file (exclude root folder)
+						intFileCount = intFileCount + 1
+						lblStatus.title = strFunction.." performed for "..intFileCount.." data files..."
+					end
+				end
+			end
+		end
+		StrButton = nil																				-- Used to remember Delete/Keep All Files option below
+		for strTargetFile, tblAttr in DirTree(strTargetDir) do
+			if tblAttr.mode == "file" and isNotRoot(strTargetFile,strTargetDir) then
+				local strSourceFile = strTargetFile:gsub(StrPlainText(strTargetDir),StrPlainText(strSourceDir))
+				if not FlgFileExists(strSourceFile) then										-- If target file has no matching source file, should it be deleted?
+					lblFilename.title = strTargetFile:gsub(StrPlainText(strTargetDir).."\\",""):gsub("&","&&")
+					local strButton = "Delete"
+					if StrButton then
+						strButton = StrButton
+					else
+						local strSourceData = "Program Data"									-- Adjust dialogue for Backup or Restore function
+						local strTargetData = "Backup Data"
+						if strFunction == "Restore" then
+							strSourceData = "Backup Data"
+							strTargetData = "Program Data"
+						end
+						local strModified = os.date(nil,tblAttr.modification)
+						strButton = GUI_ModeDialogue("Delete File "..strModified,"WARNING: File does not exist in "..strSourceData.." folder. Should it be deleted from "..strTargetData.." folder?","Delete This File","Keep This File","Delete All Files","Keep All Files")
+						if strButton:match("All Files") then
+							StrButton = strButton													-- Remember Delete/Keep All Files option
+						end
+					end
+					if strButton:match("Delete") then
+						DeleteFile(strTargetFile)													-- Delete any Target file that does not exist in Source (exclude root folder)
+					else
+						intFileCount = intFileCount + 1
+						lblStatus.title = strFunction.." performed for "..intFileCount.." data files..."
+					end
+				end
+			end
+		end
+		return intFileCount
+	end -- local function intCopyFiles
+
+	local function doCheckUninstalledData()													-- Check for Uninstalled Data to Delete
+		for strFolder in lfs.dir(StrBackupDir) do
+			if strFolder ~= "." and strFolder ~= ".." then									-- Repeat for each Family Historian folder in Backup folder
+				local strProgName = strFolder
+				local strProgPath = StrBackupDir.."\\"..strProgName
+				if lfs.attributes(strProgPath,"mode") == "directory"
+				and strProgName:match("^Family Historian") then
+					for intProgram = 1, #TblProgram do
+						if TblProgram[intProgram] == strProgName then						-- Signal a match with an installed Program
+							strProgName = nil
+						end	
+					end
+					if strProgName then
+						local strButton = GUI_ModeDialogue("Program Uninstalled","ADVICE: "..strProgName.." is not installed so should its Backup Data be deleted?","Yes - Delete","No - Keep")
+						if strButton:match("Delete") then
+							repeat
+								for strFile, tblAttr in DirTree(strProgPath) do
+									if tblAttr.mode == "file" then
+										local isOK, strError = os.remove(strFile)				-- Delete each leaf file
+									end
+									if tblAttr.mode == "directory" then
+										local isOK, strError = lfs.rmdir(strFile)				-- Delete each leaf folder
+									end
+								end
+							until lfs.rmdir(strProgPath)											-- Until the Family Historian folder is empty and can be deleted
+						end
+					end
+				end
+			end
+		end
+	end -- local function doCheckUninstalledData
+
+	local strKeyHKCU = "HKCU\\Software\\Calico Pie"											-- HKEY_CURRENT_USER keys path for REG
+	local strKeyHKLM = "HKLM\\SOFTWARE\\Calico Pie"											-- HKEY_LOCAL_MACHINE keys path for REG
+	local strRegKeys = "Registry.keys"															-- Backup of Registry Keys filename
+	local strVerData = "Version.data"															-- Backup of Version Data filename
+	local strListTxt = "ImageList.txt"															-- List of External Images filename
+	local strBetaName = "Family Historian 5.0 Beta"
+
+	--[=[
+	HKEY_CURRENT_USER\Software\Calico Pie\Family Historian...														-- Current User keys for Diagrams, etc.
+	HKEY_USERS\S-1-5-21-4109675573-1409003035-2569323029-1002\Software\Calico Pie\Family Historian...	-- Default User keys for above, not for Backup
+	HKEY_LOCAL_MACHINE\SOFTWARE{\WOW6432Node}\Calico Pie\Family Historian... 	(WOW6432Node optional)		-- Local PC keys for Preferences, etc.
+	]=]
+
+	local function runBatchFileOK(strBatchScript,strParameters,strFilename)			-- Invoke a Batch Script with Parameters and check Filename
+		local strBatchFile = StrPluginRoot..".bat"
+		DeleteFile(strBatchFile)
+		SaveStringToFile(strBatchScript,strBatchFile)
+		if strParameters then
+			DeleteFile(strFilename)																-- If parameters then delete output file and run batch file
+			DoExecute(strBatchFile,strParameters.." \""..strFilename.."\" ")
+			local intOldSize = -1
+			local intNewSize = -1
+			local intCounter = 40
+			repeat
+				if intNewSize > 1000 then intOldSize = intNewSize end
+				fhSleep(200,100)																	-- Allow batch file to run
+				intNewSize = lfs.attributes(strFilename,"size") or 0
+				intCounter = intCounter - 1
+			until intOldSize == intNewSize or intCounter < 0								-- Wait until output file stops getting bigger or takes too long
+			DeleteFile(strBatchFile)
+			if intCounter < 0 then return false end
+		else
+			DoExecute(strBatchFile," \""..strFilename.."\" ")								-- No parameters so input file and batch file must be retained
+			fhSleep(200,100)
+		end
+		return true
+	end -- local function runBatchFileOK
+
+	local function doExportRegistry(strTargetDir,strProgName)								-- Invoke a Batch Script to Export the Registry Keys and find external image files
+		--[=[
+			The FIND commands search for ":\" to locate file paths like "C:\..." in Standard & Custom Diagram Type .fhd/fhdx files
+			Windows 7 & Vista support REG QUERY "KeyPath" /V "Value" /S but on Windows XP /V and /S are mutually exclusive
+			Thus the following script works on Windows 7 & Vista but not on Windows XP - the resulting side effect is that the output file is a bit bigger
+			IF EXIST %3\Image.Icons DEL %3\Image.Icons
+			REG QUERY %1 /V "Icon" /S > %3\Image.Icons
+			IF EXIST %3\Image.Picts DEL %3\Image.Picts
+			REG QUERY %1 /V "Bkg Pic Path" /S > %3\Image.Picts
+		]=]
+		local strRegExport =			 															-- Script to run FIND & REG QUERY / EXPORT on HKCU & HKLM keys for one Family Historian program
+		[=[
+		@ECHO OFF
+
+		IF EXIST %3\Image.Standard DEL %3\Image.Standard
+		FIND ":\" %3\Diagrams\Standard\*.fhd* > %3\Image.Standard
+
+		IF EXIST %3\Image.Custom DEL %3\Image.Custom
+		FIND ":\" %3\Diagrams\Custom\*.fhd* > %3\Image.Custom
+
+		IF EXIST %3\Image.Query DEL %3\Image.Query
+		REG QUERY %1 /S > %3\Image.Query
+
+		IF EXIST %4 DEL %4
+		IF EXIST %4-1 DEL %4-1
+		IF EXIST %4-2 DEL %4-2
+		ECHO.
+		ECHO REG EXPORT %1 %4-1
+		ECHO.
+		REG EXPORT %1 %4-1
+		IF ERRORLEVEL 1 (
+			ECHO.
+			PAUSE
+		)
+		ECHO.
+		ECHO REG EXPORT %2 %4-2
+		ECHO.
+		REG EXPORT %2 %4-2
+		IF ERRORLEVEL 1 (
+			ECHO.
+			PAUSE
+		)
+		TYPE %4-? > %4
+		DEL %4-?
+		EXIT
+		]=]
+		local flgKeyHKLM = false
+		local tblRegFile = {}
+		local strRegFile = strTargetDir.."\\"..strRegKeys									-- Invoke the Batch Script file to FIND files & REG QUERY / EXPORT HKCU & HKLM keys 
+		lblFilename.title = strRegKeys
+		local strHKCU = strKeyHKCU.."\\"..strProgName
+		local strHKLM = strKeyHKLM.."\\"..strProgName.."\\2.0\\Preferences"
+		if not runBatchFileOK(strRegExport," \""..strHKCU.."\" \""..strHKLM.."\" \""..strTargetDir.."\" ",strRegFile) then
+			GUI_ModeDialogue("Registry Export Error","ERROR: Registry Key data not saved by REG EXPORT for\n"..strHKCU.."\n"..strHKLM.."\n"..strRegFile.."\n","OK")
+		end
+		for strLine in io.lines(strRegFile) do
+			if strLine:match("HKEY_LOCAL_MACHINE") then flgKeyHKLM = true end
+			if not ( flgKeyHKLM and strLine:match("=\"%u:\\\\") ) then
+				table.insert(tblRegFile,strLine)												-- Copy Registry Keys excluding HKLM file references such as ="C:\\
+			end
+		end
+		SaveStringToFile(table.concat(tblRegFile,"\n"),strRegFile)
+	end -- local function doExportRegistry
+
+	local function doImportRegistry(strSourceDir,strProgName)								-- Invoke a Batch Script to Import the Registry Keys
+		local strBatPause = 																		-- Script to PAUSE before proceeding with the REG IMPORT script below
+		[=[
+		@ECHO OFF
+		ECHO.
+		ECHO REG IMPORT %1
+		ECHO.
+		ECHO Ensure the Family Historian program is closed before continuing. 
+		ECHO.
+		ECHO Otherwise, press Ctrl+C to cancel operation.
+		ECHO.
+		PAUSE	
+		ECHO.
+		]=]
+		local strRegImport = 																		-- Script to run REG IMPORT on one Family Historian backup Registry.keys file
+		[=[
+		@ECHO OFF
+		ECHO.
+		ECHO REG IMPORT %1
+		ECHO.
+		REG IMPORT %1
+		IF ERRORLEVEL 1 (
+			ECHO.
+			PAUSE
+		)
+		EXIT
+		]=]
+		local strRegFile = strSourceDir.."\\"..strRegKeys
+		lblFilename.title = strRegKeys
+		if FlgFileExists(strRegFile) then
+			if strProgName == TblProgram[#TblProgram] then									-- Handle currently running program differently
+				local strButton = GUI_ModeDialogue("Close Program", "WARNING: Ensure '"..strProgName.."' is closed before restoring its Registry Keys data.\nOtherwise the restored Registry Keys will be overwritten when the program is closed.\nSo after clicking 'OK - Quit Plugin' the Plugin will close to let you close the program.\nThe 'REG IMPORT' dialogue will remain open after '"..strProgName.."' is closed.","OK - Quit Plugin","No - Close Later")
+				runBatchFileOK(strBatPause..strRegImport,nil,strRegFile)					-- Invoke the Batch Script file to PAUSE and REG IMPORT registry keys
+				lblStatus.title = "Restore initialised for 1 Registry file"
+				if strButton:match("OK") then
+					fhSleep(100)
+					return -1
+				end
+			else
+				local strButton = GUI_ModeDialogue("Close Program", "WARNING: Ensure '"..strProgName.."' is closed before restoring its Registry Keys data.\nOtherwise the restored Registry Keys will be overwritten when the program is closed.\nThis is the last opportunity to quit restoring the Registry Keys data.","OK - Program Closed","Quit Restore Registry")
+				if strButton:match("OK") then
+					runBatchFileOK(strRegImport,nil,strRegFile)								-- Invoke the Batch Script file to REG IMPORT registry keys
+					lblStatus.title = "Restore initialised for 1 Registry file"
+				end
+			end
+		else
+			GUI_ModeDialogue("Backup File Missing","ERROR: Cannot restore from missing backup registry file:\n"..strRegFile.."\n","OK")
+		end
+		return 0
+	end -- local function doImportRegistry
+
+	local function doSetProgramVersions()														-- Set FH Program Names & Versions from Calico Pie data
+		local strRegQuery = 																		-- Script to run REG QUERY on HKLM /Subkeys for all Family Historian programs
+		[=[
+		@ECHO OFF
+		IF EXIST %2 DEL %2
+		ECHO.
+		ECHO REG QUERY %1 /S > %2
+		ECHO.
+		REG QUERY %1 /S > %2
+		IF ERRORLEVEL 1 (
+			ECHO.
+			PAUSE
+		)
+		EXIT
+		]=]
+		local strCurrent = fhGetContextInfo("CI_APP_DATA_FOLDER"):gsub(StrPlainText(StrCalicoPie).."\\","")
+		local strProgram = ""
+		local strVersion = ""
+		local strQueryFile = StrPluginRoot..".keys"
+		if runBatchFileOK(strRegQuery," \""..strKeyHKLM.."\" ",strQueryFile) then		-- Invoke the Batch Script file to REG QUERY HKLM keys
+			for strLine in io.lines(strQueryFile) do
+				local strProgKey = strLine:match(strKeyHKLM:gsub("HKLM","HKEY_LOCAL_MACHINE").."\\(.*)\\2.0$")
+				if strProgKey and strProgKey:match("^Family Historian") then
+					strProgram = strProgKey														-- Remember name of each Family Historian program in turn
+					strVersion = " Version "
+					if strProgram == strCurrent then
+						table.insert(TblProgram,strProgram)										-- Add current running Family Historian program to end of table
+					else
+						table.insert(TblProgram,1,strProgram)									-- Add other installed Family Historian programs to top of table
+					end
+				end
+				local strDigit = strLine:match("%s+Ver%d%s+REG_DWORD%s+0x(%d)")
+				if strDigit then
+					strVersion = strVersion..strDigit.."."										-- Compose the Version number digits of each program
+				end
+				local strBackups = strLine:match("%s+Backup Directory%s+REG_SZ%s+(.*)")
+				if strBackups then
+					strVersion = strVersion:gsub("%.$","")										-- Save the Version number of program minus trailing dot
+					if strProgram == strCurrent then
+						table.insert(TblVersion,strVersion)
+						StrBackupKey = strBackups													-- Save the Backups folder of current program as default Backup Data folder
+					else
+						table.insert(TblVersion,1,strVersion)
+					end
+				end
+			end
+			DeleteFile(strQueryFile)
+		else
+			local intSize = lfs.attributes(strQueryFile,"size") or -1
+			GUI_ModeDialogue("Registry Query Error","ERROR: Registry Key data not saved by REG QUERY "..strKeyHKLM.."\n"..intSize.." bytes written to "..strQueryFile.."\n Plugin cannot proceed.  Plugin will be closed.\n","OK")
+			return false
+		end
+		return true
+	end -- local function doSetProgramVersions
+
+	local function intBackupImageFiles(strProgramDir,strTargetDir)						-- Backup image files not located in Program Data folders
+		local strFileList = ""
+		local strFileDiag = nil
+		local strFilePath = nil
+		local tblFilePath = {}
+		local intFilePath = 0
+		local intFileCount = 0
+		local strMatch = nil
+		for i, strFileType in ipairs( { "Standard","Custom","Query" } ) do				-- Search the Image.* files created by doExportRegistry() above
+			local strImageFile = strTargetDir.."\\Image."..strFileType
+			if FlgFileExists(strImageFile) then
+				for strLine in io.lines(strImageFile) do
+					strMatch = strLine:match("^---------- %u:\\.*\\(STANDARD\\.*)$")	-- Standard Diagram Type (.fhd/.fhdx) definition file
+					if strMatch then strFileDiag = strMatch end
+					strMatch = strLine:match("^---------- %u:\\.*\\(CUSTOM\\.*)$")		-- Custom Diagram Type (.fhd/.fhdx) definition file
+					if strMatch then strFileDiag = strMatch end
+					strMatch = strLine:match("^Icon=(%u:\\.*)$")								-- Diagram Type (.fhd) Box Icon external image file
+					if strMatch then strFilePath = strMatch end
+					strMatch = strLine:match("^(%u:\\.-)[^%a]*$")							-- Diagram Type (.fhdx) Picture or Box Icon external image file
+					if strMatch then strFilePath = strMatch end
+					strMatch = strLine:match("%s*Bkg Pic Path%s*REG_SZ%s*(%u:\\.*)$")	-- Registry Diagram Picture external image file
+					if strMatch then strFileDiag = "REGISTRY DIAGRAM PICTURE" strFilePath = strMatch end
+					strMatch = strLine:match("%s*Icon%s*REG_SZ%s*(%u:\\.*)$")				-- Registry Diagram Box Icon external image file
+					if strMatch then strFileDiag = "REGISTRY DIAGRAM BOX ICON" strFilePath = strMatch end
+					if strFilePath and
+					not strFilePath:match(strProgramDir..".-\\.-\\") then					-- Image file path not in any Program Data subfolder
+						local intFileIndex = tblFilePath[strFilePath]
+						if not intFileIndex then
+							intFilePath = intFilePath + 1
+							intFileIndex = intFilePath
+							tblFilePath[strFilePath] = intFilePath
+							if FlgFileExists(strFilePath) then
+								intFileCount = intFileCount + 1
+								local strFileName = "\\"..intFileIndex.."~"..strFilePath:match("%u:\\.-([^\\]-[^%.]+)$")
+								doCopyFile(strFilePath,strTargetDir..strFileName,"Backup")
+								tblFilePath[strFileName] = intFilePath
+							end
+						end
+						local strFileText = "  references missing file  "
+						if FlgFileExists(strFilePath) then
+							strFileText = "  references file "..intFileIndex.."  ~  "
+						end
+						strFileList = strFileList..strFileDiag..strFileText..strFilePath.."\n"
+						strFilePath = nil
+					end
+				end
+				DeleteFile(strImageFile)
+			end
+		end
+		for strEntry in lfs.dir(strTargetDir) do												-- Search backup folder for image files
+			if strEntry ~= "." and strEntry ~= ".." then
+				local strFileName = "\\"..strEntry
+				local tblAttr = lfs.attributes(strTargetDir..strFileName)
+				if tblAttr.mode == "file"
+				and strFileName:match("^\\%d+~")
+				and not tblFilePath[strFileName] then
+					DeleteFile(strTargetDir..strFileName)										-- Delete redundant old image file backup
+				end
+			end
+		end
+		if strFileList ~= "" then
+			local strImageList = strTargetDir.."\\"..strListTxt
+			SaveStringToFile(strFileList,strImageList)
+			lblFilename.title = strListTxt:gsub("&","&&")
+			local strMoveAdvice = ""
+			if intFileCount > 0 then strMoveAdvice = "\nPreferably any Box Icon external images should be moved to the Program Data FH Program Icons folder." end
+			local strMissAdvice = ""
+			local intMissCount = intFilePath - intFileCount
+			if intMissCount > 0 then strMissAdvice = "\nTake note that "..intMissCount.." of the referenced external image files cannot be found." end
+			local strButton = GUI_ModeDialogue("External Image File","ADVICE: Diagram Type Picture / Box Icon external image file references are listed in the "..strListTxt.." file."..strMoveAdvice..strMissAdvice,"View Image List","OK - Continue")
+			if strButton:match("View") then DoExecute( strImageList, " " ) end
+		end
+		return intFileCount
+	end -- local function intBackupImageFiles
+
+	local function intRestoreImageFiles(strSourceDir)										-- Restore image files not located in Program Data folders
+		local intFileCount = 0
+		local intFileIndex = 0
+		local intFileError = 0
+		local strImageList = strSourceDir.."\\"..strListTxt
+		if FlgFileExists(strImageList) then
+			lblFilename.title = strListTxt:gsub("&","&&")
+			for strLine in io.lines(strImageList) do											-- Look through the FileList.txt file to find image file paths
+				local intFilePath, strFilePath = strLine:match(".*  references file (%d*)  ~  (%u:\\.*)$")
+				if strFilePath then
+					local strFileName = strSourceDir.."\\"..intFilePath.."~"..strFilePath:match("%u:\\.-([^\\]-[^%.]+)$")
+					intFilePath = tonumber(intFilePath)
+					if FlgFileExists(strFileName) and intFilePath > intFileIndex then
+						intFileCount = intFileCount + 1
+						intFileIndex = intFilePath
+						strTargetDir = SplitFilename(strFilePath)
+						if lfs.attributes(strTargetDir) then
+							doCopyFile(strFileName,strFilePath,"Restore")
+						else
+							local isOK, strError = lfs.mkdir(strTargetDir)					-- Ensure the Target folder exists
+							if isOK then
+								doCopyFile(strFileName,strFilePath,"Restore")
+							else
+								GUI_ModeDialogue("Cannot Make Folder","ERROR: Cannot make Restore Image folder path. "..tostring(strError)..".\n"..strFilePath.."\nRestore Image File operation cancelled.\n","OK")
+								intFileError = intFileError + 1
+							end
+						end
+					end
+				end
+			end
+			if intFileCount > 0 then
+				local strButton = GUI_ModeDialogue("External Image File","ADVICE: Diagram Type Picture / Box Icon external image file references are listed in the "..strListTxt.." file.\nPreferably any Box Icon external images should be moved to the Program Data FH Program Icons folder.","View Image List","OK - Continue")
+				if strButton:match("View") then DoExecute( strImageList, " " ) end
+			end
+		end
+		return intFileCount - intFileError
+	end -- local function intRestoreImageFiles
+--[==[
+	local function strRegeditExport(strFile,strKeys)										-- Run regedit to Export text Registry Keys and return as string
+		DeleteFile(strFile)
+		DoExecute( "regedit.exe", " /E:A \""..strFile.."\" \""..strKeys.."\" " )		-- /E:A means Export in ASCII text
+		local intOldSize = -1
+		local intNewSize = -1
+		local intCounter = 40
+		repeat
+			if intNewSize > 1000 then intOldSize = intNewSize end
+			fhSleep(200,100)																		-- Allow regedit to run and wait until file stops getting bigger
+			intNewSize = lfs.attributes(strFile,"size") or 0
+			intCounter = intCounter - 1
+		until intOldSize == intNewSize or intCounter < 0
+		if intCounter < 0 then
+			GUI_ModeDialogue("Registry Export Error","ERROR: Registry Key data not saved by regedit export:\n"..strFile.."\n"..strKeys,"OK")
+		end
+		return StrLoadFromFile(strFile)
+	end -- local function strRegeditExport
+
+	local function doRenameFile(strSource,strTarget)										-- Rename file from Source to Target if Source exists
+		if FlgFileExists(strSource) then
+			DeleteFile(strTarget)
+			local isOK, strErrorText = os.rename(strSource,strTarget)
+			if not isOK then
+				GUI_ModeDialogue("Rename Failed","ERROR: Rename of file failed for:\n"..strSource.."\n"..strTarget.."\n","OK")
+			end
+		end
+	end -- local function doRenameFile
+
+	local function doMigrateToVersion5(strSourceDir,strVersion)							-- Migrate FH 5.0 Beta Backup Data to installed FH V5.0
+		local strRegFile = strSourceDir.."\\"..strRegKeys
+		local strVerFile = strSourceDir.."\\"..strVerData
+		doRenameFile(strRegFile,strRegFile.."_beta")											-- Preserve current Registry.keys & Version.data Beta files
+		doRenameFile(strVerFile,strVerFile.."_beta")
+		local strKeyHKCU = strKeyHKCU:gsub("HKCU","HKEY_CURRENT_USER")					-- Obtain the FH 5.0 Beta regedit Registry keys for HKCU & HKLM
+		local strKeyHKLM = strKeyHKLM:gsub("HKLM","HKEY_LOCAL_MACHINE")
+		local tblRegKeys = {}
+		table.insert(tblRegKeys,strRegeditExport(strRegFile,strKeyHKCU.."\\"..strBetaName))
+		table.insert(tblRegKeys,strRegeditExport(strRegFile,strKeyHKLM.."\\"..strBetaName.."\\2.0\\Preferences"))
+		local strRegKeys = table.concat(tblRegKeys):gsub("\\"..strBetaName,"\\Family Historian")
+		SaveStringToFile(strRegKeys,strRegFile)												-- Create new Registry.keys file
+		SaveStringToFile(strVersion,strVerFile)												-- Create new Version.data file
+	end -- local function doMigrateToVersion5
+]==]
+	local function setBackupFolderOK(strFunction,strBackupDir)							-- Choose Backup/Restore Folder Path
+		if FlgFolderWrite(strBackupDir) then return true end								-- If supplied folder writeable then dialogue not required
+		if FlgFolderExists(StrBackupDir) then
+			strBackupDir = StrBackupDir															-- Set initial directory to existing Plugin Backup Folder 
+		else
+			strBackupDir = StrBackupKey															-- Set initial directory to Program Preferences Backups Folder
+		end
+		if not FlgFolderWrite(strBackupDir) then
+			strBackupDir = StrPublicPath															-- Set initial directory to Project Public folder
+		end
+		local filedlg = iup.filedlg{dialogtype="DIR", title="The current Backup Data folder path is \n"..strBackupDir, directory=strBackupDir}
+		filedlg:popup(iup.CENTER,iup.CENTER)
+		if filedlg.status == "0" then
+			strBackupDir = filedlg.value
+			if FlgFolderWrite(strBackupDir) then												-- If chosen folder is writeable then all OK
+				StrBackupDir = strBackupDir
+				SaveSettings(StrStickyFile)														-- Save sticky data settings
+				return true
+			else
+				lblBackup.title = strBackupDir:gsub("&","&&")
+				GUI_ModeDialogue(strFunction.." Cancelled","ERROR: "..strFunction.." Operation has failed because Backup Data folder does not have write access.","OK")
+				lblBackup.title = StrBackupDir:gsub("&","&&")
+				return false
+			end
+		else
+			GUI_ModeDialogue(strFunction.." Cancelled","ADVICE: "..strFunction.." Operation has been cancelled via the 'Browse For Folder' dialogue.","OK")
+		end
+		return false		
+	end -- local function setBackupFolderOK
+
+	-- GUI Backup Tab Functions --
+
+	function btnBackup:action()																	-- Action for Backup Customisations button
+		tabControls.active	= "NO"
+		btnBackup.active	= "NO"
+		if setBackupFolderOK("Backup",StrBackupDir) then									-- Ensure the Backup Data folder is OK
+			lblBackup.title = StrBackupDir:gsub("&","&&")
+			local intProgTotal = 0
+			local intFileTotal = 0
+			for intProgram = 1, #TblProgram do													-- Repeat for each installed Family Historian program Version
+				local strProgName = TblProgram[intProgram]
+				local strProgVers = TblVersion[intProgram]
+				lblProgram.title = strProgName..strProgVers
+				lblFilename.title = " "
+				lblStatus.title	= " "
+				local strSourceDir = StrCalicoPie.."\\"..strProgName						-- Backup source is Calico Pie program name data folder
+				local strTargetDir = StrBackupDir.."\\"..strProgName						-- Backup target is Backup Data folder with same program name
+				local strButton = "Yes"
+				if FlgFolderExists(strTargetDir) then
+					local strModified = ""
+					local strVerFile = strTargetDir.."\\"..strVerData
+					if FlgFileExists(strVerFile) then
+						strModified = os.date(nil,lfs.attributes(strVerFile,"modification"))
+					end
+					strButton = GUI_ModeDialogue("Backup Data Exists "..strModified,"WARNING: Backup folder already has "..strProgName.." backup data saved.\nIs it acceptable to update this old Backup Data with new Backup Data?","Yes - Backup","No - Skip")
+				else
+					strButton = GUI_ModeDialogue("Backup Data Request","ADVICE: Is it acceptable to create new Backup Data for "..strProgName.."?","Yes - Backup","No - Skip")
+				end
+				if strButton:match("Yes") then													-- Backup all Program Data files from Calico Pie folder
+					local intFileCount = intCopyFiles(strSourceDir,strTargetDir,strProgName,"Backup")
+					if intFileCount < 0 then break end
+					if intFileCount > 0 then
+						intProgTotal = intProgTotal + 1
+						doExportRegistry(strTargetDir,strProgName)							-- Export all Registry Keys for Program
+						SaveStringToFile(strProgVers,strTargetDir.."\\"..strVerData)		-- Save the Program Version number
+						intFileCount = intFileCount + intBackupImageFiles(StrCalicoPie.."\\Family Historian",strTargetDir)
+						intFileTotal = intFileTotal + intFileCount
+						lblFilename.title = ""
+						lblStatus.title = "Backup completed for "..intFileCount.." data files and 1 registry file"
+						fhSleep(900,100)
+					end
+				end
+			end -- per installed Program loop
+			doCheckUninstalledData()																-- Check if any Backup Data folder exists for an uninstalled program
+			lblProgram.title = ""
+			local strPrograms = " programs"
+			if intProgTotal == 1 then strPrograms = " program" end
+			lblStatus.title = "Backup completed for "..intFileTotal.." data files for "..intProgTotal..strPrograms
+		end
+		tabControls.active	= "YES"
+		btnBackup.active	= "YES"
+	end -- function btnBackup:action
+
+	-- GUI Restore Tab Functions --
+
+	function btnRestore:action()																	-- Action for Restore Customisations button
+		tabControls.active	= "NO"
+		btnRestore.active	= "NO"
+		if setBackupFolderOK("Restore",StrBackupDir) then									-- Ensure the Backup Data folder is OK
+			lblBackup.title = StrBackupDir:gsub("&","&&")
+			local intProgTotal	= 0
+			local intFileTotal	= 0
+			local strBetaVers	= ""
+			for intProgram = 1, #TblProgram do
+				local strProgName = TblProgram[intProgram]									-- Repeat for each installed Family Historian program Version
+				local strProgVers = TblVersion[intProgram]
+				lblProgram.title = strProgName..strProgVers
+				if strProgName == strBetaName then strBetaVers = strProgVers end
+				local strSourceDir	= StrBackupDir.."\\"..strProgName						-- Restore source is Backup Data program name folder
+				local strTargetDir	= StrCalicoPie.."\\"..strProgName						-- Restore target is Calico Pie program name data folder
+				local strProgram	= "Program Data Files"
+				local strRegistry	= "Registry Data Keys"
+				if FlgFolderExists(strSourceDir) then
+					repeat
+						lblFilename.title = " "
+						lblStatus.title	= " "
+						local strButton
+						local strRegFile = strSourceDir.."\\"..strRegKeys
+						local strVerFile = strSourceDir.."\\"..strVerData
+						if not FlgFileExists(strVerFile) then
+							GUI_ModeDialogue("Version Data Missing","ERROR: Cannot find the "..strProgName.." program Version of the Backup Data.\n"..strVerFile.." is missing.\n","OK")
+							break
+						end
+						local strBackVers = StrLoadFromFile(strVerFile)
+						if strBackVers then
+							if strBackVers ~= strProgVers then
+								if strBackVers:match(" Version (%d)%.") == strProgVers:match(" Version (%d)%.") then
+									GUI_ModeDialogue("Minor Version Mismatch","ERROR: "..strProgName.." backup"..strBackVers.." does not match"..strProgVers.." installed.\nInstall a free upgrade to bring the older program version upto date and make the backups compatible.","OK")
+								else
+									GUI_ModeDialogue("Major Version Mismatch","ERROR: "..strProgName.." backup"..strBackVers.." does not match"..strProgVers.." installed.\nThe program settings for different Family Historian program Versions are NOT compatible.","OK")
+								end
+								break
+							end
+							local strOption = ""
+--[==[
+							if strProgName == "Family Historian"								-- Check for Migrate Beta option
+							and strProgName == TblProgram[#TblProgram]
+							and strProgVers:match(" Version (%d%.%d)%.") == "5.0"
+							and strBetaVers:match(" Version (.*)") == "5.0.0.7" then		-- FH V5.0 is current and FH Beta V5.0.0.7 is installed
+								strOption = "Migrate Beta to V"..strProgVers:match(" Version (%d%.%d)%.")
+							end
+]==]
+							local strModified = os.date(nil,lfs.attributes(strVerFile,"modification"))
+							strButton = GUI_ModeDialogue("Restore Data "..strModified,"WARNING: Use 'Skip Operation' unless certain of the consequences of using Restore.\nHas a Backup been performed (by another PC or User or Project) for the current Program Settings?\nDo you want to Restore the Custom Program Data Files or the Preferences Registry Data Keys?",strOption,strProgram,strRegistry,"Skip Operation")
+--[==[
+							if strButton:match("Migrate") then
+								lblProgram.title = strBetaName..strBetaVers.. " to "..strProgName..strProgVers  
+								GUI_ModeDialogue("Migrate Beta Backup","ADVICE: This will CONVERT "..strBetaName.." settings to Family Historian"..strProgVers.." settings.\nIf running in an Administrator account there may be two 'User Account Control' popups for 'Registry Editor'.\nThe usual 'Program Data Files' button and 'Registry Data Keys' button will MIGRATE the data settings.","OK")
+								strSourceDir = StrBackupDir.."\\"..strBetaName				-- Restore source is Backup FH 5.0 Beta data folder
+								doMigrateToVersion5(strSourceDir,strProgVers)
+								strBetaVers = ""													-- Inhibit the Migrate option
+							end
+]==]
+							if strButton:match("Program Data") then							-- Restore all Program Data files to Calico Pie folder
+								strProgram = ""
+								local intImageCount = intRestoreImageFiles(strSourceDir)
+								local intFileCount = intCopyFiles(strSourceDir,strTargetDir,strProgName,"Restore")
+								if intFileCount < 0 then break end
+								intFileCount = intFileCount + intImageCount
+								if intFileCount > 0 then
+									intFileTotal = intFileTotal + intFileCount
+									lblStatus.title = "Restore completed for "..intFileCount.." data files"
+									lblFilename.title = ""
+									fhSleep(800,100)
+								end
+							elseif strButton:match("Registry Data") then						-- Import all Registry Data Keys for Program
+								strRegistry = ""
+								if doImportRegistry(strSourceDir,strProgName) < 0 then return iup.CLOSE end
+								lblFilename.title = ""
+								fhSleep(800,100)
+							end
+						else
+							strButton = "Skip Operation"
+						end
+						if lblStatus.title	~= " " then
+	 						intProgTotal = intProgTotal + 1
+						end
+					until strButton:match("Skip") or ( strProgram == "" and ( strRegistry == "" or StrRegistry == "OFF" ) )
+				else
+					GUI_ModeDialogue("Backup Data Missing","ERROR: Backup Data folder has no "..strProgName.." backup data saved.","OK")
+				end
+			end -- per Program loop
+			doCheckUninstalledData()																-- Check if any Backup Data folder exists for an uninstalled program
+			lblProgram.title = ""
+			local strPrograms = " programs"
+			if intProgTotal == 1 then strPrograms = " program" end
+			lblStatus.title = "Restore completed for "..intFileTotal.." data files for "..intProgTotal..strPrograms
+		end
+		tabControls.active	= "YES"
+		btnRestore.active	= "YES"
+	end -- function btnRestore:action
+
+	-- GUI Options Tab Functions --
+
+	function btnDefault:action()																	-- Action for Restore Defaults button
+		ResetDefaultSettings()
+		if	BtnMainHelp.active == "NO" then														-- If Help button inactive, then Help is active, so redisplay its dialogue
+			DialogHelp.rastersize = StrHelpS
+			DialogHelp:showxy(IntHelpX,IntHelpY)
+		end
+		dialogMain.rastersize	= StrMainS
+		dialogMain:showxy(IntMainX,IntMainY)
+		local tblPosn = dialogMain.screenposition:SplitNumbers()
+		IntMainX = tblPosn[1]
+		IntMainY = tblPosn[2]
+		lblBackup.title		= StrBackupDir
+		lblProgData.title	= StrCalicoPie
+		tglRegistry.value	= StrRegistry
+		SaveSettings(StrStickyFile)																-- Save sticky data settings
+	end -- function btnDefault:action
+
+	function btnFontSet:action()																	-- Action for User Interface Font button
+		local strAnswer = GUI_FontDialogue()
+		if strAnswer == "Change" then
+			for i, control in ipairs({ btnBackup, btnRestore, vboxMain, frameStatus, }) do
+				control.font = StrFontHead
+			end
+			for i, control in ipairs({ vboxBackup, vboxRestore, vboxOptions, vboxStatus, }) do
+				control.font = StrFontBody
+			end
+			if	BtnMainHelp.active == "NO" then													-- If Help button inactive, then Help is active, so update its font
+				HboxHelp.font = StrFontBody
+			end
+		end
+		SaveSettings(StrStickyFile)																-- Save sticky data settings
+	end -- function btnFontSet:action
+
+	function btnFolder:action()																	-- Action for Set Backup Folder button
+		if setBackupFolderOK("Choose","") then
+			lblBackup.title = StrBackupDir:gsub("&","&&")
+		end
+	end -- function btnFolder:action
+
+	function tglRegistry:action(intState)														-- Action for Allow RESTORE Registry Data toggle
+		if intState == 0 then StrRegistry = "OFF" end
+		if intState == 1 then StrRegistry = "ON" end
+		SaveSettings(StrStickyFile)																-- Save sticky data settings
+	end -- function tglGeoCode:action
+
+	-- GUI Main Dialogue Global Functions --
+
+	function tabControls:tabchangepos_cb(intNew,intOld)										-- Call back when Main tab position is changed
+		lblProgram.title	= " "
+		lblFilename.title	= " "
+		lblStatus.title		= " "
+		SaveSettings(StrStickyFile)																-- Save sticky data settings
+	end -- function tabControls:tabchangepos_cb
+
+	function BtnMainHelp:action()																-- Action for Help & Advice button
+		BtnMainHelp.active = "NO"
+		GUI_HelpDialogue()
+	end -- function BtnMainHelp:action
+
+	function btnClose:action()																	-- Action for Close Plugin button
+		return iup.CLOSE 
+	end -- function btnClose:action
+
+	function dialogMain:close_cb()																-- Call back when GUI window Close pressed
+		return iup.CLOSE
+	end -- function dialogMain:close_cb
+
+	-- GUI Main Dialogue Initialisation --
+--[==[
+	local strMigrate = StrBackupDir.."\\"..strBetaName										-- Retrieve original Registry.keys & Version.data after Beta Migrate operation on previous run of Plugin
+	local strRegFile = strMigrate.."\\"..strRegKeys
+	local strVerFile = strMigrate.."\\"..strVerData
+	doRenameFile(strRegFile.."_beta",strRegFile)
+	doRenameFile(strVerFile.."_beta",strVerFile)
+]==]
+	dialogMain:showxy(IntMainX,IntMainY)
+
+	if doSetProgramVersions()	then																-- Establish the installed Family Historian program Versions
+		if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+	end
+
+end -- function GUI_MainDialogue
+--[[
+-- Obtain Version in Plugin Store by Id --
+function StrVersionInStore(strId)
+	if strId then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?id="..strId
+]]
+-- Obtain Version in Plugin Store by Id or Name --
+function StrVersionInStore(strPlugin)
+	local strType = "name="
+	if tonumber(strPlugin) then strType = "id=" end
+	if strPlugin then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..strPlugin
+ 		http:Open("GET",strRequest,false)
+		http:Send()
+		local strReturn = http.Responsebody
+		local strVersion = ""
+		if strReturn ~= nil then
+			strVersion = strReturn:match("(%d.*),%d*")
+		end
+		return strVersion
+	else
+		return nil
+	end
+end -- function StrVersionInStore
+
+-- Main body of Plugin script starts here --
+
+	PresetGlobalConstants()				-- Preset global data constants, etc
+
+	ResetDefaultSettings()					-- Preset default sticky settings
+
+	LoadSettings(StrStickyFile)			-- Load sticky data settings
+
+	StrInitialMessage = [[
+	 of this Plugin from the Family Historian Plugin Store.
+
+	Ensure you digest the Help && Advice before using the Plugin, especially regarding RESTORE operations.
+
+	This Plugin can change your Windows Registry (low-level PC settings) if you use the RESTORE option.
+	However, this 'RESTORE Registry Data' feature is initially disabled by default on the Options tab. 
+	You are strongly advised to backup the Windows Registry before making any changes to it.
+
+	If you have any questions about this Plugin, or if you encounter any problems as a consequence of using it,
+	please contact the Plugin's author, Mike Tate, via the FHUG at www.fhug.org.uk or on the FHU Mailing List.
+
+	Please do NOT contact Calico Pie, who are not responsible for this Plugin.          Thank you.
+	]]
+
+	StrVersion = StrVersionInStore("223")
+
+	if StrIssue:match(StrVersion) then
+		StrInitialMessage = "\nYou are currently running the latest Version"..StrInitialMessage
+	else
+		StrInitialMessage = "\nPlease download the latest Version "..StrVersion..StrInitialMessage
+	end
+
+	if iup.Alarm(StrPlugin..StrIssue.." -  IMPORTANT PLEASE READ",StrInitialMessage,"OK","Cancel") == 2 then return end
+
+	GUI_MainDialogue()
+
+	SaveSettings(StrStickyFile)			-- Save sticky data settings

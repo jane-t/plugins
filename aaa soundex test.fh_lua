@@ -1,0 +1,41 @@
+--[[
+@Title: Soundex Calculator
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: Feburary 2012
+@Description: function to compute SoundEx codes on any string
+]]
+code2 = {
+    A=0,E=0,I=0,O=0,U=0,Y=0,H=0,
+    B=1,P=1,F=1,V=1,
+    C=2,S=2,G=2,J=2,K=2,Q=2,X=2,Z=2,
+    D=3,T=3,
+    L=4,
+    M=5,N=5,
+    R=6
+    }
+function soundex(str)
+    local codes = code2
+    local strCap = string.upper(str)
+    local strSoundex = string.sub(strCap,1,1)
+    local strRest = string.sub(strCap,2)
+    for letter in string.gmatch(strRest, "%a") do
+		local l = string.len(strSoundex)
+        local strLast = string.sub(strSoundex,l,l)
+        if codes[letter] ~= 0 and codes[letter] ~= tonumber(strLast) then
+            strSoundex = strSoundex..codes[letter]
+        end
+        if #strSoundex == 4 then break end
+    end
+    strSoundex = strSoundex..'0000'
+    return string.sub(strSoundex,1,4)
+end
+
+-- Example Usage
+s = os.time()
+for i=1,1000000 do
+  t = soundex('ScaddenJohns')
+end 
+e = os.time()
+x = e - s
+fhMessageBox(t..' '..x)

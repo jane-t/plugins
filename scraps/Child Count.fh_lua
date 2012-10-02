@@ -1,0 +1,4 @@
+ptrf = fhNewItemPtr('FAM')
+print(fhGetDisplayText(ptrf))
+ptrCount = fhGetItemPtr(ptrf,'FAM.NCHI') 
+print(fhGetDisplayText(ptrCount))

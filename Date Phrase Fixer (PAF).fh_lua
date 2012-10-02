@@ -1,0 +1,130 @@
+--[[
+@title: Date Phrase Cleanup (PAF)
+@author: Jane Taubman
+@lastupdated: September 2012
+@description: 
+Find All Date Phrases and Match and replace them where possible.
+]]
+----------------------------------------------------------------------------------- Main Function
+function mainfunction()
+    -- Define Columns
+    local tblOutput,iC = createResultTable()
+    tblOutput.phrase = {title='Date Phrase',type='text',width=140,align='align_left',content={}}
+    tblOutput.record = {title='Record',type='item',width=140,align='align_left',content={}}
+    tblOutput.fact = {title='Fact',type='item',width=140,align='align_left',content={}}
+    tblOutput.age = {title='Age',type='item',width=40,align='align_left',content={}}
+
+    -- Define Variables
+    local tblTypes = {"INDI","FAM"} -- Scan both Family and Individual Record Types
+    local dtDate = fhNewDate()
+    local dpDatePoint = fhNewDatePt()
+    local dpEndDatePoint = fhNewDatePt()
+    local pi = fhNewItemPtr()
+    local ptrFact = fhNewItemPtr() -- Fact Which Contains Date
+    local ptrOwner = fhNewItemPtr() -- Owner Which Contains Fact
+    local ptrAge = fhNewItemPtr() -- Owner Which Contains Fact
+
+    -- Process through all elements in the Individual & Family Records
+    for iType,strTypeDesc in ipairs(tblTypes) do
+        pi:MoveToFirstRecord(strTypeDesc)
+        while not pi:IsNull() do
+            strType = fhGetTag(pi)
+            if strType == 'DATE' then
+                local dtDate = fhGetValueAsDate(pi)
+                local strPhrase = dtDate:GetPhrase()
+                if (strPhrase ~= nil) and (strPhrase ~= "") then
+                    -- Check for Age in brackets
+                    local age = nil
+                    local age = tonumber(string.match(strPhrase,'%((%d-)%)'))
+                    -- Extract Year
+                    local iYear = nil
+                    iYear = tonumber(string.match(strPhrase,'%d%d%d%d'))
+                    -- Extract Quarter
+                    local qtr = string.match(strPhrase,'Q(%d)')
+                    if iYear and qtr then
+                        -- Got a Year and Quarter
+                        local startMonth = (qtr - 1) * 3 + 1
+                        local endMonth = (qtr - 1) * 3 + 3
+                        dpDatePoint:SetValue(iYear,startMonth)
+                        dpEndDatePoint:SetValue(iYear,endMonth)
+                        dtDate:SetRange('between', dpDatePoint,dpEndDatePoint)
+                        fhSetValueAsDate(pi,dtDate)
+                    end
+                    strPhrase = strPhrase:gsub('Reg:','c%.') -- Replace Reg: with c.
+                    if string.match(strPhrase,'c%.') then -- Convert c. at start to (app) on the end and update date
+                        strDate = strPhrase:gsub('c%.','')..' (app)'
+                        local bResult = dtDate:SetValueAsText(strDate,false)
+                        if bResult then
+                            fhSetValueAsDate(pi,dtDate)
+                        end
+                    end
+                    if age and qtr == nil then
+                        -- remove age in brackets and replace date
+                        local strDate = strPhrase:gsub('%(.-%)','')
+                        local strDate = strPhrase:gsub('Reg:','')
+                        local bResult = dtDate:SetValueAsText(strDate,false)
+                        if bResult then
+                            fhSetValueAsDate(pi,dtDate)
+                        end
+                    end
+                    ptrFact:MoveToParentItem(pi)
+                    ptrAge:MoveTo(ptrFact,'~.AGE')
+                    if age then
+                        -- Add Age to Fact if not already records
+                        ptrAge:MoveTo(ptrFact,'~.AGE')
+                        if ptrAge:IsNull() then
+                            ptrAge = fhCreateItem('AGE',ptrFact)
+                            bOK = fhSetValueAsText(ptrAge, age)
+                        end
+                    end
+                    ptrOwner:MoveToParentItem(ptrFact)
+                    -- Add Data to Columns even if no changes were made
+                    iC = iC + 1
+                    tblOutput.phrase.content[iC] = strPhrase
+                    tblOutput.record.content[iC] = ptrOwner:Clone() -- Add to Owner Column
+                    tblOutput.fact.content[iC] = ptrFact:Clone() -- Add to Fact Column
+                    tblOutput.age.content[iC] = ptrAge:Clone() -- Add Age if set
+                end
+            end
+            pi:MoveNextSpecial()
+        end
+    end
+
+    -- Send the Tables to Query Window.
+    if iC > 0 then
+    fhOutputResultSetTitles("Date Phrase Fixing for PAF"," ", "Date: %#x")
+       for t in tblOutput() do
+         fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+       end
+    else
+       fhMessageBox('No Date Phrases Found','MB_OK','MB_ICONINFORMATION')
+    end
+end
+-------------------------------------------------------------------- Functions
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+-------------------------------------------------------------------- Call mainfunction
+mainfunction()

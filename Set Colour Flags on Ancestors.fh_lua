@@ -1,0 +1,111 @@
+--[[
+@Title: Set Colour Flags on Ancestors
+@Author: Jane Taubman
+@Version:
+@LastUpdated:
+@Description:
+Using the Barry Ewell Technique
+]]
+--[[
+@function: CheckDuplicate
+@description: Adds Record Id as value and index, to table if it does not already exist
+@parameters: Item Pointer - Must be at Record Level
+@returns: true if pointer is a duplicate
+@requires: none
+]]
+function CheckDuplicate(table, ptr)
+    local id = fhGetRecordId(ptr)
+    if table[id] == nil then
+        table[id] = id
+        return false
+    else
+        return true
+    end
+end
+-- End Function
+--[[
+@function: GetAncestorList
+@description: Returns a list of Ancestors
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]]
+function GetAncestorList(ptr)
+    local ancestorlist  = {}
+    local dupcheck = {}
+    
+    local ptrMother = fhNewItemPtr()
+    local ptrFather = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+    
+    table.insert(ancestorlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #ancestorlist do
+        ptrBase = ancestorlist[iLoop]
+        -- Loop Family as Child
+        ptrFamily:MoveTo(ptrBase,'~.FAMC')
+        while ptrFamily:IsNotNull() do
+            ptrMother:MoveTo(fhGetValueAsLink(ptrFamily),'~.WIFE>')
+            if ptrMother:IsNotNull() and (not CheckDuplicate(dupcheck,ptrMother))then
+                table.insert(ancestorlist,ptrMother:Clone())
+            end
+            ptrFather:MoveTo(fhGetValueAsLink(ptrFamily),'~.HUSB>')
+            if ptrFather:IsNotNull() and (not CheckDuplicate(dupcheck,ptrFather)) then
+                table.insert(ancestorlist,ptrFather:Clone())
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return ancestorlist
+end
+-- End Function
+function round(num, idp)
+    local mult = 10^(idp or 0)
+    return math.floor(num * mult) / mult
+end
+function getiTafel(ptrRoot,ptr)
+local iTafel = fhCallBuiltInFunction('AhnentafelNumber',ptrRoot,ptr,1)
+      local  iKey = iTafel
+        while iKey > 15 do
+            iKey = round(iKey / 2)
+        end
+
+return iKey
+end
+---------------------------------------------------------------- Colour Patterns
+tblcolour = {'Blue','Blue','Red','Blue','Blue','Red','Red','Blue','Blue','Green','Green','Red','Red','Yellow','Yellow'}
+tblclrcolour = {'Blue', 'Red','Yellow','Green'}
+---------------------------------------------------------------- Main Code
+flgPtr = fhNewItemPtr()
+flgCPtr = fhNewItemPtr()
+
+ptrRoot = fhPromptUserForRecordSel('INDI',1)
+if ptrRoot[1]:IsNotNull() then
+    ancestors = GetAncestorList(ptrRoot[1])
+    for i,ptr in pairs(ancestors) do
+        
+        print(tblcolour[getiTafel(ptrRoot[1],ptr)] ,fhGetDisplayText(ptr))
+        
+        flgPtr:MoveTo(ptr,'~._FLGS')
+        if flgPtr:IsNull() then
+            fhCreateItem('_FLGS', ptr)
+        end
+        
+        -- Clear any colour flags
+        for _,strcolour in pairs(tblclrcolour) do
+            strTag, strError = fhGetFlagTag(strcolour, true)
+            
+            flgCPtr:MoveTo(flgPtr,'~.'.. strTag)
+            if flgCPtr:IsNotNull() then
+                fhDeleteItem(flgCPtr)
+            end
+        end
+        strTag, strError = fhGetFlagTag(tblcolour[getiTafel(ptrRoot[1],ptr)], true)        
+        flgCPtr:MoveTo(flgPtr,'~.'.. strTag)
+        if flgCPtr:IsNull() then
+            item = fhCreateItem(strTag, flgPtr)
+        end
+    end    
+end

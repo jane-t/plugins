@@ -1,0 +1,81 @@
+--[[
+@Title: Text Pedigree Report
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: June 2012 
+@Description: 
+]]
+
+function main()
+local plist = fhPromptUserForRecordSel('INDI',1)
+
+if plist[1] == nil then
+    return
+end
+list = GetAncestorList(plist[1])
+for i,v in pairs(list) do
+
+local aNo = fhCallBuiltInFunction('AhnentafelNumber',plist[1],v,1) or 0
+
+local gen = aNo
+local sex = fhGetItemText(v,'~.SEX')
+if sex == 'Female' then
+   gen = gen - 1
+end
+gen = log2(gen) 
+print(fhGetDisplayText(v),aNo,gen)
+end
+end 
+
+function log2(x)
+   return math.floor(math.log( x ) / math.log( 2 ))
+end
+function CheckDuplicate(table, ptr)
+    local id = fhGetRecordId(ptr)
+    if table[id] == nil then
+        table[id] = id
+        return false
+    else
+        return true
+    end
+end
+-- End Function
+--[[
+@function: GetAncestorList
+@description: Returns a list of Ancestors
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]]
+function GetAncestorList(ptr)
+    local ancestorlist = {}
+    local dupcheck = {}
+    local ptrMother = fhNewItemPtr()
+    local ptrFather = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+    table.insert(ancestorlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #ancestorlist do
+        ptrBase = ancestorlist[iLoop]
+        -- Loop Family as Child
+        ptrFamily:MoveTo(ptrBase,'~.FAMC')
+        while ptrFamily:IsNotNull() do
+            ptrMother:MoveTo(fhGetValueAsLink(ptrFamily),'~.WIFE>')
+            if ptrMother:IsNotNull() and (not CheckDuplicate(dupcheck,ptrMother))then
+                table.insert(ancestorlist,ptrMother:Clone())
+            end
+            ptrFather:MoveTo(fhGetValueAsLink(ptrFamily),'~.HUSB>')
+            if ptrFather:IsNotNull() and (not CheckDuplicate(dupcheck,ptrFather)) then
+                table.insert(ancestorlist,ptrFather:Clone())
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return ancestorlist
+end
+------------------------- Run Main
+main()
+
+

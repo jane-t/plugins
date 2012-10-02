@@ -1,0 +1,570 @@
+--[[
+@Title: Map a Persons Locations
+@Author: Jane Taubman
+@LastUpdated: 27th Feb 2012
+@Version: 1.3
+@Description: 
+Creates a web page which uses Google Maps to display on a map the location of events (and attributes) in a person’s life – 
+if you click 'Quick View Current Record' when you run it.  Alternatively, if you click 'Select Records and Create Pages for All' 
+it will create multiple web page files (.html files) for a set of people that you choose.  In the latter case, you will need 
+to select both the location to save the web page files to, and the individuals to map.
+
+If Google does not recognise any particular places, you can solve this by using the 'Map Geo-code Maintenance' plugin to 
+specify an alternate name for each place (one that Google will recognise), or a specific longitude and latitude.
+
+V1.2 Fixed Issue where Fact had no date.
+V1.3 Fixed Display for Child Facts
+]]
+htmlMasterPage = [[
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name = "viewport" content = "initial-scale=1.0, user-scalable=no" />
+    <meta http-equiv = "content-type" content = "text/html; charset=UTF-8" />
+    <title>Map of Locations for {name}</title>
+    <link href = "http://code.google.com/apis/maps/documentation/javascript/examples/default.css"
+        rel = "stylesheet" type = "text/css" />
+    <script type = "text/javascript"
+        src = "http://maps.googleapis.com/maps/api/js?sensor=false">
+    </script>
+    <style type = "text/css">
+      body
+          {
+          font-family: Arial, Helvetica, sans-serif;
+          }
+
+      li
+          {
+          font-size: small;
+          padding-bottom: 0.25em;
+          }
+
+      h1
+          {
+          font-family: Arial, Helvetica, sans-serif;
+          background-color: rgb( 255, 255, 204 );
+          padding-top: 1em;
+          padding-right: 1em;
+          padding-bottom: 1em;
+          padding-left: 1em;
+          }
+      a {
+			text-decoration: none;
+      }
+      #missing li {
+          color: red;
+          list-style: square;
+      }
+      #EventList {
+         width:38%;
+         float:left;
+         padding-right: 2%;
+      }
+      #map_canvas {
+          height:80%;
+          width:60%;
+      }
+		#loading {
+			font-size: 0.8em;
+			color: red;
+			margin-left: 5em;
+			}
+    </style>
+  </head>
+  <script type = "text/javascript">
+  var geocoder;
+var map;
+function initialize() {
+    geocoder = new google.maps.Geocoder();
+    var latlng = new google.maps.LatLng(52.482961,-1.893592);
+    var myOptions = {
+    zoom: 9,
+    center: latlng,
+    mapTypeId: google.maps.MapTypeId.ROADMAP,
+    overviewMapControl: true
+    }
+    LatLngList = new Array();
+    map = new google.maps.Map(document.getElementById("map_canvas"), myOptions);
+    codeAddress({mainpoint});
+    {mappoints}
+    //  Create a new viewpoint bound
+    var bounds = new google.maps.LatLngBounds (); 
+    //  Go through each...
+    for (var i = 0, LtLgLen = LatLngList.length; i < LtLgLen; i++) {
+        //  And increase the bounds to take this point
+        bounds.extend (LatLngList[i]);
+    }
+    //  Fit these bounds to the map
+    //  map.fitBounds (bounds);
+    }
+    
+function codeAddress(address,title,lat,long) {
+    if (lat != 0 ) {
+          var myLatlng = new google.maps.LatLng(lat,long); 
+          map.setCenter(myLatlng);
+    } else {
+
+    geocoder.geocode( { 'address': address}, function(results, status) {
+    if (status == google.maps.GeocoderStatus.OK) {
+        map.setCenter(results[0].geometry.location);
+        } else {
+        alertmsg = address + " was not found (" + status + ")";
+        document.getElementById("missing").innerHTML = 
+              document.getElementById("missing").innerHTML + '<li>' + alertmsg + '</li>'; 
+        }
+        });}
+        }
+function AddAddress(address,title,ref,delay) {
+		  var cmd = 'AddAddress2("' + address + '","' + title+'",' + ref + ')';
+   		  setTimeout(cmd,delay);
+        }
+function AddAddress2(address,title,ref) {
+    geocoder.geocode( { 'address': address}, function(results, status) {
+    if (status == google.maps.GeocoderStatus.OK) {
+        var marker = new google.maps.Marker({
+        map: map,
+        position: results[0].geometry.location,
+        title: title
+        });
+		  LatLngList[ref] = results[0].geometry.location;
+        } else {
+        alertmsg = address + " was not found (" + status + ")";
+        document.getElementById("missing").innerHTML = 
+              document.getElementById("missing").innerHTML + '<li>' + alertmsg + '</li>'; 
+        }
+        });
+        }
+
+function AddLongLat(lat,long,title,ref) {
+  var myLatlng = new google.maps.LatLng(lat,long); 
+  var marker = new google.maps.Marker({
+      position: myLatlng, 
+      map: map, 
+      title:title
+   });
+   LatLngList[ref] = myLatlng;
+   }
+function pantomarker(i) {
+   map.panTo(LatLngList[i]);
+}
+function hideloading(delay) {
+		  var cmd = 'document.getElementById("loading").innerHTML = "&nbsp;"';
+   		  setTimeout(cmd,delay);
+        }
+  </script>
+  </head>
+  <body onload = "initialize()">
+    <h1>Map of Locations for {name}</h1>
+    <div id = "EventList">
+		<p id="loading">Performing Geo-code lookups please wait</p>
+      <ul>
+        {factlist}
+      </ul>
+      <ul id="missing"></ul>
+    </div>
+                    <div id = "map_canvas"></div>
+  </body>
+</html>
+]]
+-------------------------------------------------------------- Place Overide Testing
+
+-------------------------------------------------------------- Table Load Save
+--[[
+   Save Table to File/Stringtable
+   Load Table from File/Stringtable
+   v 0.94
+   
+   Lua 5.1 compatible
+   
+   Userdata and indices of these are not saved
+   Functions are saved via string.dump, so make sure it has no upvalues
+   References are saved
+   ----------------------------------------------------
+   table.save( table [, filename] )
+   
+   Saves a table so it can be called via the table.load function again
+   table must a object of type 'table'
+   filename is optional, and may be a string representing a filename or true/1
+   
+   table.save( table )
+      on success: returns a string representing the table (stringtable)
+      (uses a string as buffer, ideal for smaller tables)
+   table.save( table, true or 1 )
+      on success: returns a string representing the table (stringtable)
+      (uses io.tmpfile() as buffer, ideal for bigger tables)
+   table.save( table, "filename" )
+      on success: returns 1
+      (saves the table to file "filename")
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   table.load( filename or stringtable )
+   
+   Loads a table that has been saved via the table.save function
+   
+   on success: returns a previously saved table
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   
+   chillcode, http://lua-users.org/wiki/SaveTableToFile
+   Licensed under the same terms as Lua itself.
+]]--
+do
+   -- declare local variables
+   --// exportstring( string )
+   --// returns a "Lua" portable version of the string
+   local function exportstring( s )
+      s = string.format( "%q",s )
+      -- to replace
+      s = string.gsub( s,"\\\n","\\n" )
+      s = string.gsub( s,"\r","\\r" )
+      s = string.gsub( s,string.char(26),"\"..string.char(26)..\"" )
+      return s
+   end
+--// The Save Function
+function table.save(  tbl,filename )
+   local charS,charE = "   ","\n"
+   local file,err
+   -- create a pseudo file that writes to a string and return the string
+   if not filename then
+      file =  { write = function( self,newstr ) self.str = self.str..newstr end, str = "" }
+      charS,charE = "",""
+   -- write table to tmpfile
+   elseif filename == true or filename == 1 then
+      charS,charE,file = "","",io.tmpfile()
+   -- write table to file
+   -- use io.open here rather than io.output, since in windows when clicking on a file opened with io.output will create an error
+   else
+      file,err = io.open( filename, "w" )
+      if err then return _,err end
+   end
+   -- initiate variables for save procedure
+   local tables,lookup = { tbl },{ [tbl] = 1 }
+   file:write( "return {"..charE )
+   for idx,t in ipairs( tables ) do
+      if filename and filename ~= true and filename ~= 1 then
+         file:write( "-- Table: {"..idx.."}"..charE )
+      end
+      file:write( "{"..charE )
+      local thandled = {}
+      for i,v in ipairs( t ) do
+         thandled[i] = true
+         -- escape functions and userdata
+         if type( v ) ~= "userdata" then
+            -- only handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables, v )
+                  lookup[v] = #tables
+               end
+               file:write( charS.."{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( charS.."loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write(  charS..value..","..charE )
+            end
+         end
+      end
+      for i,v in pairs( t ) do
+         -- escape functions and userdata
+         if (not thandled[i]) and type( v ) ~= "userdata" then
+            -- handle index
+            if type( i ) == "table" then
+               if not lookup[i] then
+                  table.insert( tables,i )
+                  lookup[i] = #tables
+               end
+               file:write( charS.."[{"..lookup[i].."}]=" )
+            else
+               local index = ( type( i ) == "string" and "["..exportstring( i ).."]" ) or string.format( "[%d]",i )
+               file:write( charS..index.."=" )
+            end
+            -- handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables,v )
+                  lookup[v] = #tables
+               end
+               file:write( "{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( "loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write( value..","..charE )
+            end
+         end
+      end
+      file:write( "},"..charE )
+   end
+   file:write( "}" )
+   -- Return Values
+   -- return stringtable from string
+   if not filename then
+      -- set marker for stringtable
+      return file.str.."--|"
+   -- return stringttable from file
+   elseif filename == true or filename == 1 then
+      file:seek ( "set" )
+      -- no need to close file, it gets closed and removed automatically
+      -- set marker for stringtable
+      return file:read( "*a" ).."--|"
+   -- close file and return 1
+   else
+      file:close()
+      return 1
+   end
+end
+
+--// The Load Function
+function table.load( sfile )
+   -- catch marker for stringtable
+   if string.sub( sfile,-3,-1 ) == "--|" then
+      tables,err = loadstring( sfile )
+   else
+      tables,err = loadfile( sfile )
+   end
+   if err then return _,err
+   end
+   tables = tables()
+   for idx = 1,#tables do
+      local tolinkv,tolinki = {},{}
+      for i,v in pairs( tables[idx] ) do
+         if type( v ) == "table" and tables[v[1]] then
+            table.insert( tolinkv,{ i,tables[v[1]] } )
+         end
+         if type( i ) == "table" and tables[i[1]] then
+            table.insert( tolinki,{ i,tables[i[1]] } )
+         end
+      end
+      -- link values, first due to possible changes of indices
+      for _,v in ipairs( tolinkv ) do
+         tables[idx][v[1]] = v[2]
+      end
+      -- link indices
+      for _,v in ipairs( tolinki ) do
+         tables[idx][v[2]],tables[idx][v[1]] =  tables[idx][v[1]],nil
+      end
+   end
+   return tables[1]
+end
+-- close do
+end
+-------------------------------------------------------------- End Table Load Save
+-- Function dumptable
+-- Debug Dump Table to Output Pane
+-- params tbl
+function dumptable(tbl)
+    for i,d in pairs(tbl) do
+        print(i,d)
+    end
+end
+------------------------------------------------ Save String To File
+function savestringtofile(str,filename)
+    local file = assert(io.open(filename,'w'))
+    file:write(str)
+    file:close()
+end
+------------------------------------------------ Add Fact to List
+function addFact(ptrEvent, strFact)
+    local dtDate = fhNewDate()
+    local datePtr = fhNewItemPtr()
+    datePtr:MoveTo(ptrEvent,'~.DATE')
+    if datePtr:IsNotNull() then
+        dtDate = fhGetValueAsDate(datePtr)
+    else
+        dtDate:SetSimpleDate(fhCallBuiltInFunction('Today'))
+    end
+    strPlace = fhGetItemText(ptrEvent,'~.PLAC')
+	if strFact == nil then
+	strFact = fhGetDisplayText(ptrEvent)
+	end
+    if strPlace ~= nil and strPlace ~= '' then
+        tblPlaces[strPlace] = (tblPlaces[strPlace] or 0) + 1
+    end
+    table.insert(tblEvents,{strFact,dtDate:Clone(),strPlace})
+end
+-------------------------------------------------------------------- Sort Event Table by Date
+function simpleSort2dDate(tbl,index)
+table.sort(tbl,function(a, b) return a[index]:Compare(b[index]) == -1 end)
+end
+-------------------------------------------------------------------- Select Directory
+function getOutPutDir()
+    local dir = fhGetContextInfo('CI_PROJECT_PUBLIC_FOLDER')
+    filedlg = iup.filedlg{dialogtype = "DIR", title = "Please select destination directory", DIRECTORY=dir}
+    
+    -- Shows file dialog in the center of the screen
+    filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+    
+    -- Gets file dialog status
+    status = filedlg.status
+    if status == "-1" then
+        iup.Message("IupFileDlg","Operation canceled")
+        return nil
+    end
+    return filedlg.value
+end
+------------------------------------------------------------------- Main Code
+settingsFile = fhGetPluginDataFileName()
+settingsFile = string.gsub(fhGetPluginDataFileName( ),'Map Life Events\.dat$','Map Geo Code Maintenance\.dat')
+
+tblPlaceOverride =table.load(settingsFile)
+if tblPlaceOverride == nil then
+    tblPlaceOverride = {}
+    table.save(tblPlaceOverride,settingsFile)
+end
+iAction = iup.Alarm('Select Mapping Action','Please Select your option from the items below:',
+'Quick View Current Record',
+'Select Records and Create Pages for All')
+if iAction == 2 then
+    outputDir = getOutPutDir()
+    if outputDir == nil then
+        return
+    end
+    ptrList = fhPromptUserForRecordSel('INDI')
+    if ptrList == nil then
+        return
+    end
+end
+if iAction == 1 then
+    ptrList = fhGetCurrentRecordSel('INDI')
+    if #ptrList >= 1 then
+        ptrIndi = ptrList[1]:Clone()
+        ptrList = {ptrIndi}
+    else
+        fhMessageBox('Please select a record before running this Plugin')
+        return
+    end
+end
+if iAction == 0 then
+	return
+end
+tblPlaceOverride =table.load(settingsFile)
+if tblPlaceOverride == nil then
+    tblPlaceOverride = {}
+end
+
+local ptrEvent = fhNewItemPtr()
+local ptrFam = fhNewItemPtr()
+local ptrChild = fhNewItemPtr()
+---------------------------------------------------------- Loop all selected Records
+for i,ptrIndi in pairs(ptrList) do
+    tblPlaces = {}
+    tblEvents = {}
+----------------------------------------------------------  Individual Events
+    ptrEvent:MoveToFirstChildItem(ptrIndi)
+    while ptrEvent:IsNotNull() do
+        if  fhIsFact(ptrEvent) then
+            addFact(ptrEvent)
+        end
+        ptrEvent:MoveNext('ANY')
+    end
+    --------------------------------------------------------- Family Events
+    i = 1
+    ptrFam:MoveTo(ptrIndi,'~.FAMS['..i..']>')
+    while ptrFam:IsNotNull() do
+        --- Process Family Events
+        ptrEvent:MoveToFirstChildItem(ptrFam)
+        while ptrEvent:IsNotNull() do
+            if  fhIsFact(ptrEvent) then
+                addFact(ptrEvent,'with '..fhGetItemText(ptrIndi,'~.~SPOU['..i..']>NAME') ..':<br /> '..fhGetDisplayText(ptrEvent))
+            end
+            ptrEvent:MoveNext('ANY')
+        end
+        --- Process Child Births
+        c = 1
+        ptrChild:MoveTo(ptrFam,'~.CHIL['..c..']>')
+        while ptrChild:IsNotNull() do
+            ptrEvent:MoveTo(ptrChild,'~.BIRT')
+            if  fhIsFact(ptrEvent) then
+                addFact(ptrEvent,'Child:'..fhGetItemText(ptrChild,'~.NAME') ..':<br />'..fhGetDisplayText(ptrEvent))
+            end
+            c= c + 1
+            ptrChild:MoveTo(ptrFam,'~.CHIL['..c..']>')
+        end
+        i = i + 1
+        ptrFam:MoveTo(ptrIndi,'~.FAMS['..i..']>')
+    end
+    ------------------------------------ Build Place List javascript
+    strPlaces = ''
+    mainPoint = ''
+    max = 0
+    imark =0
+    iDelay = 0
+    tblMark = {}
+    for i,count in pairs(tblPlaces) do
+		  strLat = 0
+			strLong = 0	
+        if tblPlaceOverride[i] ~= nil then
+			  strLat = tblPlaceOverride[i]['lat']
+			  strLong = tblPlaceOverride[i]['long']
+			  if strLat == '' then strLat = 0 end
+			  if strLong == '' then strLong = 0 end			
+            strLoc = tblPlaceOverride[i]['modern']
+			  if tblPlaceOverride[i]['long'] ~= '' then
+				-- Longitude and Latitude in use
+			     strPlaces = strPlaces..'AddLongLat('..tblPlaceOverride[i]['lat']..','..tblPlaceOverride[i]['long']..',"'..i..' '..count..' Events",'..imark..');\n'      
+            else
+               iDelay = iDelay + 750
+           strPlaces = strPlaces..'AddAddress("'..strLoc..'","'..i..' '..count..' Events",'..imark..','..iDelay..');\n'
+             end	
+        else
+
+            strLoc = i
+               iDelay = iDelay + 750
+            strPlaces = strPlaces..'AddAddress("'..strLoc..'","'..i..' '..count..' Events",'..imark..','..iDelay..');\n'
+        end
+        -- Track the places marker ID
+        tblMark[i] = imark
+		 print( strLoc, imark)
+        imark = imark + 1
+        if max < count then
+            max = count
+            mainPoint = '"'..strLoc..'","'..strLoc..' '..count..' Events",'..strLat..','..strLong
+        end
+    end
+    ------------------------------------- Close off Loading message
+    strPlaces = strPlaces..'hideloading('..iDelay..');\n'
+
+    ------------------------------------ Build Event List for Html
+    strEvents = ''
+    simpleSort2dDate(tblEvents,2)
+    for i,event in pairs(tblEvents) do
+		  strPlace = event[3]
+		  if strPlace ~= nil and strPlace ~= '' then
+            imark = tblMark[strPlace]
+			  strEvents = strEvents..'<li><a href="#" onclick="pantomarker('..imark..')">'..event[1]..'</a></li>\n'
+        else 
+           strEvents = strEvents..'<li>'..event[1]..'</li>\n'
+        end
+    end
+    ----------------------------------- Output Web Page
+    if max > 0 then
+        htmlPage = htmlMasterPage
+        htmlPage = htmlPage:gsub('{name}',fhGetDisplayText(ptrIndi))
+        htmlPage = htmlPage:gsub('{factlist}',strEvents)
+        htmlPage = htmlPage:gsub('{mappoints}',strPlaces)
+        htmlPage = htmlPage:gsub('{mainpoint}',mainPoint)
+        if outputDir == nil then
+            -- Create Temp Filename
+					filename = os.getenv('TEMP')..os.tmpname()..'.html' 
+        else
+            filename = outputDir..'\\mapI'..fhGetRecordId(ptrIndi)..'.html'
+        end
+        
+        savestringtofile(htmlPage,filename)
+        if #ptrList == 1 then
+            bOK, iErrorCode, strErrorText = fhShellExecute(filename)
+            if not(bOK) then
+                fhMessageBox(strErrorText..' ('..iErrorCode..')')
+            end
+        end
+    else
+        fhMessageBox('No Events with Places found for '..fhGetDisplayText(ptrIndi)..' No Map Created')
+    end
+end
+if #ptrList > 1 then
+   bOK, iErrorCode, strErrorText = fhShellExecute(outputDir)
+   if not(bOK) then
+      fhMessageBox(strErrorText..' ('..iErrorCode..')')
+   end
+end

@@ -1,0 +1,18 @@
+-- load needed modules
+local ftp = require("socket.ftp")
+local ltn12 = require("ltn12")
+local url = require("socket.url")
+local t = {}
+_,e = ftp.get( {
+  host = 'www.rjt.org.uk',
+  sink = ltn12.sink.table(t),
+  path = '/',
+  user = 'ftptest@rjt.org.uk',
+  password = 'EyX?z8C@*OgQ',
+  command = 'NLST',
+  type = 'a'
+} )
+print(e)
+for i,l in pairs(t) do
+print(l)
+end

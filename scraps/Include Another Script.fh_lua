@@ -1,0 +1,2 @@
+scriptdir = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\plugins\\'
+dofile(scriptdir.."Hello World.fh_lua")

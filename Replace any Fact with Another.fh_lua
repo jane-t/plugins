@@ -1,0 +1,58 @@
+--[[
+@Title: Exchange one Fact 
+@Author: Calico Pie 
+@LastUpdated: June 2011
+@Description: Exchanges one Fact (including level 1 UDF facts) for another Fact
+]]
+---------------------------------------
+-- Function: CopyChildBranch
+---------------------------------------
+function CopyChildBranch(ptrSrc, ptrTargParent)
+    local ptrNew = fhCreateItem(fhGetTag(ptrSrc), ptrTargParent)    
+    fhSetValue_Copy(ptrNew, ptrSrc)         
+    CopyChildren_FromTo(ptrSrc, ptrNew)
+    end
+
+---------------------------------------
+-- Function: CreateCopyChildren_FromTo
+---------------------------------------
+function CopyChildren_FromTo(ptrFrom, ptrTo)
+    local ptrF = fhNewItemPtr()
+    ptrF:Copy(ptrFrom)
+    ptrF:MoveToChildItem()
+    while not ptrF:IsNull() do
+        CopyChildBranch(ptrF, ptrTo)
+        ptrF:MoveNext()
+        end
+    end
+---------------------------------------
+-- main body of script starts here
+---------------------------------------
+
+ptrInd = fhNewItemPtr()
+ptrFind = fhNewItemPtr()
+
+-- Item to Search For (in this example it must be a level 1 item (eg a Fact)
+    sFind = "_HEIG"
+
+-- WARNING the Tag must exist as a valid item in a Fact Set
+--         the Query Data Reference window can be used to check the value for this item.
+    sReplace = "_ATTR-HEIGHT"
+
+	iCount = 0
+    while not ptrInd:IsNull() do
+        ptrFind:MoveTo(sFind, ptrInd)
+        while not ptrFind:IsNull() do
+            ptrReplace = fhCreateItem(sReplace, ptrInd)           
+			CopyChildren_FromTo(ptrFind, ptrReplace)
+           	iCount = iCount + 1
+           	fhDeleteItem(ptrFind)
+ 	       ptrFind:MoveTo(sFind, ptrInd)
+		end
+        ptrInd:MoveNext()
+        end
+    fhMessageBox("Finished.  " .. iCount .. " item(s) found and converted")
+
+
+
+

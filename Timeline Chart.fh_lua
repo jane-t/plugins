@@ -1,0 +1,396 @@
+--[[
+@Title: Timeline Chart
+@Author: Jane Taubman
+@LastUpdated: April 2012
+@Version: 1.4
+@Description: 
+Creates a web page containing a timeline to display the events of persons life. 
+Can either create a temporary page to see the currently selected person, or can select a group of people and create a whole set of pages for use on a web site.
+Uses SIMILE Widgets to display the time line.
+V1.4 Use HTA files for the quick view to avoid IE and Chrome issues
+V1.3 Fix issue with year only births, better support for extended character sets.
+V1.2 Use 2.3.1 SIMILE Widgets
+V1.1 Fix issue with multiple Families with Parents Deaths
+]]
+------------------------------------------------------------------- Main Code
+function main()
+    settingsFile = fhGetPluginDataFileName()
+    iAction = iup.Alarm('Select Timeline Action','Please Select your option from the items below:',
+    'Quick View Current Record',
+    'Select Records and Create Pages for All')
+    if iAction == 2 then
+        outputDir = getOutPutDir()
+        if outputDir == nil then
+            return
+        end
+        ptrList = fhPromptUserForRecordSel('INDI')
+        if ptrList == nil then
+            return
+        end
+    end
+    if iAction == 1 then
+        ptrList = fhGetCurrentRecordSel('INDI')
+        if #ptrList >= 1 then
+            ptrIndi = ptrList[1]:Clone()
+            ptrList = {ptrIndi}
+        else
+            fhMessageBox('Please select a record before running this Plugin')
+            return
+        end
+    end
+    if iAction == 0 then
+        return
+    end
+    local ptrEvent = fhNewItemPtr()
+    local ptrFam = fhNewItemPtr()
+    local ptrChild = fhNewItemPtr()
+    local ptrDate = fhNewItemPtr()
+    ---------------------------------------------------------- Loop all selected Records
+    for i,ptrIndi in pairs(ptrList) do
+        tblPlaces = {}
+        tblEvents = {}
+        strEndLabel = 'Death'
+        birthdate = fhCallBuiltInFunction('EstimatedBirthDate',ptrIndi, 'EARLIEST')
+        deathdate = fhCallBuiltInFunction('EstimatedDeathDate',ptrIndi, 'LATEST')
+        if deathdate:IsNull() then
+            deathdate = fhCallBuiltInFunction('Today')
+            strEndLabel = 'Today'
+        end
+        xmlBirth = buildDate(birthdate)
+        xmlDeath = buildDate(deathdate)
+        ---------------------------------------------------------- Individual Events
+        ptrEvent:MoveToFirstChildItem(ptrIndi)
+        while ptrEvent:IsNotNull() do
+            if fhIsFact(ptrEvent) then
+                addFact(ptrEvent)
+            end
+            ptrEvent:MoveNext('ANY')
+        end
+        --------------------------------------------------------- Family Events
+        i = 1
+        ptrFam:MoveTo(ptrIndi,'~.FAMS['..i..']>')
+        while ptrFam:IsNotNull() do
+            --- Process Family Events
+            ptrEvent:MoveToFirstChildItem(ptrFam)
+            while ptrEvent:IsNotNull() do
+                if fhIsFact(ptrEvent) then
+                    addFact(ptrEvent,'with '..fhGetItemText(ptrIndi,'~.~SPOU['..i..']>NAME') ..': '..fhGetDisplayText(ptrEvent))
+                end
+                ptrEvent:MoveNext('ANY')
+            end
+            --- Process Child Births
+            c = 1
+            ptrChild:MoveTo(ptrFam,'~.CHIL['..c..']>')
+            while ptrChild:IsNotNull() do
+                ptrEvent:MoveTo(ptrChild,'~.BIRT')
+                if fhIsFact(ptrEvent) then
+                    addFact(ptrEvent,'Child: '..fhGetItemText(ptrChild,'~.NAME') ..' '..fhGetDisplayText(ptrEvent))
+                end
+                -- Death of Child before Parent
+                ptrEvent:MoveTo(ptrChild,'~.DEAT')
+                if fhIsFact(ptrEvent) then
+                    ptrDate:MoveTo(ptrEvent,'~.DATE')
+                    ChildDeath = fhGetValueAsDate(ptrDate)
+                    if deathdate:Compare(ChildDeath:GetDatePt1()) > 0 then
+                        addFact(ptrEvent,'Child: '..fhGetItemText(ptrChild,'~.NAME') ..' '..fhGetDisplayText(ptrEvent))
+                    end
+                end
+                c= c + 1
+                ptrChild:MoveTo(ptrFam,'~.CHIL['..c..']>')
+            end
+            i = i + 1
+            ptrFam:MoveTo(ptrIndi,'~.FAMS['..i..']>')
+        end
+        -- Get Parents Deaths
+        i = 1
+        ptrFam:MoveTo(ptrIndi,'~.FAMC['..i..']>')
+        while ptrFam:IsNotNull() do
+            ptrParent = fhGetItemPtr(ptrFam,'~.HUSB>')
+            ptrEvent:MoveTo(ptrParent,'~.DEAT')
+            if fhIsFact(ptrEvent) then
+                addFact(ptrEvent,'Father:'..fhGetItemText(ptrParent,'~.NAME') ..': '..fhGetDisplayText(ptrEvent))
+            end
+            ptrParent = fhGetItemPtr(ptrFam,'~.WIFE>')
+            ptrEvent:MoveTo(ptrParent,'~.DEAT')
+            if fhIsFact(ptrEvent) then
+                addFact(ptrEvent,'Mother:'..fhGetItemText(ptrParent,'~.NAME') ..': '..fhGetDisplayText(ptrEvent))
+            end
+            i = i + 1
+            ptrFam:MoveTo(ptrIndi,'~.FAMC['..i..']>')
+        end
+        strEndLabel = 'Death'
+        birthdate = fhCallBuiltInFunction('EstimatedBirthDate',ptrIndi, 'EARLIEST')
+        deathdate = fhCallBuiltInFunction('EstimatedDeathDate',ptrIndi, 'LATEST')
+        if deathdate:IsNull() then
+            deathdate = fhCallBuiltInFunction('Today')
+            strEndLabel = 'Today'
+        end
+        xmlBirth = buildDate(birthdate,'min')
+        xmlDeath = buildDate(deathdate,'max')
+        ------------------------------------ Build Time Line XML for Html
+        strEvents = ''
+        xmlData = '<data>\n'
+        simpleSort2dDate(tblEvents,2)
+        for i,event in pairs(tblEvents) do
+            strEvents = strEvents..'<li>'..event[1]..'</li>\n'
+            xmlLine = strEventTemplate
+            if not(event[2]:IsNull()) then
+                startDate = event[2]:GetDatePt1()
+                endDate = event[2]:GetDatePt2()
+                xmlStart = buildDate(startDate)
+                xmlLine = xmlLine:gsub('{start}',xmlStart)
+                if endDate:IsNull() then
+                    xmlLine = xmlLine:gsub('end="{end}"',' ')
+                else
+                    xmlEnd = buildDate(endDate)
+                    xmlLine = xmlLine:gsub('{end}',xmlEnd)
+                end
+                xmlLine = xmlLine:gsub('{note}',StrHTML_Encode(event[4]))
+                xmlLine = xmlLine:gsub('{title}',StrHTML_Encode(event[1]))
+                xmlData = xmlData..xmlLine
+            end
+        end
+        xmlData = xmlData..'</data>'
+        ----------------------------------- Output Web Page and XML file
+        if #tblEvents > 0 then
+            htmlPage = htmlMasterPage
+            htmlPage = htmlPage:gsub('{name}',fhGetDisplayText(ptrIndi))
+            htmlPage = htmlPage:gsub('{ref}',fhGetRecordId(ptrIndi))
+            htmlPage = htmlPage:gsub('{title}','The life of '..fhGetDisplayText(ptrIndi))
+            htmlPage = htmlPage:gsub('{startdate}',xmlBirth)
+            htmlPage = htmlPage:gsub('{birthyear}',birthdate:GetYear())
+            htmlPage = htmlPage:gsub('{enddate}',xmlDeath)
+            htmlPage = htmlPage:gsub('{endlabel}',strEndLabel)
+            if outputDir == nil then
+                -- Create Temp Filename
+                filename = os.getenv('TEMP')..'\\timeline.hta'
+                xmlfile = os.getenv('TEMP')..'\\timeline.xml'
+                xmlshort = 'timeline.xml'
+            else
+                filename = outputDir..'\\timeI'..fhGetRecordId(ptrIndi)..'.html'
+                xmlfile = outputDir..'\\timeI'..fhGetRecordId(ptrIndi)..'.xml'
+                xmlshort = 'timeI'..fhGetRecordId(ptrIndi)..'.xml'
+            end
+            htmlPage = htmlPage:gsub('{xmlfilename}',xmlshort)
+            savestringtofile(htmlPage,filename)
+            savestringtofile(xmlData,xmlfile)
+            if #ptrList == 1 then
+                bOK, iErrorCode, strErrorText = fhShellExecute(filename)
+                if not(bOK) then
+                    fhMessageBox(strErrorText..' ('..iErrorCode..')')
+                end
+            end
+        else
+            fhMessageBox('No Events with Places found for '..fhGetDisplayText(ptrIndi)..' No Map Created')
+        end
+    end
+    if #ptrList > 1 then
+        bOK, iErrorCode, strErrorText = fhShellExecute(outputDir)
+        if not(bOK) then
+            fhMessageBox(strErrorText..' ('..iErrorCode..')')
+        end
+    end
+end
+------------------------------------------------------------- Functions
+-- Function dumptable
+-- Debug Dump Table to Output Pane
+-- params tbl
+function dumptable(tbl)
+    for i,d in pairs(tbl) do
+        print(i,d)
+    end
+end
+
+-- Encode HTML symbols into &...; escape sequences --
+function StrHTML_Encode(strHTML)
+    -- "\n" newline is encoded as "<br>" tag, which must be unencoded from "&lt;br&gt;" to "<br>"
+    local tblEncodings = {
+            {"\n","<br>"}, {"%c"," "}, {"&","&amp;"}, {"<","&lt;"}, {">","&gt;"}, {"\'","&apos;"},{"\"","&quot;"},
+            {"€","&euro;"}, {"™","&#8482;"},{"¢","&cent;"}, {"¤","&curren;"},{"¥","&yen;"}, {"&lt;br&gt;","<br>"},
+                {"["..string.char(127).."-"..string.char(255).."]",function(char) return "&#"..string.byte(char)..";" end},
+            }
+            if strHTML then
+                for i, tblEncode in ipairs(tblEncodings) do
+                    strHTML = strHTML:gsub(tblEncode[1],tblEncode[2])
+                end
+            else
+                strHTML = ""
+            end
+            return strHTML
+        end -- function StrHTML_Encode
+        ------------------------------------------------ Save String To File
+        function savestringtofile(str,filename)
+            local file = assert(io.open(filename,'w'))
+            file:write(str)
+            file:close()
+        end
+        ------------------------------------------------ Add Fact to List
+        function addFact(ptrEvent, strFact)
+            local dtDate = fhNewDate()
+            local datePtr = fhNewItemPtr()
+            datePtr:MoveTo(ptrEvent,'~.DATE')
+            if datePtr:IsNotNull() then
+                dtDate = fhGetValueAsDate(datePtr)
+            else
+                dtDate:SetSimpleDate(fhCallBuiltInFunction('Today'))
+            end
+            strPlace = fhGetItemText(ptrEvent,'~.PLAC')
+            if strFact == nil then
+                strFact = (fhGetDisplayText(ptrEvent))
+            end
+            local strNote = (fhGetItemText(ptrEvent,'~.NOTE2'))
+            if strNote == nil then
+                strNote = ' '
+            end
+            table.insert(tblEvents,{strFact,dtDate:Clone(),strPlace,strNote})
+        end
+        -------------------------------------------------------------------- Sort Event Table by Date
+        function simpleSort2dDate(tbl,index)
+            table.sort(tbl,function(a, b) return a[index]:Compare(b[index]) == -1 end)
+        end
+        -------------------------------------------------------------------- Select Directory
+        function getOutPutDir()
+            local dir = fhGetContextInfo('CI_PROJECT_PUBLIC_FOLDER')
+            filedlg = iup.filedlg{dialogtype = "DIR", title = "Please select destination directory", DIRECTORY=dir}
+            
+            -- Shows file dialog in the center of the screen
+            filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+            
+            -- Gets file dialog status
+            status = filedlg.status
+            if status == "-1" then
+                iup.Message("Timeline Chart","Cancelled")
+                return nil
+            end
+            return filedlg.value
+        end
+        ----------------------------------------------------------- Build Date
+        function buildDate(datept,type)
+            if type == nil then
+                type = 'min'
+            end
+            local strDate = ''
+            tblMonthName = {'Jan','Feb','Mar','Apr','May','June','Jul','Aug','Sep','Oct','Nov','Dec'}
+            local iMonth = datept:GetMonth()
+            local iDay = datept:GetDay()
+            local iYear = datept:GetYear()
+            if iMonth == 0 then
+                if type == 'min' then
+                    iMonth = 1
+                else
+                    iMonth = 12
+                end
+            end
+            if iDay == 0 then
+                if type == 'min' then
+                    iDay = 1
+                else
+                    iDay = 28
+                end
+            end
+            if iMonth > 0 and iDay > 0 then
+                strDate = strDate..tblMonthName[iMonth]
+                if iDay > 0 then
+                    strDate = strDate..' '..iDay
+                end
+                strDate = strDate..' '..iYear
+            else
+                strDate = iYear
+            end
+            return strDate
+        end
+        ------------------------------------------------ Templates
+htmlMasterPage = [[
+<html>
+<!-- Replacement fields
+ref   : Record reference
+title : page title
+startdate : start date for timeline birth
+enddate : end date for timeline     death
+endlabel : Death unless person living
+-->
+<head>
+    <title>{title}</title>
+    <link rel='stylesheet' href='../styles.css' type='text/css' />
+<script src="http://static.simile.mit.edu/timeline/api-2.3.1/timeline-api.js?bundle=true" type="text/javascript"></script>
+    <script>
+        var tl;
+        function onLoad() {
+            var eventSource = new Timeline.DefaultEventSource(0);
+            
+            var theme = Timeline.ClassicTheme.create();
+            theme.event.bubble.width = 320;
+            theme.event.bubble.height = 220;
+            theme.ether.backgroundColors[1] = theme.ether.backgroundColors[0];
+            var d = Timeline.DateTime.parseGregorianDateTime("{birthyear}")
+            var bandInfos = [
+                Timeline.createBandInfo({
+                    width:          "10%", 
+                    intervalUnit:   Timeline.DateTime.DECADE, 
+                    intervalPixels: 200,
+                    date:           d,
+                    showEventText:  false,
+                    theme:          theme
+                }),
+                Timeline.createBandInfo({
+                    width:          "90%", 
+                    intervalUnit:   Timeline.DateTime.DECADE, 
+                    intervalPixels: 200,
+                    eventSource:    eventSource,
+                    date:           d,
+                    theme:          theme
+                })
+            ];
+            bandInfos[0].etherPainter = new Timeline.YearCountEtherPainter({
+                startDate:  "{startdate} 00:00:00 GMT",
+                multiple:   5,
+                theme:      theme
+            });
+            bandInfos[0].syncWith = 1;
+            bandInfos[0].highlight = false;
+            bandInfos[0].decorators = [
+                new Timeline.SpanHighlightDecorator({
+                    startDate:  "{startdate} 00:00:00 GMT",
+                    endDate:    "{enddate} 00:00:00 GMT",
+                    startLabel: "Born",
+                    endLabel:   "{endlabel}",
+                    color:      "#FFC080",
+                    opacity:    50,
+                    theme:      theme
+                })
+            ];
+            
+            tl = Timeline.create(document.getElementById("tl"), bandInfos, Timeline.HORIZONTAL);
+            tl.loadXML("{xmlfilename}", function(xml, url) {
+                eventSource.loadXML(xml, url);
+            });
+        }
+        var resizeTimerID = null;
+        function onResize() {
+            if (resizeTimerID == null) {
+                resizeTimerID = window.setTimeout(function() {
+                    resizeTimerID = null;
+                    tl.layout();
+                }, 500);
+            }
+        }
+    </script>
+</head>
+<body onload="onLoad();" onresize="onResize();">
+<div id="body">
+    <h1>The Life of {name}</h1>
+    <div id="tl" class="timeline-default" style="height: 500px;">
+    </div>
+</div>
+<div class="footer">
+    <p>Timeline version <span id='tl_ver'></span>.
+<script>Timeline.writeVersion('tl_ver')</script>   </p>
+</div>
+</body>
+</html>
+        ]]
+strEventTemplate = '<event start="{start}" end="{end}" title="{title}">{note}</event>\n'
+-------------------------------------------------------------- MonthNames
+tblMonthName = {'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'}
+--------------------------------------------------- Call Main Function
+main()

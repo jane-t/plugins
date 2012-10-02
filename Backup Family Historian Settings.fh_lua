@@ -1,0 +1,185 @@
+--[[
+@Title: Backup Family Historian Settings
+@Author: Jane Taubman
+@LastUpdated: May 2012
+@Version: 1.3
+@Description: Creates a Backup of the Family Historian Settings to a backup location of your choice.
+@changes:
+1.1 Changed to use the Lua Path to find the FH Program Data folder so it works with XP.
+1.1 Changed to simply return when No is selected on the first prompt.
+1.2 Use the fhGetContextInfo("CI_APP_DATA_FOLDER") now it's been reinstated.
+1.3 Don't save preferences when in Standalone Gedcom mode.
+]]
+require "iuplua"   -- For directory dialog
+require "lfs"      -- To access the directory structure
+------------------------------------------------
+-- dirtree
+-- Returns a directory tree.
+------------------------------------------------
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    
+    local function yieldtree(dir)
+    for entry in lfs.dir(dir) do
+        if entry ~= "." and entry ~= ".." then
+            entry=dir.."\\"..entry
+            local attr=lfs.attributes(entry)
+            coroutine.yield(entry,attr)
+            if attr.mode == "directory" then
+                yieldtree(entry)
+            end
+        end
+    end
+end
+
+return coroutine.wrap(function() yieldtree(dir) end)
+end
+------------------------------------------------
+-- file_exists
+-- Checks if a file exists
+------------------------------------------------
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+------------------------------------------------
+-- CopyFile
+-- Copies a file
+-- @requires file_exists() function
+-- @requires "LFS" module
+-- @Parms strfromfile File to copy from
+-- @Parms strtofile   File to copy to
+-- @Parms bReplace    Boolean for existing to files true=replace file, false=skip  
+------------------------------------------------
+function CopyFile(strfromfile,strtofile,bReplace)
+    if not(bReplace) then
+        if file_exists(strtofile) then
+            return false
+        end
+    end
+    local inp = assert(io.open(strfromfile, "rb"))
+    local out = assert(io.open(strtofile, "wb"))
+    
+    local data = inp:read("*all")
+    out:write(data)
+    assert(inp:close())
+    assert(out:close())
+    -- Copy the last modification date and access date from the original.
+    local attr = lfs.attributes(strfromfile)
+    lfs.touch(strtofile,attr['modification'],attr['access'])
+    return true
+end
+------------------------------------------------
+-- DupDir
+-- Makes a Directory and copies the modification date
+-- @requires "LFS" module
+------------------------------------------------
+function DupDir(strfromDir,strtoDir)
+	local attr = lfs.attributes(strtoDir)
+	if attr == nil then -- Directory does not exist
+		lfs.mkdir(strtoDir)
+	end
+end
+------------------------------------------------
+-- StartProgressBar
+-- Progress Bar for long running Plugin.
+------------------------------------------------
+function StartProgressBar(strTitle)
+    cancelbutton = iup.button {
+    title = "Cancel",
+    size = "120x30",
+    action=function()
+    cancelflag = true
+    return iup.CLOSE
+end
+}
+gaugeProgress = iup.progressbar{ expand="HORIZONTAL" }
+dlgProgress = iup.dialog{
+title = strTitle,
+dialogframe = "YES", border = "YES",
+iup.vbox {
+gaugeProgress,
+cancelbutton;
+alignment = "ACENTER",gap=20
+}
+}
+dlgProgress.size = "QUARTERxEIGHTH"
+dlgProgress.menubox = "NO"  --  Remove Windows close button and menu.
+dlgProgress.close_cb = cancelbutton.action
+dlgProgress:showxy(iup.CENTER, iup.CENTER)  --  Put up Progress Display
+end
+
+----------------------------------------------------------------------------------
+-- Main Code Starts Here
+----------------------------------------------------------------------------------
+-- Subfolders to copy as of Version 5
+tblSubfolders = {
+'Diagrams',
+'Fact Types',
+'Icons',
+'Plugins',
+'Property Box',
+'Queries',
+'Reports',
+'Text Schemes'
+}
+-- Base Folder for Family Historian in Application Data
+strAppDataFolder = fhGetContextInfo("CI_APP_DATA_FOLDER")..'\\'
+-- Get Parms
+parmFile = fhGetPluginDataFileName()
+loadSettings,err = loadfile(parmFile)
+if loadSettings == nil then
+	strDir = ''
+else
+loadSettings()
+end
+
+-- Creates a file dialog and sets its type, title, filter and filter info
+filedlg = iup.filedlg{dialogtype = "DIR", title = "Export Custom items to Directory", directory = strDir}
+
+-- Shows file dialog in the center of the screen
+filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+
+-- Gets file dialog status
+status = filedlg.status
+
+if status == "0"  then
+	-- Save Settings
+	if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
+	 local out = assert(io.open(parmFile, "w"))
+    out:write('strDir = "'..filedlg.value:gsub('\\','\\\\')..'"')
+    out:close()	
+ 	end
+    StartProgressBar("File Copy in Progress, copying to "..filedlg.value)
+    strOutPutDir = filedlg.value .. '\\'
+	 count = 0
+    for i,strDir in pairs(tblSubfolders) do
+        strLongDir = strAppDataFolder..strDir
+		 DupDir(strLongDir,strOutPutDir..strDir)
+        gaugeProgress.value = gaugeProgress.value + .125
+        for strOrgItem, attr in dirtree(strLongDir) do
+           -- allow the dialog to process any messages
+	        iup.LoopStep()
+            strNewItem = string.gsub(strOrgItem,strAppDataFolder,strOutPutDir)
+            ipos = string.find(strNewItem,'\\Standard\\') 
+            if ipos == nil then     -- Skip Contents of Standard Directories
+                if attr.mode == 'directory' then
+					 DupDir(strOrgItem,strNewItem)
+                else
+                   if attr.mode == 'file' then
+                       CopyFile(strOrgItem,strNewItem,true)
+							 count = count + 1
+                   end
+               end
+            end
+        end
+    end
+    dlgProgress:destroy()
+	fhMessageBox('Backup Completed '..count..' files copied to '..strOutPutDir)
+end

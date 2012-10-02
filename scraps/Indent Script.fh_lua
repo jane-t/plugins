@@ -1,0 +1,90 @@
+--[[
+@title: Format Lua Script
+@author: Calico Pie (RJT)
+@lastupdated: July 2010
+@description:
+Prompts for a Lua Script and re-indents it with 4 spaces.
+Requires new lines for the keywords to work.
+]]
+-----------------------------
+function trim(s)
+    -------------------------
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+-----------------------------
+function firstword(str)
+    -------------------------
+    local iPos = string.find(str..' ',' ')
+    local strWord = ''
+    if iPos ~= nil then
+        strWord = string.sub(str,1,iPos - 1)
+    end
+    return  strWord
+end
+-----------------------------
+function chkIndent(strWord)
+    -------------------------
+    local tblList = {'function','if','while', 'for', 'elseif', 'else','repeat'}
+    local i
+    local bfound = false
+    for i,strListWord in pairs(tblList) do
+        if strListWord == strWord then
+            bfound = true
+            break
+        end
+    end
+    return bfound
+end
+-----------------------------
+function chkOutdent(strWord)
+    -------------------------
+    local tblList = {'end','next','elseif','else','until'}
+    local i
+    local bfound = false
+    for i,strListWord in pairs(tblList) do
+        if strListWord == strWord then
+            bfound = true
+            break
+        end
+    end
+    return bfound
+end
+-- End Of Functions
+---------------------------------------
+-- main body of script starts here
+---------------------------------------
+iIndent = 0
+iStep = 4
+strAppData = os.getenv('ALLUSERSPROFILE')
+print(strAppData)
+strLuaDir = strAppData..'\\Calico Pie\\Family Historian 5\\Plugins\\*.fh_lua'
+print(strLuaDir)
+f, err = iup.GetFile(strLuaDir)
+if err == 0 then
+    -- Process File
+    print(f)
+    tblOutput = {}
+    for line in io.lines(f) do
+        strNewLine = trim(line)
+        strFirstWord = firstword(strNewLine)
+        if chkOutdent(strFirstWord) then
+            iIndent = iIndent - iStep
+            if iIndent < 0 then
+                iIndent = 0
+            end
+        end
+        strNewLine = string.rep(' ',iIndent)..strNewLine
+        table.insert(tblOutput,strNewLine)
+        if chkIndent(strFirstWord) then
+            iIndent = iIndent + iStep
+        end
+    end
+    -- Output file
+    file = io.open(f,"w")
+    
+    for i, l in ipairs(tblOutput) do
+        file:write(l,'\n')
+    end
+    file:close()
+    fhMessageBox('Script '..f..' reformatted')
+end

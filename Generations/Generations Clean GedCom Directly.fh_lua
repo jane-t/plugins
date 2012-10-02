@@ -1,0 +1,42 @@
+--[[
+@Title: Generations Gedcom - Pre-Load 
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Description: Replace Invalid Events directly in the GEDCOM File
+]]
+
+events = {
+EMAIL='EVEN-EMAIL',
+RACE='NATI',
+BAPT='BAPM',
+ADDR='NOTE Address:',
+PHON='NOTE Phone:',
+FAX='NOTE Fax:'
+}
+attrib = {
+}
+-- strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
+strProjectFile = 'D:\\temp\\gedcom\\Wignall\\WIGNALL Work In Progress.ged'
+strNewFile = strProjectFile:gsub('%.ged',' updated.ged')
+file,err = io.open(strProjectFile,'r')
+data = file:read('*all')
+file:close()
+-- Replace Level 1 Events
+for oldfield,newfield in pairs(events) do
+oldstart = '\n1 '..oldfield
+newstart = '\n1 '..newfield:gsub('-','\n2 TYPE ')
+data = data:gsub(oldstart,newstart)
+end
+-- Attributes
+-- Fix Sources back to originals (in case saved by FH)
+data = data:gsub('\n2 SOUR @@(.-)@@','\n2 SOUR @%1@')
+-- Change TYPE on Sources to _TYPE
+data = data:gsub('SOUR\n1 TYPE','SOUR\n1 _TYPE')
+data = data:gsub('\n3 TEXT','\n3 NOTE')
+-- Sort Out Addresses
+data = data:gsub('\n1 ADDR','\n1 NOTE Address:')
+
+file = io.open(strNewFile,'w')
+file:write(data)
+file:close()
+

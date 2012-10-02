@@ -1,0 +1,14 @@
+olddata = [[<OBJECT type="text/sitemap">%s*<param name="Name" value="(.-)">%s*<param name="Local" value="(.-)">%s*</OBJECT>]]
+newdata = [[<a href="%2">%1</a>]]
+
+dropbox = 'D:\\Work\\Dropbox\\'
+fromFile =  'D:\\Work\\Dropbox\\_Html Help\\fh.hhc'
+toFile =  'D:\\Work\\Dropbox\\_Html Help\\_content.html'
+inp = assert(io.open(fromFile, "rb"))
+data = inp:read("*all")
+inp:close()
+output = data:gsub(olddata,newdata)
+print(output)
+out = assert(io.open(toFile, "wb"))
+out:write(output)
+out:close()

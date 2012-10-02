@@ -1,0 +1,158 @@
+--[[
+@title: List all Unidentified Data Fields
+@author: Calico Pie
+@lastupdated: Sept 2010
+@description:
+Produces a Result Set Containing all the Unidentified Data Fields
+in the Gedcom.  Along with their data references and the Records containing them.
+]]
+--[[
+@function: BuildDR
+@description: Get Data Reference for Tag
+@parameters: Item Pointer
+@returns: Data reference String (excluding index)
+@requires: none
+]] 
+function BuildDR(ptr)
+   local ptrTemp = fhNewItemPtr()
+   ptrTemp:MoveTo(ptr)
+   strDR = fhGetTag(ptrTemp)
+   while fhHasParentItem(ptrTemp) do
+      ptrTemp:MoveToParentItem(ptrTemp)
+      strDR = fhGetTag(ptrTemp)..'.'..strDR
+   end
+   return strDR
+end
+function GetAndDelete(ptr,strTag)
+	local ptrTemp = fhGetItemPtr(ptrItem,'~.'..strTag)
+	if ptrTemp:IsNotNull() then
+		strValue = fhGetValueAsText(ptrTemp)
+		fhDeleteItem(ptrTemp)
+		return strValue
+	else
+		return ' '
+	end
+end
+---------------------------------------
+-- Function: CopyChildBranch
+---------------------------------------
+function CopyChildBranch(ptrSrc, ptrTargParent)
+    local ptrNew = fhCreateItem(fhGetTag(ptrSrc), ptrTargParent)
+    fhSetValue_Copy(ptrNew, ptrSrc)
+    CopyChildren_FromTo(ptrSrc, ptrNew)
+end
+ 
+---------------------------------------
+-- Function: CreateCopyChildren_FromTo
+---------------------------------------
+function CopyChildren_FromTo(ptrFrom, ptrTo)
+    local ptrF = fhNewItemPtr()
+    ptrF = ptrFrom:Clone()
+    ptrF:MoveToFirstChildItem(ptrF)
+    while ptrF:IsNotNull() do
+        CopyChildBranch(ptrF, ptrTo)
+        ptrF:MoveNext()
+    end
+end
+----------------------------
+-- Main Code
+----------------------------
+iCount = fhGetRecordTypeCount() -- Get Count of Record types
+ii = 0
+tblTextClass = {
+text = true,
+longtext = true,
+name = true,
+place = true,
+}
+ptr = fhNewItemPtr()
+ptrItem = fhNewItemPtr()
+ptrRecord = fhNewItemPtr()
+ptrParent = fhNewItemPtr()
+ptrDelete = fhNewItemPtr()
+tblItem = {}
+tblRecord = {}
+tblRecordType = {}
+tblItemTag = {}
+tblItemDataRef = {}
+
+for ii =1,iCount do
+    strType = fhGetRecordTypeTag(ii)
+    ptrItem:MoveToFirstRecord(strType)
+    while ptrItem:IsNotNull() do
+		bFixed = false
+		ptrDelete:SetNull()
+        if fhIsUDF(ptrItem) then
+			ptrParent:MoveToParentItem(ptrItem)
+			print('-'..fhGetTag(ptrItem))
+			if (fhGetTag(ptrItem) == 'CONT') or (fhGetTag(ptrItem) == 'CONC') then
+				-- Append to Parent Item and delete UDF
+
+				print(fhGetValueType(ptrParent)..' '..fhGetDataClass(ptrParent)..' '..tostring(tblTextClass[fhGetDataClass(ptrParent)]))
+				if fhGetValueType(ptrParent) == 'text' and tblTextClass[fhGetDataClass(ptrParent)] == true then
+					print('Do It')
+					if fhGetTag(ptrItem) == 'CONT' then
+							strPad = ''
+					else
+							strPad = ' '
+					end
+					fhSetValueAsText(ptrParent,fhGetValueAsText(ptrParent)..strPad..fhGetValueAsText(ptrParent))
+					ptrDelete = ptrItem:Clone()
+					bFixed = true
+				end
+			end
+			if fhGetTag(ptrItem) == 'ADDR' and fhGetTag(ptrParent) == 'INDI' then
+				-- Convert this to a RESI Event with an ADDRESS
+				strADR1 = GetAndDelete(ptrItem,'ADR1')
+				strCITY = GetAndDelete(ptrItem,'CITY')
+				strSTAE = GetAndDelete(ptrItem,'STAE')
+				strPOST = GetAndDelete(ptrItem,'POST')
+				
+				ptrResi = fhCreateItem('RESI',ptrParent)
+				ptrPlace = fhCreateItem('PLAC',ptrResi)
+				fhSetValueAsText(ptrPlace,strCITY..','..strSTAE)
+				ptrAddr = fhCreateItem('ADDR',ptrResi)
+				fhSetValueAsText(ptrAddr,strADR1..','..strCITY..','..strSTAE..','..strPOST)
+				bFixed = true
+				ptrDelete = ptrItem:Clone()				
+			end
+			if fhGetTag(ptrItem) == '_MEND' and fhGetTag(ptrParent) == 'FAM' then
+				-- Marriage Ending
+				ptrResi = fhCreateItem('',ptrParent)
+				ptrPlace = fhCreateItem('PLAC',ptrResi)
+			end
+			if fhGetTag(ptrItem) == 'ADDR' and fhGetTag(ptrParent) == 'INDI' then
+				-- Convert this to a RESI Event with an ADDRESS
+				strADR1 = GetAndDelete(ptrItem,'ADR1')
+				strCITY = GetAndDelete(ptrItem,'CITY')
+				strSTAE = GetAndDelete(ptrItem,'STAE')
+				strPOST = GetAndDelete(ptrItem,'POST')
+				
+				ptrResi = fhCreateItem('RESI',ptrParent)
+				ptrPlace = fhCreateItem('PLAC',ptrResi)
+				fhSetValueAsText(ptrPlace,strCITY..','..strSTAE)
+				ptrAddr = fhCreateItem('ADDR',ptrResi)
+				fhSetValueAsText(ptrAddr,strADR1..','..strCITY..','..strSTAE..','..strPOST)
+				bFixed = true
+				ptrDelete = ptrItem:Clone()				
+			end
+			if not bFixed then
+	            ptrRecord:MoveToRecordItem(ptrItem)
+	            table.insert(tblItem,fhGetDisplayText(ptrItem))
+	            table.insert(tblRecord,ptrRecord:Clone())
+	            table.insert(tblRecordType,strType)
+	            table.insert(tblItemTag,fhGetTag(ptrItem))
+				table.insert(tblItemDataRef,BuildDR(ptrItem))
+			end
+        end
+        ptrItem:MoveNextSpecial()
+		if ptrDelete:IsNotNull() then
+			fhDeleteItem(ptrDelete)
+		end
+    end
+end
+fhOutputResultSetColumn("UDF Item", "text", tblItem, #tblItem, 180, "align_left")
+fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
+fhOutputResultSetColumn("Record Type", "text", tblRecordType, #tblRecordType, 40, "align_left")
+fhOutputResultSetColumn("Item Tag", "text", tblItemTag, #tblItemTag, 40, "align_left")
+fhOutputResultSetColumn("Item Data Reference", "text", tblItemDataRef, #tblItemDataRef, 140, "align_left")

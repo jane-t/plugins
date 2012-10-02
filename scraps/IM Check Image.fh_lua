@@ -1,0 +1,17 @@
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+require"imlua"
+file_name = "D:\\temp\\Wallpaper\\RJT703051-Edit4.JPG"
+test = file_exists(file_name)
+local ifile, error = im.FileOpen(file_name)
+local format, compression, image_count = ifile:GetInfo()
+local format_desc = im.FormatInfo(format)
+for i = 1, image_count do
+   local width, height, color_mode, data_type, error = ifile:ReadImageInfo(i)
+end
+ifile:Close()    

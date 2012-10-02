@@ -1,0 +1,79 @@
+--[[
+@Title: Check for new Search The Internet settings   
+@Author: Calico Pie
+@Version: 1.0
+@LastUpdated: May 2012 
+@Description: Downloads the current "Search The Internet Parameters" from Calico Pie and upgrades if required.
+]]
+function main()
+    local filename = 'Standard.fhi'
+    local folder = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\Web Search'
+    local curdata = StrLoadFromFile(folder..'\\'..filename)
+    local curver1 = curdata:match('Ver1=(%d+)')
+    local curver2 = curdata:match('Ver2=(%d+)')
+
+    local newdata,err = fetchfile(filename,folder)
+    if err then
+         fhMessageBox(err) 
+         return
+    end
+    local ver1 = newdata:match('Ver1=(%d+)')
+    local ver2 = newdata:match('Ver2=(%d+)')
+    if ver1 ~= curver1 then
+          -- Unable to download file major version mismatch
+          fhMessageBox('Unable to download file major version mismatch- please check for updated plugin')
+    elseif ver2 ~= curver2 then
+         -- New File Available update
+         SaveStringToFile(newdata,folder..'\\'..filename)
+         fhMessageBox(string.format('Search the Internet settings updated to version %s.%s from %s.%s',ver1,ver2,curver1,curver2),'MB_OK','MB_ICONINFORMATION')
+    else 
+         fhMessageBox(string.format('Search the Internet settings are up to date version %s.%s',ver1,ver2),'MB_OK','MB_ICONINFORMATION')
+    end
+end
+
+function fetchfile(filename,folder)
+    -- Get Plugin down and upgrade it
+    local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+    local url = 'http://www.family-historian.co.uk/lnk/'..filename
+    http:Open("GET",url,false)
+    http:Send()
+    http:WaitForResponse(30)
+    local status = http.StatusText
+    print('Status = '..status)
+    if status == 'OK' then
+        data = http.ResponseBody
+        return(data)
+    else
+        return nil,'An error occurred in Download please try later'
+    end
+end
+
+
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end
+
+
+function StrLoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"r")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end
+
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"w")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end
+
+
+-----------------------------------------------------------------------------------
+require "luacom"
+
+main()
+

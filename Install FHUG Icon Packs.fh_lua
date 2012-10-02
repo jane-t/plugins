@@ -1,0 +1,150 @@
+--[[
+@Title: Install FHUG Icon Packs
+@Author: Jane Taubman
+@Version: 1.1
+@LastUpdated: May 2012 
+@Description: Install Icon packs to the Icon Folder on Family Historian.
+The plugin will prompt for a zip file and create a subfolder in the FH icon folder
+with the same name as the zip file and add any bitmap (bmp) graphics files in to
+the folder.  It will overwrite existing files with matching names. 
+
+V1.1 Fix problem with zip files with subdirectories (remove directory from filename) 
+]]
+require "luacom"
+require "iup"
+require "lfs"
+function main()
+    local icondir = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\Icons\\'
+    filename = zipfileselect()
+    if not(filename) then
+        return
+    end
+    local path,file,ext = splitfilename(filename)
+    local newdir = icondir..file:match('(.*)%.')
+    local sts = lfs.mkdir(newdir)
+    local iconzip,err = zip.open(filename)
+    local count = 0
+    for file in iconzip:files() do
+        zpath,zname,zext = splitfilename(file.filename:gsub('/','\\'))
+        if zext:lower() == 'bmp' then
+            -- extract file from zip
+            ifile = iconzip:open(file.filename)
+            contents = ifile:read("*a")
+            ifile:close()
+            local tofile = newdir..'\\'..zname
+            SaveStringToFile(contents,tofile)
+            count = count + 1
+        end
+    end
+    iconzip:close()
+    if count == 0 then
+        fhMessageBox('No bmp Icons found in selected zip file')
+    else
+        fhMessageBox(string.format('%d Icons Added or Updated in folder %s',count,file:match('(.*)%.')))
+    end
+end
+------------------------------------------ End of Main Function
+function zipfileselect()
+    local documentsdir = os.getenv('USERPROFILE')..'\\'
+    local dialogGetFile = iup.filedlg {
+        dialogtype="OPEN",
+        title="Select the downloaded Icon zip file to install in FH Icons subfolder",
+        directory=documentsdir,
+        filter="*.zip"
+    }
+    dialogGetFile:popup(iup.CENTER, iup.CENTER)
+    if dialogGetFile.status ~= '0' then
+        return nil
+    else
+        return(dialogGetFile.value)
+    end
+end
+function fileExists(strFileName)
+    local fileHandle = io.open(strFileName,"r")
+    if fileHandle ~= nil then
+        io.close(fileHandle)
+        return true
+    else
+        return false
+    end
+end
+function loadrequire(module)
+    local function installmodule(module,filename)
+        local bmodule = false
+        if not(filename) then
+            filename = module..'.mod'
+            bmodule = true
+        end
+        local storein = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\Plugins\\'
+        -- Check if subdirectory needed
+        local path = string.match(filename, "(.-)[^/]-[^%.]+$")
+        if path ~= "" then
+            path = path:gsub('/','\\')
+            -- Create sub-directory
+            lfs.mkdir(storein..path)
+        end
+        -- Get file down and install it
+        local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+        local url = "http://www.family-historian.co.uk/lnk/getpluginmodule.php?file="..filename
+        http:Open("GET",url,false)
+        http:Send()
+        http:WaitForResponse(30)
+        local status = http.StatusText
+        if status == 'OK' then
+            length = http:GetResponseHeader('Content-Length')
+            data = http.ResponseBody
+            if bmodule then
+                local modlist = loadstring(http.ResponseBody)
+                for _,f in pairs(modlist()) do
+                    if not(installmodule(module,f)) then
+                        break
+                    end
+                end
+            else
+                SaveStringToFile(data,storein..filename)
+            end
+            return true
+        else
+            fhMessageBox('An error occurred in Download please try later')
+            return false
+        end
+    end
+    local function requiref(module)
+        require(module)
+    end
+    res = pcall(requiref,module)
+    if not(res) then
+        local ans = fhMessageBox(
+              'This plugin requires '..module..' support, please click OK to download and install the module',
+              'MB_OKCANCEL','MB_ICONEXCLAMATION')
+        if ans ~= 'OK' then
+            return false
+        end
+        if installmodule(module) then
+            require(module)
+        else
+            return false
+        end
+    end
+    return true
+end
+function splitfilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- OpenFile
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"wb")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end -- SaveStringToFile
+------------------------------------------- End of Additional Functions
+if not(loadrequire('zip')) then return end
+main()

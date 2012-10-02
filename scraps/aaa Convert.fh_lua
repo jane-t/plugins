@@ -1,0 +1,10 @@
+
+filename = "C:\\Users\\Jane\\Documents\\My Dropbox\\_Html Help\\diagramoptionsdialogproxiestab.html"
+f = io.open(filename, "r")
+str = f:read("*all")
+f:close()
+
+str = str:gsub('<p>%s*<span class = "nobullet_defn">(.-)</span>(.-)</p>','<dt>%1</dt><dd>%2</dd>')
+f = io.open(filename, "w")
+f:write(str)
+f:close()

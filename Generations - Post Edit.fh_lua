@@ -1,0 +1,87 @@
+--[[
+@Title: Generations - Post Edit  
+@Author: Jane Taubman
+@Version: 
+@LastUpdated: 
+@Description:
+Change TYPE to _TYPE on Sources and fix Source links on  
+]]
+function getXwords(str,wordcount)
+local newStr = ''
+local i = 0
+for word in string.gmatch(str, "%a+") do 
+i = i + 1
+if i > wordcount then
+break
+end
+newStr=newStr..word..' ' 
+end
+return newStr
+end
+---------------------------------------------------- Main Code
+ptr = fhNewItemPtr()
+ptrType = fhNewItemPtr()
+ptrNewType = fhNewItemPtr()
+tblDelete = {}
+--  Change TYPE UDF to _TYPE on sources
+ptr:MoveToFirstRecord('SOUR')
+while ptr:IsNotNull() do
+	ptrType:MoveTo(ptr,'~.TYPE')
+	if ptrType:IsNotNull() then
+		strType = fhGetValueAsText(ptrType)
+		print(strType)
+		ptrNewType = fhCreateItem('_TYPE',ptr)
+		bOK = fhSetValueAsText(ptrNewType, strType)
+		bOK = fhDeleteItem(ptrType)
+	end
+------------------------------------------------- Check and Clean Titles
+pTitle = fhGetItemPtr(ptr,'~.TITLE')
+if pTitle:IsNull() then
+	strText = fhGetItemText(ptr,'~.TEXT')
+	if strText ~= '' then
+	ptrItem = fhCreateItem('TITL', ptr)
+	fhSetValueAsText(ptrItem,getXwords(strText,15))
+	end
+end
+------------------------------------------------- Find all UDF fields and convert to Note
+strNote = 'Fields '
+
+ptrType:MoveToFirstChildItem(ptr)
+while ptrType:IsNotNull() do
+	if fhIsUDF(ptrType) then
+		strTag = fhGetTag(ptrType)
+		strValue = fhGetValueAsText(ptrType)
+		strNote = strNote.. ' '..strTag..': '..strValue
+		table.insert(tblDelete,ptrType:Clone())
+	end
+	ptrType:MoveNext()
+end
+	if strNote ~= 'Fields ' then
+		-- Create Source Note
+		ptrItem = fhCreateItem('NOTE2', ptr)
+		fhSetValueAsText(ptrItem,strNote)
+	end
+
+ptr:MoveNext()
+end
+------------------------------------------------- Correct SOUR Levels on Note Records
+ptr:MoveToFirstRecord('NOTE')
+ptrSOUR = fhNewItemPtr()
+while ptr:IsNotNull() do
+ptrType:MoveTo(ptr,'~.TEXT.SOUR')
+while ptrType:IsNotNull() do
+	print(fhGetDisplayText(ptrType))
+	i = tonumber(string.match(fhGetDisplayText(ptrType),'@S(%d*)@'))
+	ptrSOUR:MoveToRecordById('SOUR',i)
+	if ptrSOUR:IsNotNull() then
+	ptrItem = fhCreateItem('SOUR', ptr)
+	fhSetValueAsLink(ptrItem,ptrSOUR)
+		table.insert(tblDelete,ptrType:Clone())
+	end
+	ptrType:MoveNext('SAME_TAG')	
+end
+ptr:MoveNext()
+end
+for _,ptrDel in pairs(tblDelete) do
+bOK = fhDeleteItem(ptrDel)
+end

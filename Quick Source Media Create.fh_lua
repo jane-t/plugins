@@ -1,0 +1,216 @@
+--[[
+@Title: Quick Source Media Create
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: April 2012
+@Description: Allow quick adding of source media.  On start a drag/drop target is displayed so 
+media items can be dropped into Family Historian, once items are dropped a prompt window appears allowing 
+the description to entered along with a date, and a destination folder to be selected. 
+
+A source can be created at the same time as the media and if this is done, it will be create with the same
+description as the media and the media attached to it.
+]]
+require( "iuplua" )
+-- require("iupluacd")
+require( "lfs" )
+----------------------------------------------- Main Code
+function main()
+mediaFolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')..'\\Media\\'
+typeList  = buildTypeList()
+tblItems = {}
+count = 0
+ms       = iup.label {title="Drop your files on the yellow box above.\nYou will then be prompted for descriptions and other options for each file."}
+ms2      = iup.label {title="                                                                                                              "}
+bRename  = iup.toggle {title="Rename Media Filename",value="ON"}
+bPrefix  = iup.toggle {title="Prefix Filename with Object ID",value="ON"}
+cv       = iup.canvas {size="250x100", xmin=0, xmax=99, posx=0, dx=10}
+dg       = iup.dialog{iup.vbox{iup.hbox{bRename;bPrefix;gap=4;padding=10};iup.frame{cv};ms;ms2;gap=4;margin="10x10"}; title="Quick add media and optionally create sources";DRAGDROP="YES"}
+
+function cv:dropfiles_cb(filename, num, x, y)
+    AddFile(filename)
+end
+function cv:map_cb()
+  cv.bgcolor = "254 254 1"
+--  self.cd_canvas = cd.CreateCanvas(cd.IUP, self)
+end
+
+--[[
+function cv:action()          -- called everytime the IUP canvas needs to be repainted
+   cd.Activate(self.cd_canvas)
+   cd.Clear()
+   self.im_image:cdText(10,10,'Hello World') -- use default values
+end
+]]
+dg:showxy(iup.CENTER, iup.CENTER)
+
+if (iup.MainLoopLevel()==0) then
+    iup.MainLoop()
+end
+if #tblItems ~= 0 then
+fhOutputResultSetTitles("Media and Sources Added", "Media and Sources Added", "Date: %#x")
+fhOutputResultSetColumn("Records", "item", tblItems, #tblItems, 180, "align_left", 1, true)
+end
+end
+---------------------------------------------- Functions
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    
+    local function yieldtree(dir)
+    for entry in lfs.dir(dir) do
+        local attr=lfs.attributes(entry)
+        if entry ~= "." and entry ~= ".." then
+            entry=dir..'\\'..entry
+            local attr=lfs.attributes(entry)
+            coroutine.yield(entry,attr)
+            if attr.mode == "directory" then
+                yieldtree(entry)
+            end
+        end
+    end
+end
+
+return coroutine.wrap(function() yieldtree(dir) end)
+end
+
+function splitfilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-)([^%.]+)$")
+end
+
+function CheckAndCreateText(ptrParent,tag,value)
+    -- Checks for existance of a tag (text type only)and updates it if it exists
+    -- and creates it if it does not.
+    ptrNew = fhGetItemPtr(ptrParent,'~.'..tag)
+    if ptrNew:IsNull() then
+        ptrNew = fhCreateItem(tag,ptrParent)
+    end
+    bOk = fhSetValueAsText(ptrNew,value)
+end
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+
+function CopyFile(strfromfile,strtofile,bReplace)
+    if not(bReplace) then
+        if file_exists(strtofile) then
+            return false
+        end
+    end
+    local inp = assert(io.open(strfromfile, "rb"))
+    local out = assert(io.open(strtofile, "wb"))
+    
+    local data = inp:read("*all")
+    out:write(data)
+    assert(inp:close())
+    assert(out:close())
+    -- Copy the last modification date and access date from the original.
+    local attr = lfs.attributes(strfromfile)
+    lfs.touch(strtofile,attr['modification'],attr['access'])
+    return true
+end
+function buildTypeList()
+    local ptrSrc = fhNewItemPtr()
+    ptrSrc:MoveToFirstRecord('SOUR')
+    srcTypes = {None=' '}
+    while ptrSrc:IsNotNull() do
+        local strType  = fhGetItemText(ptrSrc,'~._TYPE')
+        srcTypes[strType] = 1
+        ptrSrc:MoveNext()
+    end
+    local typeList = {'_None'}
+    for ty,_ in pairs(srcTypes) do
+        table.insert(typeList,ty)
+    end
+    table.sort(typeList)
+    return typeList
+end
+
+function AddFile(filename)
+    local folderList = {'Media'}
+    for filename,attr in dirtree(mediaFolder) do
+        if attr.mode == 'directory' then
+            local shortName = 'media'..filename:gsub(mediaFolder,'')
+            table.insert(folderList,shortName)
+        end
+    end
+    
+    -- Prompt User to Confirm Options
+    local path,pDescription,extension = splitfilename(filename)
+    -- Clean up Description File name.  Remove trailing full stops, underlines and hyphens and space mixed case words
+    pDescription = string.gsub(string.gsub(pDescription:gsub('%.$',''),'[-_]',' '),'(%u)(%l)',' %1%2')
+    pCreateSource = 0
+    pPrompt =
+    "Description: %s{File will be renamed using this description}\n"..
+    "Date: %s{leave blank if not required}\n"..
+    "Create Matching Source: %b{creates source and attaches media if ticked}\n"..
+    "Source Type %l|"..table.concat(typeList,'|')..'{Only required when creating a source}|\n'..
+    "Destination Folder %l|"..table.concat(folderList,'|')..'|{select the folder to copy the media to}\n'
+    
+    ret, pDescription, pDate,pCreateSource,pType,pFolder =
+    iup.GetParam("Family Historian Add Media", param_action,
+    pPrompt,
+    pDescription,'', 0, pCreateSource,0)
+    
+    if (ret ~= true) then
+        return
+    end
+    --  Create Media Record
+    local ptrOBJE = fhCreateItem('OBJE') -- OBJE
+    local iRecordId = fhGetRecordId(ptrOBJE)
+    local pFileName = string.gsub(pDescription,'[_%W]','_')
+    local newLocation = folderList[pFolder + 1]..'\\O'..iRecordId..'-'..pFileName..'.'..extension
+    local newpath = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')..'\\'..newLocation
+    CheckAndCreateText(ptrOBJE,'_FILE',newLocation)
+    -- Add Date
+    local dtDate = fhNewDate()
+    dtDate:SetValueAsText(pDate,true)
+    if pDate ~= nil then
+        local ptrDate = fhCreateItem('_DATE',ptrOBJE)
+        -- OBJE._DATE
+        bOK  = fhSetValueAsDate(ptrDate,dtDate)
+    end
+    --  Copy with new name
+    if not(CopyFile(filename,newpath,true)) then
+        error("Unable To copy File")
+    end
+    
+    if extension:lower() == 'jpg' then
+        CheckAndCreateText(ptrOBJE,'FORM','jpeg')
+    else
+        CheckAndCreateText(ptrOBJE,'FORM',extension:lower())
+    end
+    CheckAndCreateText(ptrOBJE,'TITL',pDescription)
+    
+	table.insert(tblItems,ptrOBJE:Clone())
+
+    --  Create Source if Required
+    if pCreateSource == 1 then
+        local ptrSOUR = fhCreateItem('SOUR') -- Source
+        CheckAndCreateText(ptrSOUR,'TITL',pDescription)
+        CheckAndCreateText(ptrSOUR,'_TYPE',typeList[pType + 1])
+        --  Add Media
+        ptrNew = fhCreateItem('OBJE',ptrSOUR)
+        fhSetValueAsLink(ptrNew,ptrOBJE)
+        if pDate ~= nil then
+            -- SOUR.DATA.EVEN[1].DATE
+            local ptrData = fhCreateItem('DATA',ptrSOUR)
+            local ptrEven = fhCreateItem('EVEN',ptrData)
+            local ptrDate = fhCreateItem('DATE',ptrEven)
+            fhSetValueAsDate(ptrDate,dtDate)
+        end
+		table.insert(tblItems,ptrSOUR:Clone())
+
+    end
+    fhUpdateDisplay()
+    ms2.title = #tblItems..' Item Added ('..newLocation..')'
+end
+
+--  Launch 
+main()

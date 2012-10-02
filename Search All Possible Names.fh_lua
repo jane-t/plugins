@@ -1,0 +1,180 @@
+--[[
+@title: Search All Possible Names
+@author: Jane Taubman
+@lastupdated: April 2012
+@version: 1.4
+@description:
+Script reads through all individuals and lists all variations of Names from the Name field
+and for married women lists them under their married names as well, where the
+given name and surname fields contain the entered search fields.
+
+Please Note: All family as Spouse occurrences will be searched even if there is no marriage recorded.
+@changes:
+1.2 If user cancels the prompt it now simply returns
+1.2 Corrected incorrect operation where user presses enter rather than pressing the OK button.
+1.3 Added option to search using basic soundex for both the name and surname.
+1.4 Added Default values from the currently selected record if there is one.
+]]
+
+function trim(s)
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+-- Convert String to Soundex
+function soundex(str)
+    local codes = {
+    A=0,E=0,I=0,O=0,U=0,Y=0,H=0,
+    B=1,P=1,F=1,V=1,
+    C=2,S=2,G=2,J=2,K=2,Q=2,X=2,Z=2,
+    D=3,T=3,
+    L=4,
+    M=5,N=5,
+    R=6
+    }
+    local strSoundex = ''
+    local strCap = string.upper(str)
+    local strSoundex = string.sub(strCap,1,1)
+    local strRest = string.sub(strCap,2)
+    for letter in string.gmatch(strRest, "%a") do
+		local l = string.len(strSoundex)
+        local strLast = string.sub(strSoundex,l,l)
+		if codes[letter] ~= nil then
+        if codes[letter] ~= 0 and codes[letter] ~= tonumber(strLast) then
+            strSoundex = strSoundex..codes[letter]
+        end
+		end
+    end
+    strSoundex = strSoundex..'0000'
+    return string.sub(strSoundex,1,4)
+end
+-- Convert all Words To Soundex
+function soundexall(str)
+local strSoundex = ''
+   for word in string.gmatch(str, "%a+") do
+		strSoundex = strSoundex..' '..soundex(word)
+end
+return strSoundex
+end
+
+function comparestring(string1,string2,bUseSoundex)
+local str1 = trim(string1:lower())
+local str2 = trim(string2:lower())
+if bUseSoundex then
+	str1 = soundexall(str1)
+	str2 = soundexall(str2)
+end
+    local ipos
+    if string2 == nil then
+        return true
+    else
+        ipos = string.find(str1,str2)
+        return not(ipos == nil)
+    end
+end
+
+
+-- Load IUP for Prompt Window.
+require( "iuplua" )
+-- If there is a current individual record grab the details as default for the search
+ptrList = fhGetCurrentRecordSel('INDI')
+if #ptrList > 0 then
+	surname   = string.lower(fhGetItemText(ptrList[1],'~.NAME:SURNAME'))
+	forenames = string.lower(fhGetItemText(ptrList[1],'~.NAME:GIVEN_ALL'))
+else
+  surname = ''
+  forenames = ''
+end
+-- Prompt User to Confirm Options
+bOK,strFirstName,strSurname,bSoundex =
+iup.GetParam("Search All Possible Names", param_action,
+"Given Name Contains: %s\n"..
+"Surname Contains: %s\n"..
+"Use Soundex for search: %b\n"
+,
+forenames,surname,0)
+if not(bOK) then
+    return
+end
+if bSoundex == 1 then 
+bUseSoundex = true 
+else 
+bUseSoundex = false 
+end 
+ptrIndividual = fhNewItemPtr()    -- declare pointer
+ptrIndividual:MoveToFirstRecord('INDI')    -- set the first to point to the first Note record
+ptrName = fhNewItemPtr()
+ptrFamS = fhNewItemPtr()
+ptrFam = fhNewItemPtr()
+count = 0
+-- Define Columns
+tblSurname = {}
+tblGivenAll = {}
+tblSoundex = {}
+tblRecord = {}
+tblFamilyRecord = {}
+tblLifeDates = {}
+tblMarriageDate = {}
+tblNameType = {}
+tblTypes = {'Primary','Secondary','Married'}
+
+while not ptrIndividual:IsNull() do
+    -- Get All Names from Name Fields
+    ptrName:MoveTo(ptrIndividual,"~.NAME") -- Get the Name for the INDI Record.
+    index = 1
+    while not ptrName:IsNull() do
+        if comparestring(fhGetItemText(ptrName,'~:SURNAME'),strSurname,bUseSoundex) and comparestring(fhGetItemText(ptrName,'~:GIVEN_ALL'),strFirstName,bUseSoundex) then
+            count = count + 1
+            tblSurname[count] = fhGetItemText(ptrName,'~:SURNAME')
+            tblGivenAll[count] = fhGetItemText(ptrName,'~:GIVEN_ALL')
+			tblSoundex[count] = soundexall(tblSurname[count])..' '..soundexall(tblGivenAll[count]) 
+            tblRecord[count]   = ptrIndividual:Clone()
+            tblLifeDates[count] = fhCallBuiltInFunction('Lifedates',ptrIndividual)
+            if index == 1 then
+                tblNameType[count] = tblTypes[1]
+            else
+                tblNameType[count] = tblTypes[2]
+            end
+        end
+        -- For Females check each set of Forenames combined with the Husbands surname.
+        strSex = fhGetItemText(ptrIndividual,'INDI.SEX')
+        if (strSex == 'Female') then
+            ptrFamS:MoveTo(ptrIndividual,"~.FAMS")
+            while not ptrFamS:IsNull() do
+                ptrFam = fhGetValueAsLink(ptrFamS)
+                famStat = fhGetItemText(ptrFam,'~._STAT')
+                if famStat ~= 'Never Married' and famStat ~= 'Unmarried Couple' then
+                    if comparestring(fhGetItemText(ptrFam,'~.HUSB>NAME:SURNAME'),strSurname,bUseSoundex) and comparestring(fhGetItemText(ptrName,'~:GIVEN_ALL'),strFirstName,bUseSoundex) then
+                        count = count + 1
+                        tblSurname[count]  = fhGetItemText(ptrFam,'~.HUSB>NAME:SURNAME')			
+                        tblGivenAll[count] = fhGetItemText(ptrName,'~:GIVEN_ALL')
+						tblSoundex[count] = soundexall(tblSurname[count])..' '..soundexall(tblGivenAll[count]) 
+                        tblRecord[count]   = ptrIndividual:Clone()
+                        tblFamilyRecord[count]   = ptrFam:Clone()
+                        tblLifeDates[count] = fhCallBuiltInFunction('Lifedates',ptrIndividual)
+                        tblMarriageDate[count]  =  fhGetItemPtr(ptrFam,'FAM.MARR.DATE')
+                        tblNameType[count] = tblTypes[3]
+                    end
+                end
+                ptrFamS:MoveNext("SAME_TAG") -- next Family as spouse
+            end
+        end
+        ptrName:MoveNext("SAME_TAG") -- next Name
+    end
+    index = index + 1
+    ptrIndividual:MoveNext() -- next individual record
+end
+if (#tblSurname > 0) then
+    strTitle = "Matches for "..strFirstName..' '..strSurname
+    strPrintTitle = "Search All Possible Names"
+    fhOutputResultSetTitles(strTitle, strPrintTitle, strTitle.." (%#x)")
+    fhOutputResultSetColumn("Surname", "text", tblSurname, #tblSurname, 80, "align_left", 1, true)
+    fhOutputResultSetColumn("Given Names", "text", tblGivenAll, #tblSurname, 80, "align_left", 2, true)
+    fhOutputResultSetColumn("Type", "text", tblNameType, #tblSurname, 40, "align_left", 0, true)
+    fhOutputResultSetColumn("Lifedates", "text", tblLifeDates, #tblSurname, 40, "align_left", 3, true)
+    fhOutputResultSetColumn("Marriage", "item", tblMarriageDate, #tblSurname, 80, "align_left", 0, true)
+    fhOutputResultSetColumn("Record", "item", tblRecord, #tblSurname, 140, "align_left")
+    fhOutputResultSetColumn("Family", "item", tblFamilyRecord, #tblSurname, 140, "align_left")
+    fhOutputResultSetColumn("Soundex", "text", tblSoundex, #tblSurname, 140, "align_left")
+	
+else
+    fhMessageBox('No matches found for '..strFirstName..' '..strSurname)
+end

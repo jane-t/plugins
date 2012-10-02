@@ -1,0 +1,207 @@
+--[[
+@Title: Life Event List
+@Author: Calico Pie
+@LastUpdated: August 2012
+@Version: 1.0
+@Description: 
+Creates a list of all the events and facts, in date order, in the life of a given person (or persons).  Events and facts include not just the person's 
+own events and facts, and mariage facts, but also child or parent events that occur during their lifetime.
+]]
+
+------------------------------------------------ Add Fact to List
+function addFact(result, ptrInd, ptrEvent, ptrOther, sDesc)
+	iIndex = #result.indi + 1
+	result.indi[iIndex] = ptrInd:Clone()
+
+	local ptrDate = fhGetItemPtr(ptrEvent, '~.DATE')
+	local dateVal = fhGetValueAsDate(ptrDate)
+	if dateVal ~= nil then
+		result.date[iIndex] = dateVal:GetDatePt1()
+	else
+		result.date[iIndex] = nil
+	end
+	if sDesc == nil then
+		sDesc = fhCallBuiltInFunction('FactLabel', ptrEvent)
+		if fhIsAttribute(ptrEvent) then
+			sDesc = sDesc ..  ' (' .. fhCallBuiltInFunction('FactValue', ptrEvent) .. ')'
+		end
+	end
+	result.event[iIndex] = sDesc
+
+	if ptrOther ~= nil then
+		result.other[iIndex] = ptrOther:Clone()
+	else
+		result.other[iIndex] = nil
+	end
+
+	result.place[iIndex] = fhGetItemPtr(ptrEvent, '~.PLAC')
+end
+
+
+------------------------------------------------ getParents (allowing for same sex marriages)
+function getParents(ptrFam)
+	ptrHusb = fhGetItemPtr(ptrFam, '~.HUSB>')
+	if ptrHusb == nil then
+		ptrHusb = fhGetItemPtr(ptrFam, '~.WIFE[2]>')
+		end
+
+	local ptrWife = fhGetItemPtr(ptrFam, '~.WIFE>')
+	if ptrWife == nil then
+		ptrWife = fhGetItemPtr(ptrFam, '~.HUSB[2]>')
+		end
+
+	return ptrHusb, ptrWife
+end
+
+------------------------------------------------ getSpouse (allowing for same sex marriages)
+function getSpouse(ptrInd, ptrFam)
+	local ptrHusb, ptrWife = getParents(ptrFam)
+	if ptrInd:IsSame(ptrHusb)	then
+		return ptrWife
+	else
+		return ptrHusb
+	end
+end
+
+
+-----------------------------------------------------------------------
+--                             Main Code							--
+-----------------------------------------------------------------------
+	local tblOutput = {}  -- Define Columns Table
+ 
+	-- Define Columns
+	tblOutput.indi = {}
+	tblOutput.date = {}
+	tblOutput.event = {}
+	tblOutput.other = {}
+	tblOutput.place = {}
+
+    ptrList = fhPromptUserForRecordSel('INDI')
+    if #ptrList == 0 then
+		return
+	end
+
+	local ptrEvent = fhNewItemPtr()
+	local ptrFam = fhNewItemPtr()
+	local ptrChild = fhNewItemPtr()
+	local ptrDate = fhNewItemPtr()
+	local ptrIndi = fhNewItemPtr()
+	local ptrOther = fhNewItemPtr()
+	local ptrFamLink = fhNewItemPtr()
+	local ptrChildLink = fhNewItemPtr()
+
+	---------------------------------------------------------- Loop through all selected Records
+	for i, ptrIndi in pairs(ptrList) do
+		tblEvents = {}
+		strEndLabel = 'Death'
+		birthdate = fhCallBuiltInFunction('EstimatedBirthDate',ptrIndi, 'EARLIEST')    
+		deathdate = fhCallBuiltInFunction('EstimatedDeathDate',ptrIndi, 'LATEST') 
+		if deathdate:IsNull() then
+			deathdate = fhCallBuiltInFunction('Today')
+		end  
+		
+
+		----------------------------------------------------------  Individual Events
+		ptrEvent:MoveToFirstChildItem(ptrIndi)
+		while ptrEvent:IsNotNull() do
+			if  fhIsFact(ptrEvent) then
+				addFact(tblOutput, ptrIndi, ptrEvent)
+			end
+			ptrEvent:MoveNext()
+		end
+
+		--------------------------------------------------------- Family Events
+		ptrFamLink:MoveTo(ptrIndi,'~.FAMS')
+		while ptrFamLink:IsNotNull() do
+			ptrFam = fhGetValueAsLink(ptrFamLink)
+			ptrOther = getSpouse(ptrIndi, ptrFam)
+
+			--- Process Family Events
+			ptrEvent:MoveToFirstChildItem(ptrFam)
+			while ptrEvent:IsNotNull() do
+				if  fhIsFact(ptrEvent) then
+					addFact(tblOutput, ptrIndi, ptrEvent, ptrOther)
+				end
+				ptrEvent:MoveNext()
+			end
+
+			--- Process Child Births, Deaths and Adoptions
+			ptrChildLink:MoveTo(ptrFam,'~.CHIL')
+			while ptrChildLink:IsNotNull() do
+				ptrChild = fhGetValueAsLink(ptrChildLink)
+				ptrEvent:MoveTo(ptrChild,'~.BIRT')
+				if  fhIsFact(ptrEvent) then
+					addFact(tblOutput, ptrIndi, ptrEvent, ptrChild, 'Birth of child')
+				end
+
+			--- Process Child Adoptions
+				ptrEvent:MoveTo(ptrChild,'~.ADOP')
+				if  fhIsFact(ptrEvent) then
+					addFact(tblOutput, ptrIndi, ptrEvent, ptrChild, 'Adoption of child')
+				end
+
+			--- Death of Child before Parent
+				ptrEvent:MoveTo(ptrChild,'~.DEAT')
+				if  fhIsFact(ptrEvent) then
+					ptrDate:MoveTo(ptrEvent,'~.DATE')
+					ChildDeath = fhGetValueAsDate(ptrDate)
+					if parentDeath ~= nil then
+						dp = ChildDeath:GetDatePt1()
+						if dp ~= nil and not dp.IsNull() and dp.GetYear() ~= 0 and deathdate:Compare(dp) > 0 then 
+             	 		addFact(tblOutput, ptrIndi, ptrEvent, ptrChild, 'Death of child')
+						end
+					end
+				end
+
+				ptrChildLink:MoveNext('SAME_TAG')
+			end
+
+			ptrFamLink:MoveNext('SAME_TAG')
+		end
+
+		-- Get Parents Deaths (allowing for same sex parents)
+		ptrFamLink:MoveTo(ptrIndi,'~.FAMC')
+		while ptrFamLink:IsNotNull() do
+			ptrFam = fhGetValueAsLink(ptrFamLink)
+			ptrHusb, ptrWife = getParents(ptrFam)
+			ptrEvent:MoveTo(ptrHusb,'~.DEAT')
+ 			if  fhIsFact(ptrEvent) then
+				ptrDate:MoveTo(ptrEvent,'~.DATE')
+				ParentDeath = fhGetValueAsDate(ptrDate)
+				if ParentDeath ~= nil then
+					dp = ParentDeath:GetDatePt1()
+					if dp ~= nil and not dp:IsNull() and dp:GetYear() ~= 0 and deathdate:Compare(dp) > 0 then 
+						addFact(tblOutput, ptrIndi, ptrEvent, ptrHusb, 'Death of parent')
+					end
+				end
+			end
+
+			ptrEvent:MoveTo(ptrWife,'~.DEAT')
+			if  fhIsFact(ptrEvent) then
+				ptrDate:MoveTo(ptrEvent,'~.DATE')
+				ParentDeath = fhGetValueAsDate(ptrDate)
+				if ParentDeath ~= nil then
+					dp = ParentDeath:GetDatePt1()
+					if dp ~= nil and not dp:IsNull() and dp:GetYear() ~= 0 and deathdate:Compare(dp) > 0 then 
+						addFact(tblOutput, ptrIndi, ptrEvent, ptrWife, 'Death of parent')
+					end
+				end
+			end
+
+			ptrFamLink:MoveNext('SAME_TAG')
+		end
+	end
+
+
+	fhOutputResultSetTitles("Life Events List")
+
+	iC = #tblOutput.indi
+
+	fhOutputResultSetColumn('Individual',	'item', 		tblOutput.indi, 		iC, 110, 'align_left')
+	fhOutputResultSetColumn('Date',			'date-point', tblOutput.date, 		iC, 90, 'align_left', 1, true)
+	fhOutputResultSetColumn('Event or Fact',	'text', 	 tblOutput.event, 		iC, 200, 'align_left')
+	fhOutputResultSetColumn('Other Party',	'item', 		 tblOutput.other, 		iC, 110, 'align_left')
+	fhOutputResultSetColumn('Place',			'item', 	 tblOutput.place,		iC, 200, 'align_left')
+-----------------------------------------------------------------------
+--                          Main Code Ends			                 --
+-----------------------------------------------------------------------

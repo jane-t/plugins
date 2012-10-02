@@ -1,0 +1,22 @@
+require "luacom"
+
+word = luacom.CreateObject("Word.Application")
+
+local book = word.documents:Add()
+word.Visible = true
+paras = book.Paragraphs:Add()
+range = paras.Range
+range.Text = ("A latin sample")
+range.Style = ("Heading 1")
+range:InsertParagraphAfter()
+paras = book.Paragraphs:Add()
+range = paras.Range
+range.Text = ([[Nam fabulas mnesarchum comprehensam ne, cu ullum euismod consulatu usu. Eam alii lobortis voluptatum id, denique eligendi pertinax quo ne. Vis congue eirmod ut. Duo probo soleat ex. Elit pertinax abhorreant eu his, ipsum dicam dissentiunt pri id. Kasd erant dolorum id sed, ei vim partem deseruisse, ne mea dico tantas alienum.
+Has cu facilisis mediocritatem. Fabellas lucilius vim ex. Mei simul omnium et, wisi vidit ut ius. Ad has erat honestatis. Malis animal aliquid id usu. Nulla utinam appellantur cu qui, scripta sententiae disputando eu nam, ut pri unum labore.
+Odio wisi torquatos sea cu. Ut detracto torquatos repudiandae pri. Vim puto solum epicurei at. Per nonummy perpetua similique te, odio platonem ut pri. Mei indoctum prodesset in, eam nisl quaerendum at.
+]])
+range.Style = ("Normal")
+range:InsertParagraphAfter()
+word.DisplayAlerts = false
+doc = nil
+word = nil

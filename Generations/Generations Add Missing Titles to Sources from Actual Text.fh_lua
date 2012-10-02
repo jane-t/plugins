@@ -1,0 +1,34 @@
+--[[
+@Title: Generations Add Missing Titles to Sources from Actual Text
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: Feb 2012 
+@Description: 
+For Generations Files which have only TEXT (Actual Text),  but no title field on sources
+Adds a title from the first 20 words of the Actual Text
+]]
+function getXwords(str,wordcount)
+local newStr = ''
+local i = 0
+for word in string.gmatch(str, "%a+") do 
+i = i + 1
+if i > wordcount then
+break
+end
+newStr=newStr..word..' ' 
+end
+return newStr
+end
+ps = fhNewItemPtr()
+ps:MoveToFirstRecord('SOUR')
+while ps:IsNotNull() do
+pTitle = fhGetItemPtr(ps,'~.TITLE')
+if pTitle:IsNull() then
+	strText = fhGetItemText(ps,'~.TEXT')
+	if strText ~= '' then
+	ptrItem = fhCreateItem('TITL', ps)
+	fhSetValueAsText(ptrItem,getXwords(strText,15))
+	end
+end
+ps:MoveNext()
+end

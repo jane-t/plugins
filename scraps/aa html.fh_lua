@@ -1,0 +1,23 @@
+--[[
+@Title: Geocode Lookup
+@Author: Jane Taubman
+@LastUpdated: 
+@Description: 
+]]
+function getXMLvalue(source,key)
+local startkey = '<'..key..'>'
+local endkey = '</'..key..'>'
+local pattern = startkey..'(.*)'..endkey
+return source:match(pattern)
+end
+
+require('luacom')
+
+http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+
+http:Open("GET","http://where.yahooapis.com/geocode?q=1600+Pennsylvania+Avenue,+Washington,+DC&appid=NVkuOj5a",false)
+http:Send()
+XML = http.Responsetext 
+
+print(getXMLvalue(XML,'latitude'))
+print(getXMLvalue(XML,'longitude'))

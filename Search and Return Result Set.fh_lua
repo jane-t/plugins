@@ -1,0 +1,151 @@
+--[[
+@title: Search and Return Result Set
+@author: Calico Pie
+@lastupdated: May 2012
+@version: 1.3
+@description:
+Search for a specified word or phrase in all text fields in the current project, with options to narrow the scope of the search.
+The matching fields are listed in a table in the Query Window result set, 
+with links back to each context of use (double-click on any Item to view it in the Property Box).
+
+1.3 Added Whole Word option and improve the message prompting. 
+
+1.2 Added Case insensitive searching.
+]]
+-------------
+-- Main Code
+-------------
+function main()
+    tblRecord = {}
+    tblItem = {}
+    tblRecordType = {}
+    tblItemDataRef = {}
+    iCount = 0
+    -- Prompt for Options
+    -- Prompt for confirmation using iup.GetParm %b are tick boxes
+    -- set initial values
+    pa ={text=1,longtext=1,name=1,place=1,wordlist=1}
+    pConfirm = 1
+    pSensitive = 0
+    pWhole = 1
+    pPlain = 1
+    -- Prompt User to Confirm Options
+    bOK, strSearch,pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole =
+    iup.GetParam("Search and Return Result Set", param_action,
+    "Search For: %s\n"..
+    "Case Sensitive: %b\n"..
+    "Search in the following Classes %t\n"..
+    "Text fields: %b{Name Prefix/Suffix/Given/Nickname, Attribute values, Cause, Where Within Source, Title, Type, Custom Id, City, State, Postcode, Country, Phone, E-mail, Website, File, Format, Keywords, Sentence, etc.}\n"..
+    "Long Text: %b{Note, Address, Author, Text From Source, Publication Info, Link/Note}\n"..
+    "Names: %b{Name fields only}\n"..
+    "Places: %b{Place fields only}\n"..
+    "Extra Search Options %t\n"..
+    "Plain Text Search: %b{Plain Text or Regular Expression search & replace.}\n"..
+    "Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}\n"
+    ,
+    "",pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole)
+    pa.word = pa.text
+    pa.wordlist = pa.text
+    if pSensitive == 0 then
+        strSearchi = nocase(strSearch)
+    end
+    if bOK then
+        -- Swap 1 for true
+        for strType,Value in pairs(pa) do pa[strType] = (Value == 1) end
+        DoAllItems('text',pa,SearchField)
+        if iCount > 0 then
+            local title = 'Search for '..strSearch..' in '..fhGetContextInfo('CI_PROJECT_NAME')
+            fhOutputResultSetTitles(title, title, "Date: %#x")
+            fhOutputResultSetColumn("Item", "item", tblItem, #tblItem, 180, "align_left")
+            fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
+            fhOutputResultSetColumn("Record Type", "text", tblRecordType, #tblRecordType, 40, "align_left")
+            fhOutputResultSetColumn("Item Data Reference", "text", tblItemDataRef, #tblItemDataRef, 140, "align_left")
+        else
+            fhMessageBox(strSearch..' Not Found')
+        end
+    else
+        return
+    end
+end
+
+function DoAllItems(strType,tblClass,action)
+
+    -- strType: Main Item Type (eg text)
+    -- strClass: Keyworded Array of Classes
+    -- action: function to perform
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types
+    local ii = 0
+    local ptr = fhNewItemPtr()
+    for ii =1,iCount do
+        strRecType = fhGetRecordTypeTag(ii)
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+            strDataClass = fhGetDataClass(ptr)
+            if fhGetValueType(ptr) == strType and tblClass[fhGetDataClass(ptr)] == true then
+                action(ptr)
+            end
+            ptr:MoveNextSpecial()
+        end
+    end
+end
+
+function nocase (s)
+    s = string.gsub(s, "%a", function (c)
+        return string.format("[%s%s]", string.lower(c),
+        string.upper(c))
+    end)
+    return s
+end
+
+function strPlainText(strText)
+    -- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
+    return strText:gsub("(%W)","%%%1")
+end
+
+function SearchField(ptr)
+
+    local strFromString = fhGetValueAsText(ptr)
+    local iPos,iPos2,iPos3 
+    strSearchFor = strSearchi
+    if pWhole == 1 and pPlain == 1 then
+        strSearchFor = '([%s%p])('..strSearchi..')([%s%p])'
+    end
+    local iPos = string.find(strFromString,strSearchFor)
+    if pWhole == 1 and pPlain == 1 then
+        -- Special Case search for last word and first word
+        local strSearchFor3 = '([%s%p])('..strSearchi..')$'
+        iPos2 = string.find(strFromString,strSearchFor3)
+        local strSearchFor3 = '^('..strSearchi..')([%s%p])'
+        iPos3 = string.find(strFromString,strSearchFor3,strReplaceWith3)
+    end
+    if (iPos or iPos2 or iPos3) then
+        local ptrRecord = fhNewItemPtr()
+        local strFromString = fhGetValueAsText(ptr)
+        ptrRecord:MoveToRecordItem(ptr)
+        table.insert(tblItem,ptr:Clone())
+        table.insert(tblRecord,ptrRecord:Clone())
+        table.insert(tblRecordType,fhGetTag(ptrRecord))
+        table.insert(tblItemDataRef,BuildDR(ptr))
+        iCount = iCount + 1
+    end
+end
+--[[
+@function: BuildDR
+@description: Get Data Reference for Tag
+@parameters: Item Pointer
+@returns: Data reference String (excluding index)
+@requires: none
+]]
+function BuildDR(ptr)
+    local ptrTemp = fhNewItemPtr()
+    ptrTemp:MoveTo(ptr)
+    strDR = fhGetTag(ptrTemp)
+    while fhHasParentItem(ptrTemp) do
+        ptrTemp:MoveToParentItem(ptrTemp)
+        strDR = fhGetTag(ptrTemp)..'.'..strDR
+    end
+    return strDR
+end
+-- Call Main
+main()

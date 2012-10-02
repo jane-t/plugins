@@ -1,0 +1,45 @@
+require( "iuplua" )
+-- File Name Prompt
+function GetExistingFile(strTitle,strfilter,strfilterinfo,strdir)
+-- Creates a file dialog and sets its type, title, filter and filter info
+filedlg = iup.filedlg{dialogtype = "OPEN", title = strTitle, 
+                      filter = strfilter, filterinfo = strfilterinfo,
+                      directory=strdir} 
+
+-- Shows file dialog in the center of the screen
+filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+
+-- Gets file dialog status
+status = filedlg.status
+return status,filedlg.value
+end
+-- Split File Name from Directory
+function splitfilename(strfilename)
+-- Find last \ in file name
+local i = string.len(strfilename)
+local j = 0
+local char = ' '
+while i > 0 and j == 0 do
+char = string.sub(strfilename,i,i)
+if char == '\\' then
+j = i i = 1
+end
+i = i  - 1
+end
+if j > 0 then
+return string.sub(strfilename,1,(j)),string.sub(strfilename,j+1)
+end
+end
+
+-- Main Program
+strnewfile = "c:\\temp\\test.jpg"
+--
+strdir,strfile = splitfilename(strnewfile)
+status,strfilename = GetExistingFile("Select Missing File","*.jpg;*.png;*.tif;*.bmp;*.gif","Image Files",strdir)
+if status == '-1' then
+error('Prompt Cancelled')
+end
+if status == '0' then
+os.execute('copy '..'"'..strfilename..'" "'..strnewfile..'"')
+print('copy file '..strfilename..'?')
+end

@@ -1,0 +1,113 @@
+--[[
+@Title: Disk Scanner
+@Author: Jane Taubman 
+@LastUpdated: 
+@Description: 
+]]
+--[[
+@Title: Progress Display (drop in)
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Description: Allows easy adding of a Progress Bar to any long running Plugin
+]]
+ProgressDisplay = {
+	Start = function (strTitle)
+		cancelflag = false
+		local cancelbutton = iup.button {
+			title = "Cancel",
+			size = "100x20",
+			action=function()
+				cancelflag = true
+				return iup.CLOSE
+			end
+		}
+		gaugeProgress = iup.progressbar{ expand="HORIZONTAL" }
+		messageline   = iup.label{expand="HORIZONTAL",title = " ",alignment = "ACENTER",gap=10} 
+		dlgProgress = iup.dialog{
+			title = strTitle,
+			dialogframe = "YES", border = "YES",
+			iup.vbox {
+				messageline,
+				gaugeProgress,
+				cancelbutton;
+				alignment = "ACENTER",gap=10
+			}
+		}
+		dlgProgress.size = "QUARTERxEIGHTH"
+		dlgProgress.menubox = "NO"  --  Remove Windows close button and menu.
+		dlgProgress.close_cb = cancelbutton.action
+		dlgProgress:showxy(iup.CENTER, iup.CENTER)  --  Put up Progress Display
+	end,
+	Step = function (iStep)
+		gaugeProgress.value = gaugeProgress.value + iStep
+		local value = tonumber(gaugeProgress.value)
+		if value >= 1 then
+			gaugeProgress.value  = 0
+		end
+		iup.LoopStep()
+	end,
+	Close = function ()
+		dlgProgress:destroy()
+	end,
+	Cancel = function ()
+		return cancelflag
+	end,
+	SetMessage = function(strMessage)
+		messageline.title = strMessage
+	end,
+	Reset = function()
+		gaugeProgress.value = 0
+	end
+}
+
+function attrdir (path)
+	ProgressDisplay.SetMessage('Searching '..path)
+	ProgressDisplay.Step(.01)  -- loops 10 times
+	if ProgressDisplay.Cancel() then
+		return false
+	end
+    for file in lfs.dir(path) do
+        if file ~= "." and file ~= ".." then
+            local f = path..'\\'..file
+            -- print ("\t "..f)
+            local attr = lfs.attributes (f)
+			if attr ~= nil then           
+		if attr.mode == "directory" and dirList[f] == nil then
+                attrdir (f)
+			else
+				if f:ends(strFilePattern) then
+					return f
+				end
+            end
+			end
+        end
+    end
+end
+function string.ends(String,End)	
+   return End=='' or string.sub(String:lower(),-string.len(End))==End:lower()
+end
+------------------------------------------------------------------------------ Main Code
+require "lfs"
+-- strPath =  fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+strPath = 'L:\\braintest\\NewBrian_brain\\brain_db'
+strFilePattern =  ".ged"
+dirSearched = {}
+dirList = {}
+print(strPath)
+i = strPath:find('\\',1)
+ProgressDisplay.Start('Scanning for '..strFilePattern)
+result = nil
+while  i ~= nil and result == nil do
+result = attrdir (strPath)
+dirList[strPath] = '1'
+strPath = string.match(strPath, ".*\\")
+strPath = strPath:sub(1,(strPath:len()) -1)
+print(strPath)
+i = strPath:find('\\',1)
+end
+if strPath:sub(strPath:len()) == ':' then
+	result = attrdir (strPath)
+end
+ProgressDisplay.Reset()
+ProgressDisplay.Close()
+print(result)

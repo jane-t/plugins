@@ -1,0 +1,37 @@
+require("lfs")
+newheader = [[<html>
+  <head>
+    <meta http-equiv = "content-type" content = "text/html; charset=windows-1250">
+    <link type = "text/css" rel = "stylesheet" href = "css/fhhelpstyle.css">
+    <title>Understanding Data References</title>
+  </head>
+  <body>
+    <div class = "article">]]
+newfooter = [[</div></body></html>]]
+olddata = [[<param name="Local" value="(.-)">]]
+fromFile =  'D:\\Work\\Dropbox\\_Html Help\\fh.hhc'
+toFile =  'D:\\Work\\Dropbox\\_Html Help\\_allpages.html'
+inp = assert(io.open(fromFile, "rb"))
+data = inp:read("*all")
+inp:close()
+lfs.chdir('D:\\Work\\Dropbox\\_Html Help\\')
+out = assert(io.open(toFile, "wb"))
+out:write(newheader)
+title = ''
+for filename in string.gmatch(data,olddata) do  
+	print(filename)
+	html =   assert(io.open(filename, "rb"))
+	htmldata = html:read("*all")
+	for newtitle in string.gmatch(htmldata,'<h1><a.->(.-)</a></h1>') do
+		if title ~= newtitle then
+		title = newtitle
+		print(title)
+		out:write('<h1>'..title..'</h1>')
+		end
+	end
+	htmldata = htmldata:gsub('<html>.-</h1>','')
+	htmldata = htmldata:gsub('</div>%s*</body>%s*</html>','')
+	out:write(htmldata)
+end
+out:write(newfooter)
+out:close()

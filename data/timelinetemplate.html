@@ -1,0 +1,89 @@
+<html>
+<!-- Replacement fields
+ref   : Record reference
+title : page title
+startdate : start date for timeline birth
+enddate : end date for timeline     death
+endlabel : Death unless person living
+-->
+<head>
+    <title>{title}</title>
+    <link rel='stylesheet' href='../styles.css' type='text/css' />
+<script src="http://static.simile.mit.edu/timeline/api-2.3.0/timeline-api.js?bundle=true" type="text/javascript"></script>
+
+    <script>
+        var tl;
+        function onLoad() {
+            var eventSource = new Timeline.DefaultEventSource(0);
+            
+            var theme = Timeline.ClassicTheme.create();
+            theme.event.bubble.width = 320;
+            theme.event.bubble.height = 220;
+            theme.ether.backgroundColors[1] = theme.ether.backgroundColors[0];
+            var d = Timeline.DateTime.parseGregorianDateTime("{birthyear}")
+            var bandInfos = [
+                Timeline.createBandInfo({
+                    width:          "10%", 
+                    intervalUnit:   Timeline.DateTime.DECADE, 
+                    intervalPixels: 200,
+                    date:           d,
+                    showEventText:  false,
+                    theme:          theme
+                }),
+                Timeline.createBandInfo({
+                    width:          "90%", 
+                    intervalUnit:   Timeline.DateTime.DECADE, 
+                    intervalPixels: 200,
+                    eventSource:    eventSource,
+                    date:           d,
+                    theme:          theme
+                })
+            ];
+            bandInfos[0].etherPainter = new Timeline.YearCountEtherPainter({
+                startDate:  "{startdate} 00:00:00 GMT",
+                multiple:   5,
+                theme:      theme
+            });
+            bandInfos[0].syncWith = 1;
+            bandInfos[0].highlight = false;
+            bandInfos[0].decorators = [
+                new Timeline.SpanHighlightDecorator({
+                    startDate:  "{startdate} 00:00:00 GMT",
+                    endDate:    "{enddate} 00:00:00 GMT",
+                    startLabel: "birth",
+                    endLabel:   "{endlabel}",
+                    color:      "#FFC080",
+                    opacity:    50,
+                    theme:      theme
+                })
+            ];
+            
+            tl = Timeline.create(document.getElementById("tl"), bandInfos, Timeline.HORIZONTAL);
+            tl.loadXML("{xmlfilename}", function(xml, url) {
+                eventSource.loadXML(xml, url);
+            });
+        }
+        var resizeTimerID = null;
+        function onResize() {
+            if (resizeTimerID == null) {
+                resizeTimerID = window.setTimeout(function() {
+                    resizeTimerID = null;
+                    tl.layout();
+                }, 500);
+            }
+        }
+    </script>
+</head>
+<body onload="onLoad();" onresize="onResize();">
+<div id="body">
+    <h1>The Life of {name}</h1>
+
+    <div id="tl" class="timeline-default" style="height: 1100px;">
+    </div>
+</div>
+<div class="footer">
+    <p>Timeline version <span id='tl_ver'></span>.
+<script>Timeline.writeVersion('tl_ver')</script>   </p>
+</div>
+</body>
+</html>

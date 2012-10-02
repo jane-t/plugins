@@ -1,0 +1,318 @@
+--[[
+@Title: Ancestor's UK Census Checker
+@Author: Jane Taubman
+@Version: 1.3
+@LastUpdated: June 2012 
+@Description: 
+Searches all the Ancestors of a selected person for the 1841 to 1911 UK Census and produces a web page to search Ancestry for any missing Census Records.
+Estimated dates are used, where none are recorded.  Womens married names are used where the Census is after the marriage date (or after the birth of the first child).
+
+1.3 Add Output to Result Set as well, to make it easier to find the Ancestors in the Local Database and support custom Census events in the xxxx Census naming format, additionally add sorting to the web output.
+1.2 Change Find My Past Search to the new format
+1.1 Added Find My Past Search  
+]]
+---------------------------------------------------------------- Web Page Template
+webpagetemplate = [[
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel = "stylesheet" href = "http://www.fhug.org.uk/css/tableformat.css" type = "text/css">
+    <title>Missing Census Data for Ancestors of {titlename}</title>
+    <script type="text/javascript" src="http://www.fhug.org.uk/programs/js/sortable/sortable.js"></script>
+  </head>
+  <body>
+    <h1>Missing Census Data for Ancestors of {titlename}</h1>
+<p>The following people appear to have no Census information, when they could be alive, people with no dates recorded are shown based on their estimated dates, women who are married at the time of the census
+are shown with their married names, where there is no marriage date the family date is taken from the 1st Childs birth date where available.</p> 
+    <div class = "datagrid">
+      <table class="sortable" id="anyid">
+        <thead>
+          <tr>
+            <th>Ancestry </th>
+            <th class="unsortable">Find My Past </th>
+            <th>Individual </th>
+            <th>Life Dates </th>
+            <th class="unsortable">Spouse Family at Census</th>
+            <th class="unsortable">Family Date </th>
+            <th class="unsortable">Father </th>
+            <th class="unsortable">Mother </th>
+          </tr>
+        </thead>
+		{content}
+      </table>
+    </div>
+  </body>
+</html>
+]]
+webtabletemplate = [[
+        <tr class = "{alt}">
+         <td>{ancestry}</td> 
+        <td>{findmypast}</td>  
+        <td>{individual}</td>
+          <td>{lifedates}</td>
+          <td>{spouse}</td>
+          <td>{marriageDate}</td>
+          <td>{father}</td>
+          <td>{mother}</td>
+         </tr>
+]]
+ancestrytemplate = [[
+<a href="http://search.ancestry.co.uk/cgi-bin/sse.dll?gl={aref}&rank=1&new=1&so=3&MSAV=0&msT=1&gsfn={givennames}&gsln={surname}&msbdy={birthyear}&msbpn__ftp={birthplace}&_83004003-n_xcl={sex}{extra}" target="_blank">
+{censusYear}
+</a>
+]]
+findmypasttemplate = [[
+    <form action="http://www.findmypast.co.uk/CensusPersonSearchResultServlet?censusYear={censusDate}" method="post" target="_blank">							
+      <input type="hidden" value="0" name="recordPosition"/>							
+      <input type="hidden" value="" name="pageDirection"/>							
+      <input type="hidden" value="startNewSearch" name="startNewSearch"/>							
+      <input type="hidden" value="false" name="advancedSearch"/>							
+      <input type="hidden" value="" name="route"/>							
+      <input type="hidden" value="{aref}" name="censusYear"/>							
+      <input type="hidden" value="{givennames}" name="forenames"/>							
+      <input type="hidden" value="fns" name="fns"/>							
+      <input type="hidden" value="{surname}" name="lastName"/>							
+      <input type="hidden" value="sns" name="sns"/>							
+      <input type="hidden" value="{birthyear}" name="yearOfBirth"/>							
+      <input type="hidden" value="5" name="yearOfBirthVariation"/>							
+      <input type="hidden" value="" name="occupation"/>							
+      <input type="hidden" value="{birthplace}" name="birthPlace"/>							
+      <input type="hidden" value="" name="residence"/>							
+      <input type="hidden" value="" name="country"/>							
+      <input type="hidden" value="" name="coIdList"/>							
+      <input type="hidden" value="ageDesc" name="sortOrder"/>              
+      <input type="submit" value="{aref}">
+      <input type="hidden" value="6,15" name="searchHouseholds"/>						
+      <input type="hidden" value="9" name="searchInstitutions"/>						
+      <input type="hidden" value="11,12" name="searchVessels"/>						
+    </form>  
+]]
+spousetemplate = '&mssng0={givennames}&mssns0={surname}'
+fathertemplate = '&msfng0={givennames}&msfns0={surname}'
+mothertemplate = '&msmng0={givennames}&msmns0={surname}'
+---------------------------------------------------------------- End Web Page Template
+function savestringtofile(str,filename)
+    local file = assert(io.open(filename,'w'))
+    file:write(str)
+    file:close()
+end
+function CheckDuplicate(table, ptr)
+    local id = fhGetRecordId(ptr)
+    if table[id] == nil then
+        table[id] = id
+        return false
+    else
+        return true
+    end
+end
+-- End Function
+--[[
+@function: GetAncestorList
+@description: Returns a list of Ancestors
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]]
+function GetAncestorList(ptr)
+    local ancestorlist = {}
+    local dupcheck = {}
+    local ptrMother = fhNewItemPtr()
+    local ptrFather = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+    table.insert(ancestorlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #ancestorlist do
+        ptrBase = ancestorlist[iLoop]
+        -- Loop Family as Child
+        ptrFamily:MoveTo(ptrBase,'~.FAMC')
+        while ptrFamily:IsNotNull() do
+            ptrMother:MoveTo(fhGetValueAsLink(ptrFamily),'~.WIFE>')
+            if ptrMother:IsNotNull() and (not CheckDuplicate(dupcheck,ptrMother))then
+                table.insert(ancestorlist,ptrMother:Clone())
+            end
+            ptrFather:MoveTo(fhGetValueAsLink(ptrFamily),'~.HUSB>')
+            if ptrFather:IsNotNull() and (not CheckDuplicate(dupcheck,ptrFather)) then
+                table.insert(ancestorlist,ptrFather:Clone())
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return ancestorlist
+end
+-- End Function
+------------------------------------- Build Census Date Table
+function buildDates()
+    local CensusDates = {}
+    -- table.insert(CensusDates,{year=1831,date="29 May 1831",aref="1831UKI"})
+    table.insert(CensusDates,{year=1841,date="6 Jun 1841",aref="1841UKI"})
+    table.insert(CensusDates,{year=1851,date="30 Mar 1851",aref="1851UKI"})
+    table.insert(CensusDates,{year=1861,date="7 Apr 1861",aref="1861UKI"})
+    table.insert(CensusDates,{year=1871,date="2 Apr 1871",aref="1871UKI"})
+    table.insert(CensusDates,{year=1881,date="3 Apr 1881",aref="1881UKI"})
+    table.insert(CensusDates,{year=1891,date="5 Apr 1891",aref="1891UKI"})
+    table.insert(CensusDates,{year=1901,date="31 Mar 1901",aref="1901UKI"})
+    table.insert(CensusDates,{year=1911,date="2 Apr 1911",aref="1911UKI"})
+    local cDate = fhNewDate()
+    for i,v in ipairs(CensusDates) do
+        cDate:SetValueAsText(v.date)
+        CensusDates[i].DatePt = cDate:Clone()
+    end
+    return CensusDates
+end
+---------------------------------------------------- End Build Census Date Table
+---------------------------------------------------- Build Ancestry Search
+function AncestrySearch(ptrIndi,aref,surname,pCurrentFam,censusYear)
+    local ancestrysearch = ancestrytemplate
+    ancestrysearch = ancestrysearch:gsub('{aref}',aref)
+    ancestrysearch = ancestrysearch:gsub('{givennames}',fhGetItemText(ptrIndi,'~.NAME:GIVEN_ALL'))
+    ancestrysearch = ancestrysearch:gsub('{surname}',surname)
+    ancestrysearch = ancestrysearch:gsub('{birthyear}',fhGetItemText(ptrIndi,'~.BIRT.DATE:YEAR'))
+    ancestrysearch = ancestrysearch:gsub('{birthplace}',fhGetItemText(ptrIndi,'~.BIRT.PLAC'))
+    ancestrysearch = ancestrysearch:gsub('{censusYear}',censusYear)
+    local sex = 'm'
+    if fhGetItemText(ptrIndi,'~.SEX') == 'Male' then
+        sex = 'f'
+    end
+    ancestrysearch = ancestrysearch:gsub('{sex}',sex)
+    -- Get Parents
+    local extra = ''
+    local pp = fhNewItemPtr()
+    pp:MoveTo(ptrIndi,'~.~FATH>')
+    if pp:IsNotNull() then
+        local line = fathertemplate:gsub('{givennames}',fhGetItemText(pp,'~.NAME:GIVEN_ALL'))
+        line = line:gsub('{surname}',fhGetItemText(pp,'~.NAME:SURNAME'))
+        extra = extra..line
+    end
+    pp:MoveTo(ptrIndi,'~.~MOTH>')
+    if pp:IsNotNull() then
+        local line = mothertemplate:gsub('{givennames}',fhGetItemText(pp,'~.NAME:GIVEN_ALL'))
+        line = line:gsub('{surname}',fhGetItemText(pp,'~.NAME:SURNAME'))
+        extra = extra..line
+    end
+    -- Get Spouse at time of Census
+    if pCurrentFam:IsNotNull() then
+        if fhGetItemText(ptrIndi,'~.SEX') == 'Female' then
+            pp:MoveTo(pCurrentFam,'~.HUSB>')
+        else
+            pp:MoveTo(pCurrentFam,'~.WIFE>')
+        end
+        local line = spousetemplate:gsub('{givennames}',fhGetItemText(pp,'~.NAME:GIVEN_ALL'))
+        line = line:gsub('{surname}',fhGetItemText(pp,'~.NAME:SURNAME'))
+        extra = extra..line
+    end
+    ancestrysearch = ancestrysearch:gsub('{extra}',extra)
+    return ancestrysearch
+end
+---------------------------------------------------- Build Find My Past Search
+function FindMyPastSearch(ptrIndi,aref,surname,pCurrentFam,year)
+    local findmypastsearch = findmypasttemplate
+    findmypastsearch = findmypastsearch:gsub('{aref}',aref)
+    findmypastsearch = findmypastsearch:gsub('{givennames}',fhGetItemText(ptrIndi,'~.NAME:FIRST'))
+    findmypastsearch = findmypastsearch:gsub('{surname}',surname)
+    findmypastsearch = findmypastsearch:gsub('{birthyear}',fhGetItemText(ptrIndi,'~.BIRT.DATE:YEAR'))
+    findmypastsearch = findmypastsearch:gsub('{birthplace}',fhGetItemText(ptrIndi,'~.BIRT.PLAC:SHORT'))
+    return findmypastsearch
+end
+---------------------------------------------------- Surname At Census
+function CurrentFamily(pi,DatePt)
+    -- Find Marriage before Census Date
+    local pFamLnk = fhNewItemPtr()
+    local pFam = fhNewItemPtr()
+    local pCurrentFam = fhNewItemPtr()
+    local pFamDate = fhNewItemPtr()
+    local dFamilyDate = fhNewDate()
+    local surname = fhGetItemText(pi,'~.NAME:SURNAME')
+    pFamLnk:MoveTo(pi,'~.FAMS') -- First Family As Spouse
+    while pFamLnk:IsNotNull() do
+        pFam = fhGetValueAsLink(pFamLnk)
+        pFamDate:MoveTo(pFam,'~.MARR.DATE')
+        if pFamDate:IsNull() then
+            -- Get Birth of First Child
+            pFamDate:MoveTo(pFam,'~.CHIL>BIRT.DATE')
+        end
+        dFamilyDate = fhGetValueAsDate(pFamDate)
+        if not(dFamilyDate:IsNull()) and dFamilyDate:Compare(DatePt) < 1 then
+            fStatus = fhGetItemText(pFam,'~._STAT')
+            if fStatus ~= 'Never Married' and fStatus ~= 'Unmarried Couple' then
+                pCurrentFam = pFam:Clone()
+            end
+        end
+        pFamLnk:MoveNext('SAME_TAG')
+    end
+    if fhGetItemText(pi,'Female') and pCurrentFam:IsNotNull() and not(dFamilyDate:IsNull())then
+        surname = fhGetItemText(pCurrentFam,'~.HUSB>NAME:SURNAME')
+    end
+    return pCurrentFam,surname,pFamDate
+end
+---------------------------------------------------- Main Program
+local plist = fhPromptUserForRecordSel('INDI',1)
+if plist[1] == nil then
+    return
+end
+local webpage = webpagetemplate:gsub('{titlename}',fhGetItemText(plist[1],'~.NAME')..' '..fhCallBuiltInFunction('LifeDates',plist[1]))
+local pi = fhNewItemPtr() -- declare pointer
+pi:MoveToFirstRecord("INDI") -- and set to the first record.
+local cPtr = fhNewItemPtr()
+local bDate = fhNewDate()
+local dDate = fhNewDate()
+local CensusDates = buildDates()
+local iCount = 0
+local balt = false -- Line colour switch
+local CensusList = {}
+local tblResultPtr = {}
+local tblResultRef = {}
+local tblAncestors = GetAncestorList(plist[1])
+for i,pi in ipairs(tblAncestors) do
+    iCount = iCount + 1
+    local bMissing = false
+    bDate:SetSimpleDate(fhCallBuiltInFunction('EstimatedBirthDate',pi,'EARLIEST'))
+    dDate:SetSimpleDate(fhCallBuiltInFunction('EstimatedDeathDate',pi,'LATEST'))
+    for i,cDate in ipairs(CensusDates) do
+        if bDate:Compare(cDate.DatePt) < 1 and dDate:Compare(cDate.DatePt) > -1 then
+            -- Alive At Selected Census
+            -- Check for Census
+            cPtr:MoveTo(pi,'~.CENS[year='..cDate.year..']')
+            if cPtr:IsNull() then
+                -- Census Not Found and Person Living
+                pSpouseFam,surname,pFamDate = CurrentFamily(pi,cDate.DatePt)
+                tableline = webtabletemplate
+                if balt then
+                    tableline = tableline:gsub('{alt}','odd')
+                else
+                    tableline = tableline:gsub('{alt}','even')
+                end
+                tableline = tableline:gsub('{individual}',surname..',  '..fhGetItemText(pi,'~.NAME:GIVEN_ALL')..' ('..fhCallBuiltInFunction('RecordId',pi)..')')
+                tableline = tableline:gsub('{lifedates}',fhCallBuiltInFunction('LifeDates',pi))
+                tableline = tableline:gsub('{spouse}',fhGetItemText(pSpouseFam,'~'))
+                tableline = tableline:gsub('{father}',fhGetItemText(pi,'~.~FATH>'))
+                tableline = tableline:gsub('{mother}',fhGetItemText(pi,'~.~MOTH>'))
+                tableline = tableline:gsub('{marriageDate}',fhGetItemText(pFamDate,'~:ABBREV2'))
+                tableline = tableline:gsub('{findmypast}',FindMyPastSearch(pi,cDate.year,surname,pSpouseFam))
+                tableline = tableline:gsub('{ancestry}',AncestrySearch(pi,cDate.aref,surname,pSpouseFam,cDate.year))
+                tableline = tableline:gsub('{censusDate}',cDate.year)
+                table.insert(CensusList,tableline)
+                balt = not(balt)
+                bMissing = true
+            end
+        end
+    end
+    if bMissing == true then
+        table.insert(tblResultPtr,pi:Clone())
+        table.insert(tblResultRef,fhCallBuiltInFunction('RecordId',pi))
+    end
+end
+if #tblResultPtr == 0 then
+   fhMessageBox('No Missing Census found for ancestors of '..fhGetDisplayText(plist[1]))
+else
+   local webpage = webpage:gsub('{content}',table.concat(CensusList))
+   local filename = os.getenv('TEMP')..os.tmpname()..'.html'
+   savestringtofile(webpage,filename)
+   local bOK, iErrorCode, strErrorText = fhShellExecute(filename)
+   local title = string.format('Ancestors of %s with missing Census Records',fhGetDisplayText(plist[1]))
+   fhOutputResultSetTitles(title, title, "Printed Date: %#x")
+   fhOutputResultSetColumn("Individuals", "item",tblResultPtr, #tblResultPtr, 180, "align_left")
+   fhOutputResultSetColumn("Ref", "integer",tblResultRef, #tblResultPtr, 30, "align_right")
+end

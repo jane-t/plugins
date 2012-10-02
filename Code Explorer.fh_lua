@@ -1,0 +1,36 @@
+--[[
+@Title: Code Explorer
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: June 2010 
+@Description: Quick display of functions in code with thier line numbers.
+]]
+-- require "iup"
+function main()
+    strAppData = fhGetContextInfo('CI_APP_DATA_FOLDER')
+    strLuaDir = strAppData..'\\Plugins\\*.fh_lua'
+    f, err = iup.GetFile(strLuaDir)
+    if err == 0 then
+        local script = searchCode(f)
+        iup.GetText('Functions in '..f, table.concat(script,'\n'))
+    end
+end
+
+-- Load lines in table from file 
+function searchCode(strFileName)
+    local    t = {}
+    local    l = 0
+    for line in io.lines(strFileName) do
+       l = l + 1
+       sfind = line:find('function[%s]')
+       if sfind then
+          cfind = line:find('%-%-')
+          if not(cfind and cfind < sfind) then
+             table.insert(t,l..'\t '..string.gsub(line:gsub('function','   '),'\t',' '))
+          end
+       end
+    end
+    return t
+end 
+-------------------------------------------- End of functions
+main()

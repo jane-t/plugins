@@ -1,0 +1,255 @@
+--[[
+@Title: Process Menu File
+@Author: Jane
+@LastUpdated: 
+@Description: Process CHM Table of Contents file to produce structure. 
+]]
+strheaddata = 
+[[<head>
+<meta http-equiv="content-type" content="text/html; charset=windows-1250">
+<link type="text/css" rel="stylesheet" href="css/fhhelpstyle.css">
+<title>{title}</title>
+</head>
+]]
+--[[
+@Module Stack Processing
+Usage:
+-- create stack
+stack = Stack:Create()
+-- push values on to the stack
+stack:push("a", "b")
+-- pop values
+stack:pop(2)
+]]
+Stack = {}
+-- Create a Table with stack functions
+function Stack:Create()
+
+  -- stack table
+  local t = {}
+  -- entry table
+  t._et = {}
+
+  -- push a value on to the stack
+  function t:push(...)
+    if ... then
+      local targs = {...}
+      -- add values
+      for _,v in pairs(targs) do
+        table.insert(self._et, v)
+      end
+    end
+  end
+
+  -- pop a value from the stack
+  function t:readlast()
+
+    -- get num values from stack
+    local num =  1
+
+    -- return table
+    local entries = {}
+      -- get last entry
+      if #self._et ~= 0 then
+        table.insert(entries, self._et[#self._et])
+      end
+    -- return unpacked entries
+    return unpack(entries)
+  end
+  function t:pop(num)
+
+    -- get num values from stack
+    local num = num or 1
+
+    -- return table
+    local entries = {}
+
+    -- get values into entries
+    for i = 1, num do
+      -- get last entry
+      if #self._et ~= 0 then
+        table.insert(entries, self._et[#self._et])
+        -- remove last value
+        table.remove(self._et)
+      else
+        break
+      end
+    end
+    -- return unpacked entries
+    return unpack(entries)
+  end
+  -- get entries
+  function t:getn()
+    return #self._et
+  end
+
+  -- list values
+  function t:list()
+    for i,v in pairs(self._et) do
+      print(i, v)
+    end
+  end
+  return t
+end
+require "lfs"
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+
+function CopyFile(strfromfile,strtofile,bReplace)
+    if not(bReplace) then
+        if file_exists(strtofile) then
+            return false
+        end
+    end
+    local inp,err = io.open(strfromfile, "rb")
+	if not(err) then
+    local out = assert(io.open(strtofile, "wb"))
+    
+    local data = inp:read("*all")
+    out:write(data)
+    assert(inp:close())
+    assert(out:close())
+    -- Copy the last modification date and access date from the original.
+    local attr = lfs.attributes(strfromfile)
+    lfs.touch(strtofile,attr['modification'],attr['access'])
+    return true
+	end
+end
+function string:split(sep)
+        local sep, fields = sep or ":", {}
+        local pattern = string.format("([^%s]+)", sep)
+        self:gsub(pattern, function(c) fields[#fields+1] = c end)
+        return fields
+end
+function relativepath(fromPath,toPath)
+local tblFrom = fromPath:split('\\')
+local tblTo  =  toPath:split('\\')
+local strlead = ''
+local strend = ''
+local max = 0
+local i = 0
+-- Find the Longest Path
+if (#tblFrom > #tblTo) then 
+	max = #tblFrom 
+else 
+	max = #tblTo 
+end
+for i=1,max do
+	if (tblFrom[i] ~= tblTo[i]) then
+		if (tblFrom[i] ~= nil) then strlead = strlead .. '../' end
+		if (tblTo[i] ~= nil) then strend = strend ..  tblTo[i] .. '/'  end
+	end
+end
+return(strlead..strend)	
+end
+function updatehtml(filename)
+    local inp = assert(io.open(filename, "rb"))
+    local out = assert(io.open('b'..filename, "wb"))
+    local data = inp:read("*all")
+	local level = ''
+	-- Replace header with new one.
+   local chgtxt = string.gsub(strheaddata,'{title}',tblFileName[filename])
+	data = string.gsub(data,'<head>(.*)</head>',chgtxt)
+-- Remove all divisons
+	data = string.gsub(data,'<div (.-)>','')
+	data = string.gsub(data,'</div>','')
+-- Change Level 1 Headings for Level Two
+	data = data:gsub('<h1>(.-)</h1>','<h2>%1</h2>')
+-- Add in Title for Sub pages and article division.
+body = '<body><div class="article">'
+if tblParentLink[filename] ~= nil then
+body = body..'<h1><a href="'..tblParentLink[filename]..'">'..tblParentName[filename]..'</a></h1>'
+end
+	data = data:gsub('<body>',body)
+	data = data:gsub('</body>','</div></body>')
+	-- sub headings to level 3 
+	data = data:gsub('<p class="SubHeading2">(.-)</p>','<h3>%1</h3>')
+	data = data:gsub('<p class="SubHeading3">(.-)</p>','<h4>%1</h4>')
+	data = data:gsub('border="1"','class="inline"')
+	-- Clean Table Section
+	data = data:gsub('<table border="0" cellspacing="0" cellpadding="0">','<table><col class=""><col class="">\n')
+	data = data:gsub('width="(.-)"','')
+	data = data:gsub('height="(.-)"','')
+	data = data:gsub(' valign="top"','')
+	data = data:gsub('class="td_1(.-)"','class="td_1"')
+	data = data:gsub(' class="tr_simple"','')
+	data = data:gsub('class="column_heading_simple"','')
+	data = data:gsub('<td class="td_1">(.-)</td>','<th>%1</th>')
+	out:write(data)
+	inp:close()
+	out:close()
+	os.remove(filename)
+	os.rename('b'..filename,tblFileOrgLink[filename])
+end
+--------------------------------------------------------------------------------
+-- Main Code Starts Here
+--------------------------------------------------------------------------------
+dropbox = 'D:\\Work\\Dropbox\\'
+fromRootDir = 'D:\\temp\\_Html Help\\OriginalHTML\\'
+toRootDir = 'D:\\temp\\_Html Help\\'
+rootlen = string.len(toRootDir) + 1
+missingDir = toRootDir..'\\unfilled\\'
+cssDir = toRootDir..'\\'
+jsDir = toRootDir..'\\js\\'
+strFile = fromRootDir..'fh.hhc'
+ilevel = -1
+icount = 0
+stkName = Stack:Create()
+stkLink = Stack:Create()
+strLink = " "
+strName = " "
+tblFileList = {}
+tblFileName = {}
+tblFileOrgLink = {}
+tblParentLink = {}
+tblParentName = {}
+newhhc  = ''
+lfs.chdir(toRootDir)
+lfs.mkdir('unfilled')
+for line in io.lines(strFile) do 	
+	if (string.match(line,'<UL>') ~= nil) then  
+		stkName:push(strName)
+		stkLink:push(strLink)
+		newdir = string.gsub(strLink, "\.html","")
+		newdir = string.gsub(newdir, "\.htm","")
+	 end
+	if (string.match(line,'</UL>') ~= nil) then  
+		stkName:pop()
+		stkLink:pop()
+	end
+	if (string.match(line,'<param name="Name"') ~= nil) then 
+		strName = string.match(line,'<param name="Name" value="(.-)"')
+	end
+	if (string.match(line,'<param name="Local"') ~= nil) then 
+		strLink = string.lower(string.match(line,'<param name="Local" value="(.-)"'))
+		if (tblFileList[strLink] == nil) then
+		tblParentLink[strLink] = stkLink:readlast()
+		tblParentName[strLink] = stkName:readlast()
+		tblFileList[strLink] = lfs.currentdir()..'\\'
+      tblFileName[strLink] = strName
+		tblFileOrgLink[strLink] = string.match(line,'<param name="Local" value="(.-)"')	
+ 		CopyFile(fromRootDir..strLink,strLink,true)
+		icount = icount + 1
+		end
+	end
+	newhhc = newhhc .. '\n' .. line
+end
+-- Process the changes now we have a full list of files.
+
+for strLink,strPath in pairs(tblFileList) do
+		lfs.chdir(strPath)
+		print(strLink, strPath)
+		updatehtml(strLink)
+		relpath = string.sub(strPath,rootlen)
+		newhhc = newhhc:gsub(tblFileOrgLink[strLink],relpath..strLink)
+end
+print(icount)
+-- newhccfile =  assert(io.open(toRootDir..'fh.hhc', "wb"))
+-- newhccfile:write(newhhc)
+-- assert(newhccfile:close())
+

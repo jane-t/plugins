@@ -1,0 +1,75 @@
+--[[
+@title: Family Anniversaries
+@author: Calico Pie
+@lastupdated: July 2011
+@version: 1.0
+@description:
+List Event's which occur in the next 7 days (regardless of Year)
+]]
+------------------------------------------------------------------------ Main Code
+	recordtypes = {'INDI','FAM'}
+	eventtypes = {'BAPM','BIRT','MARR'}
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types
+    local ptr = fhNewItemPtr()
+    local ptrEvent = fhNewItemPtr()
+    local ptrDate = fhNewItemPtr()
+	 local dpToday = fhCallBuiltInFunction('Today')
+	 local dpPlus7 =  fhCallBuiltInFunction('CalcDate',dpToday,0,0,7)
+	 local dtToday = fhNewDate()
+  	 local dtPlus7 = fhNewDate()	
+    -- Define Result Tables	
+	 tblRecord = {}
+	 tblDate   = {}
+	 tblADate  = {}
+	 tblFact  = {}
+	 tblYears  = {}
+    for i,strRecType in pairs(recordtypes) do
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+    			for j,strEventType in pairs(eventtypes) do
+-- Check for Each Event Type
+			   ptrEvent:MoveTo(ptr,'~.'..strEventType)
+        while ptrEvent:IsNotNull() do
+			   ptrDate:MoveTo(ptrEvent,'~.DATE')
+				dtDate = fhGetValueAsDate(ptrDate) 
+				dpDate   = dtDate:GetDatePt1()
+				year = dpDate:GetYear()
+				month = dpDate:GetMonth()
+				day   = dpDate:GetDay()
+				yearcur = dpToday:GetYear()
+				dptest = fhNewDatePt(yearcur,month,day)
+			   if (dptest:Compare(dpToday) > -1) and (dptest:Compare(dpPlus7) < 1) then
+					-- Matching Date Add to Result Set
+
+				   table.insert(tblRecord,ptr:Clone())
+				   table.insert(tblFact,ptrEvent:Clone())
+				   table.insert(tblADate,dptest:Clone())
+				   table.insert(tblDate,dpDate:Clone())
+				   table.insert(tblYears,(yearcur - year))
+			   end  
+			   ptrEvent:MoveNext('SAME_TAG')
+		  end
+				end		
+            	ptr:MoveNext()
+        end
+end
+if #tblRecord == 0 then
+	fhMessageBox('No Event Anniversaries in the next 7 days')
+else
+	dtToday = fhNewDate()
+	dtToday:SetSimpleDate(dpToday)
+	dtPlus7 = fhNewDate()
+	dtPlus7:SetSimpleDate(dpPlus7)
+
+	title = "Event Anniversaries"
+	subtitle = dtToday:GetValueAsText()..'-'..dtPlus7:GetValueAsText() 
+	fhOutputResultSetTitles(title..' '..subtitle, title,subtitle.." Printed: %#x")
+	fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 220, "align_left")
+	fhOutputResultSetColumn("Event", "item", tblFact, #tblRecord, 180, "align_left")
+  	fhOutputResultSetColumn("Date", "date-point", tblDate, #tblRecord, 70, "align_left",2)
+  	fhOutputResultSetColumn("Anniversary", "date-point", tblADate, #tblRecord, 70, "align_left",1)
+  	fhOutputResultSetColumn("Years Ago", "integer", tblYears, #tblRecord, 40, "align_right")
+
+end
+

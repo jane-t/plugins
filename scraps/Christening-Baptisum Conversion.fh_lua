@@ -1,0 +1,75 @@
+--[[
+@Title: Christening-Baptism Conversion
+@Author: Calico Pie
+@LastUpdated: June 2011
+@Description: Replaces all CHR tags with BAP tags or vice versa
+]]
+
+require ("iuplua")   -- needed because we are going to call an IUP function
+
+---------------------------------------
+-- Function: CopyChildBranch
+---------------------------------------
+function CopyChildBranch(ptrSrc, ptrTargParent)
+    local ptrNew = fhCreateItem(fhGetTag(ptrSrc), ptrTargParent)
+    fhSetValue_Copy(ptrNew, ptrSrc)
+    CopyChildren_FromTo(ptrSrc, ptrNew)
+end
+---------------------------------------
+-- Function: CreateCopyChildren_FromTo
+---------------------------------------
+function CopyChildren_FromTo(ptrFrom, ptrTo)
+    local ptrF = fhNewItemPtr()
+    ptrF:Copy(ptrFrom)
+    ptrF:MoveToChildItem()
+    while not ptrF:IsNull()
+        do
+        CopyChildBranch(ptrF, ptrTo)
+        ptrF:MoveNext()
+    end
+end
+
+---------------------------------------
+-- main body of script starts here
+---------------------------------------
+
+sTitle = "Christening-Baptism Conversion"
+
+iButton = iup.Alarm(sTitle ,
+"This plugin will convert all christening events to baptisms or vice versa.  Please choose the direction of conversion.",
+"Christening to Baptism", "Baptism to Christening", "Cancel")
+
+ptrInd = fhNewItemPtr()
+ptrInd:MoveToFirstRecord('INDI')
+ptrFind = fhNewItemPtr()
+
+if iButton == 1 then
+    sFind = "CHR"
+    sReplace = "BAPM"
+elseif iButton == 2 then
+    sFind = "BAPM"
+    sReplace = "CHR"
+end
+
+iCount = 0
+
+if (iButton == 1)
+    or (iButton == 2) then
+    while not ptrInd:IsNull()
+        do
+        ptrFind:MoveTo(ptrInd,sFind)
+        while not ptrFind:IsNull() do
+            ptrReplace = fhCreateItem(sReplace, ptrInd)
+            CopyChildren_FromTo(ptrFind, ptrReplace)
+            iCount = iCount + 1
+            fhDeleteItem(ptrFind)
+            ptrFind:MoveTo(sFind, ptrInd)
+        end
+        ptrInd:MoveNext()
+    end
+    
+    iup.Message(sTitle, "Finished.  " .. iCount .. " item(s) found and converted")
+else
+    iup.Message(sTitle, "Cancelled")
+end
+

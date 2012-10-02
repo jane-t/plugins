@@ -1,0 +1,96 @@
+--[[
+@Title: Possible Problem Marker
+@Author: Jane Taubman
+@LastUpdated: May 2012
+@Version: 1.1
+@Description: Companion to Possible Problem Marker,  
+this allows Events to be marked as "Ignore" so that they are 
+not listed on the Possible Problem Report.
+
+1.1 Update for Store
+]]
+require "iuplua"
+require "scraps._tableloadsave"
+
+function getAllFacts(ptr)
+    local ptrItems = {}
+    local dspList = {}
+    local markList = {}
+	local recordList = {ptr}
+    local ptrEvent = fhNewItemPtr()
+    local ptrDate = fhNewItemPtr()
+	for i,ptr in ipairs(recordList) do
+    ptrEvent:MoveToFirstChildItem(ptr)
+    while ptrEvent:IsNotNull() do
+        if  fhIsFact(ptrEvent) then
+			 ptrDate:MoveTo(ptrEvent,'~.DATE')
+			 warning = ""
+			 if ptrDate:IsNotNull() then
+				warning = fhCallBuiltInFunction('GetDataWarning',ptrDate,1)
+				if warning ~= "" then 
+					warning="   ~~Warning~~" 
+				end
+			end
+            local tblRecord = {recordid=fhGetRecordId(ptr),
+								    type=fhGetTag(ptr),
+									date=fhGetItemText(ptrEvent,'~.DATE'),
+                                plac=fhGetItemText(ptrEvent,'~.PLAC'),
+                                tag=fhGetTag(ptrEvent),
+                                value=fhGetItemText(ptrEvent,'~')}
+            table.insert(ptrItems,tblRecord)
+            table.insert(dspList,fhGetDisplayText(ptrEvent)..'('..fhGetTag(ptrEvent)..')'..warning)
+            table.insert(markList,checkMark(tblRecord))
+        end
+		 if fhGetTag(ptrEvent) == 'FAMS' then
+			 table.insert(recordList,fhGetValueAsLink(ptrEvent))
+		end
+        ptrEvent:MoveNext('ANY')
+    end
+	end
+    return ptrItems,dspList,markList
+end
+
+function buildIndex(record)
+    return (record.type..'|'..record.recordid..'|'..record.tag..'|'..record.date..'|'..record.plac..'|'..record.value)
+end
+function checkMark(record)
+    local mark = 0
+    if Settings[buildIndex(record)] ~= nil then
+        mark = 1
+    end
+    return mark
+end
+--------------------------------------------------------------Main Code
+strSettings = fhGetPluginDataFileName()
+-- Fix File name
+strSettings =strSettings:gsub('Data\\.-\.dat','Data\\Possible Problem Manager.dat')
+Settings = table.load(strSettings)
+if Settings == nil then Settings = {} end  -- First Run set empty Settings File
+    -- Get Current Record abort if none.
+    ptrList = fhGetCurrentRecordSel('INDI')
+    if ptrList[1] == nil then
+        error('No Record - Currently Selected')
+    end
+    ptrItems,dspList,markList = getAllFacts(ptrList[1])
+	table.insert(dspList,1,'Clear All Marks')
+	table.insert(markList,1,0)
+    error = iup.ListDialog(2,"Mark Events To Be Ignored - Ctrl Click to select more than one",#dspList,dspList,0,40,15,markList)
+	bClear = false
+    if error == -1 then
+		return
+    else
+        for i,mark in ipairs(markList) do
+			 if i == 1 and mark == 1 then
+					bClear = true
+			 end
+			 if i > 1 then
+            idx = buildIndex(ptrItems[i-1])
+            if (mark == 1) and not(bClear) then
+                Settings[idx] = 1
+            else
+                Settings[idx] = nil
+            end
+			end
+        end
+    end
+    table.save(Settings,strSettings)

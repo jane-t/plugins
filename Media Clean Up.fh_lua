@@ -1,0 +1,79 @@
+--[[
+@title: Media Clean Up Routine
+@author: Calico Pie
+@lastupdated: March 2011
+@description:
+Checks all Media records for broken links and optionally copies media outside of the media folder into the media folder.
+]]
+------------------------------------------------------------------- Functions
+function SplitFilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+function string.starts(String,Start)
+   return string.sub(String,1,string.len(Start))==Start
+end
+-- Check for File
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+-- End Functions
+----------------------------------------------------------------- Main Program
+require( "iuplua" )
+-- Define Pointers
+ptrMedia = fhNewItemPtr()
+ptrFileName = fhNewItemPtr()
+-- Get Environment
+bIsProject = fhGetContextInfo('CI_APP_MODE') == 'Project Mode'
+strProjectFolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+strMediaFolder = strProjectFolder..'\\Media\\'
+if not(bIsProject) then
+    a = fhMessageBox("The File is not open in Project Mode, only file existence will be checked and any files in the Media Folder will be missing. Do you wish to continue?", "MB_YESNO","MB_ICONEXCLAMATION")
+    if a == "No" then
+        error('User Cancelled')
+    end
+end
+
+ptrMedia:MoveToFirstRecord('OBJE')
+while ptrMedia:IsNotNull() do
+    ptrFileName:MoveTo (ptrMedia,'~._FILE')
+    strFilename = fhGetItemText(ptrFileName,'~')
+    if string.sub(strFilename,1,5) == 'Media' and bIsProject then
+        strFilenamefull = 	strProjectFolder..'\\'..strFilename
+    else
+        strFilenamefull = 	strFilename
+    end
+    -- Check File Exists
+    if not(file_exists(strFilenamefull)) then
+        -- Broken Link
+        print('File '..strFilenamefull..' not found')
+        f, err = iup.GetFile(strFilenamefull)
+        if err == 1 then
+            iup.Message("New file", f)
+        elseif err == 0 then
+				-- File Has been selected is it in the Media Folder?
+				strDir,strNewName,strExt = SplitFilename(f)
+				print (strDir,strNewName,strExt)
+				if strDir:starts(strMediaFolder) then
+					--  File already in Media Folder
+					print('In media folder')
+				else
+					-- Copy File to Media Folder
+				end
+		            iup.Message("File already exists", f)
+        elseif err == -1 then
+            error('Process Cancelled')
+        end
+    end
+    if bIsProject then
+        if string.sub(strFilename,1,5) ~= 'Media' then
+            print('Not Media Folder:'..strFilename)
+			   
+        end
+    end
+    ptrMedia:MoveNext()  -- Next Individual
+end

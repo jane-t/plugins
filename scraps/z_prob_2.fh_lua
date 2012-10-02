@@ -1,0 +1,15 @@
+local i = 1
+local i2 = 2
+local i3 = 0
+local k = 2
+while i2 < 4000000 do
+i3 = i + i2
+i = i2
+i2 = i3
+-- print (i,i2,i2 % 2)
+if (i2 % 2) == 0 then
+k = k + i2
+print (i2,k)
+end
+end
+print(k)

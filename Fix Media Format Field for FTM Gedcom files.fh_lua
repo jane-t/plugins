@@ -1,0 +1,30 @@
+--[[
+@Title: Fix media format field for imported Family Tree Maker 2012 Files
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: April 2012 
+@Description: Add missing format lines to Family Tree Maker Files.
+]]
+function splitfilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-)([^%.]+)$")
+end
+
+--------------------------------------------------------------- Main Code
+ptrObje  = fhNewItemPtr()
+ptrForm  = fhNewItemPtr()
+ptrObje:MoveToFirstRecord('OBJE')
+while ptrObje:IsNotNull() do
+  filename = fhGetItemText(ptrObje,'~._FILE')
+  path,name,ext = splitfilename(filename:lower())
+  if ext == 'jpg' then
+	  ext = 'jpeg'
+  end
+  ptrForm:MoveTo(ptrObje,'~.FORM')
+  if ptrForm:IsNull() then
+	-- Create Format Item
+    ptrForm = fhCreateItem('FORM',ptrObje)
+    fhSetValueAsText(ptrForm,ext)
+  end
+  ptrObje:MoveNext()
+end

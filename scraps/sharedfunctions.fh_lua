@@ -1,0 +1,136 @@
+if ... == nil then error('This is a Module') end
+module(..., package.seeall)
+--------------------------------
+--[[
+@function: CheckDuplicate
+@description: Adds Record Id as value and index, to table if it does not already exist
+@parameters: Item Pointer - Must be at Record Level
+@returns: true if pointer is a duplicate
+@requires: none
+]] 
+function CheckDuplicate(table, ptr)
+  local id = fhGetRecordId(ptr)
+  if table[id] == nil then
+      table[id] = id
+      return false
+      else
+      return true
+  end
+end
+-- End Function
+--[[
+@function: GetAncestorList
+@description: Returns a list of Ancestors
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]] 
+function GetAncestorList(ptr)
+    local ancestorlist  = {}
+    local dupcheck = {}
+
+    local ptrMother = fhNewItemPtr()
+    local ptrFather = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+
+    table.insert(ancestorlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #ancestorlist do
+        ptrBase = ancestorlist[iLoop]
+        -- Loop Family as Child
+        ptrFamily:MoveTo(ptrBase,'~.FAMC')
+        while ptrFamily:IsNotNull() do
+            ptrMother:MoveTo(fhGetValueAsLink(ptrFamily),'~.WIFE>')
+            if ptrMother:IsNotNull() and (not CheckDuplicate(dupcheck,ptrMother))then
+                table.insert(ancestorlist,ptrMother:Clone())
+            end
+            ptrFather:MoveTo(fhGetValueAsLink(ptrFamily),'~.HUSB>')
+            if ptrFather:IsNotNull() and (not CheckDuplicate(dupcheck,ptrFather)) then
+                table.insert(ancestorlist,ptrFather:Clone())
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return ancestorlist
+end
+-- End Function
+--[[
+@function: GetDecendantList
+@description: Returns a list of decendants
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]] 
+function GetDecendantList(ptr)
+    local decendantlist  = {}
+    local dupcheck = {}
+    local ptrChild = fhNewItemPtr()
+
+    local ptrFamily = fhNewItemPtr()
+    local ptrFamilyRec = fhNewItemPtr()
+    local ptrBase   = fhNewItemPtr
+
+    table.insert(decendantlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #decendantlist do
+        ptrBase = decendantlist[iLoop]
+        -- Loop Family as Spouse
+        ptrFamily:MoveTo(ptrBase,'~.FAMS')
+        while ptrFamily:IsNotNull() do
+            ptrFamilyRecord = fhGetValueAsLink(ptrFamily)
+            -- Loop Children
+            ptrChild:MoveTo(ptrFamilyRecord,'~.CHIL')
+            while ptrChild:IsNotNull() do 
+              ptrChildRecord = fhGetValueAsLink(ptrChild)
+                if ptrChildRecord:IsNotNull() and not CheckDuplicate(dupcheck,ptrChildRecord) then
+                    table.insert(decendantlist,fhGetValueAsLink(ptrChild))
+                end
+                ptrChild:MoveNext('SAME_TAG')
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return decendantlist
+end
+-- End Function
+--[[
+@function: SplitFilename
+@description: Splits filename with path into components
+@parameters: full file path
+@returns: filepath, filename, extension
+@requires: None
+]] 
+function splitfilename(strfilename)
+return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+-- End Function
+--[[
+@function: CopyFile
+@description: Copies a file in binary mode from one place to another
+@parameters: fromfile,tofile
+@returns: true if file copied, false if not
+@requires: None
+]] 
+function CopyFile(strfromfile,strtofile)
+    local inp = assert(io.open(strfromfile, "rb"))
+    local out = assert(io.open(strtofile, "wb"))
+    
+    local data = inp:read("*all")
+    out:write(data)
+    assert(in:close())
+    assert(out:close())
+end
+-- file_exists
+-- Checks if a file exists
+------------------------------------------------
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end

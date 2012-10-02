@@ -1,0 +1,4 @@
+local f = io.popen("ver") -- runs command
+local l = f:read("*a") -- read output of command
+print(l)
+f:close()

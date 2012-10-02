@@ -1,0 +1,38 @@
+-- iupole-browser.lua
+--
+-- Duplicate the iupole_browser.cpp sample in pure lua
+
+require "iuplua"
+require "iupluaole"
+require "luacom"
+
+-- create the WebBrowser based on its ProgID
+local control = iup.olecontrol{"Shell.Explorer.2"}
+
+-- connect it to LuaCOM
+control:CreateLuaCOM()
+
+-- Sets production mode
+control.designmode= "NO"
+
+-- Create a dialog containing the OLE control
+
+local dlg = iup.dialog{
+    title="Display HTML in IUP Dialogue",
+    size="HALFxHALF",
+    iup.vbox{
+	control,
+    }
+}
+
+-- Show the dialog and run the main loop
+dlg:show()
+
+control.com:Navigate("http://www.family-historian.co.uk/wp-content/plugins/forced-download2/download.php?path=/wp-content/uploads/formidable/tatewise/&file=Map-Life-Facts3.fh_lua&id=190")
+fhSleep(2000,100)
+myfield = control.com.Document.DocumentElement.OuterHtml
+print(o2)
+
+if (not iup.MainLoopLevel or iup.MainLoopLevel()==0) then
+  iup.MainLoop()
+end

@@ -1,0 +1,286 @@
+--[[
+@title: Create and Update Ancestor and Descendant Counts
+@author: Jane Taubman
+@lastupdated: July 2012
+@version: 1.2
+@description:
+Create (if necessary) and Update counts for the number of ancestors
+and the number of descendants for each person in the current project.
+Where the custom attributes are created the Fact Set information will
+need to be updated manually.
+
+To use the counts in queries remember to use the =texttonumber() function
+to convert the value to a number to allow logical sorting.
+1.1 Only update records where the values have changed.
+1.2 Fix issue with Progress Bar
+]]
+--[[
+@function: CheckDuplicate
+@description: Adds Record Id as value and index, to table if it does not already exist
+@parameters: Item Pointer - Must be at Record Level
+@returns: true if pointer is a duplicate
+@requires: none
+]] 
+function CheckDuplicate(table, ptr)
+  local id = fhGetRecordId(ptr)
+  if table[id] == nil then
+      table[id] = id
+      return false
+      else
+      return true
+  end
+end
+-- End Function
+--[[
+@function: GetAncestorList
+@description: Returns a list of Ancestors
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]] 
+function GetAncestorList(ptr)
+    local ancestorlist  = {}
+    local dupcheck = {}
+
+    local ptrMother = fhNewItemPtr()
+    local ptrFather = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+
+    table.insert(ancestorlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #ancestorlist do
+        ptrBase = ancestorlist[iLoop]
+        -- Loop Family as Child
+        ptrFamily:MoveTo(ptrBase,'~.FAMC')
+        while ptrFamily:IsNotNull() do
+            ptrMother:MoveTo(fhGetValueAsLink(ptrFamily),'~.WIFE>')
+            if ptrMother:IsNotNull() and (not CheckDuplicate(dupcheck,ptrMother))then
+                table.insert(ancestorlist,ptrMother:Clone())
+            end
+            ptrFather:MoveTo(fhGetValueAsLink(ptrFamily),'~.HUSB>')
+            if ptrFather:IsNotNull() and (not CheckDuplicate(dupcheck,ptrFather)) then
+                table.insert(ancestorlist,ptrFather:Clone())
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return ancestorlist
+end
+-- End Function
+--[[
+@function: GetDecendantList
+@description: Returns a list of decendants
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]] 
+function GetDecendantList(ptr)
+    local decendantlist  = {}
+    local dupcheck = {}
+    local ptrChild = fhNewItemPtr()
+
+    local ptrFamily = fhNewItemPtr()
+    local ptrFamilyRec = fhNewItemPtr()
+    local ptrBase   = fhNewItemPtr
+
+    table.insert(decendantlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #decendantlist do
+        ptrBase = decendantlist[iLoop]
+        -- Loop Family as Spouse
+        ptrFamily:MoveTo(ptrBase,'~.FAMS')
+        while ptrFamily:IsNotNull() do
+            ptrFamilyRecord = fhGetValueAsLink(ptrFamily)
+            -- Loop Children
+            ptrChild:MoveTo(ptrFamilyRecord,'~.CHIL')
+            while ptrChild:IsNotNull() do 
+              ptrChildRecord = fhGetValueAsLink(ptrChild)
+                if ptrChildRecord:IsNotNull() and not CheckDuplicate(dupcheck,ptrChildRecord) then
+                    table.insert(decendantlist,fhGetValueAsLink(ptrChild))
+                end
+                ptrChild:MoveNext('SAME_TAG')
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return decendantlist
+end
+-- End Function
+---------------------------------------------------------------------------- Start ProgressDisplay
+--[[
+@Title: Progress Display (drop in)
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Description: Allows easy adding of a Progress Bar to any long running Plugin
+
+Sample of Use
+
+ProgressDisplay.Start('This is my progress Box')
+for i=1,100 do
+	ProgressDisplay.SetMessage('I = '..i)
+	for j = 1,100 do end
+	ProgressDisplay.Step(.01)  -- loops 10 times
+	if ProgressDisplay.Cancel() then
+		break
+	end
+end 
+ProgressDisplay.Reset()
+ProgressDisplay.Close()
+]]
+
+ProgressDisplay = {
+	Start = function (strTitle)
+		cancelflag = false
+		local cancelbutton = iup.button {
+			title = "Cancel",
+			size = "100x20",
+			action=function()
+				cancelflag = true
+				return iup.CLOSE
+			end
+		}
+		gaugeProgress = iup.progressbar{ expand="HORIZONTAL" }
+		messageline   = iup.label{expand="HORIZONTAL",title = " ",alignment = "ACENTER",gap=10} 
+		dlgProgress = iup.dialog{
+			title = strTitle,
+			dialogframe = "YES", border = "YES",
+			iup.vbox {
+				messageline,
+				gaugeProgress,
+				cancelbutton;
+				alignment = "ACENTER",gap=10
+			}
+		}
+		dlgProgress.size = "QUARTERxEIGHTH"
+		dlgProgress.menubox = "NO"  --  Remove Windows close button and menu.
+		dlgProgress.close_cb = cancelbutton.action
+		dlgProgress:showxy(iup.CENTER, iup.CENTER)  --  Put up Progress Display
+	end,
+	Step = function (iStep)
+		gaugeProgress.value = gaugeProgress.value + iStep
+		iup.LoopStep()
+	end,
+	Close = function ()
+		dlgProgress:destroy()
+	end,
+	Cancel = function ()
+		iup.LoopStep()
+		return cancelflag
+	end,
+	SetMessage = function(strMessage)
+		messageline.title = strMessage
+	end,
+	Reset = function()
+		gaugeProgress.value = 0
+	end
+}
+
+---------------------------------------------------------------------------- End ProgressDisplay
+
+-------------------------------------------
+function CheckCreateAttributeTag (strName)
+    -------------------------------------------
+    local strTag, strError = fhGetFactTag(strName, "Attribute", "INDI", false)
+    if strTag == '' then
+        strTag, strError = fhGetFactTag(strName, "Attribute", "INDI", true)
+        if strError ~= nil then
+            error('Error Creating '..strName)
+        end
+    end
+    return strTag
+end
+-------------------------------------------
+function CheckCreateAttributeText(ptr,strTag,strValue)
+    -------------------------------------------
+    local ptrAttrib = fhNewItemPtr()
+    ptrAttrib:MoveTo(ptr,'~.'..strTag)
+    if ptrAttrib:IsNull() then
+        ptrAttrib = fhCreateItem(strTag,ptrIndi)
+    end
+	 -- Only Update if the Value has changed
+	local strOld = fhGetValueAsText(ptrAttrib) 
+	 if  strOld ~= tostring(strValue) then
+	    fhSetValueAsText(ptrAttrib,strValue)
+	 end
+end
+function DeleteTag(ptr,strTag)
+    local ptrTag = fhNewItemPtr()
+    ptrTag:MoveTo(ptr,'~.'..strTag)
+    while ptrTag:IsNotNull() do
+        fhDeleteItem(ptrTag)
+        ptrTag:MoveTo(ptr,'~.'..strTag)
+    end
+end
+function CountRecords(strRecordTag)
+    local ptrCount = fhNewItemPtr()
+    local iCount = 0
+    ptrCount:MoveToFirstRecord(strRecordTag)
+    while ptrCount:IsNotNull() do
+        iCount = iCount + 1
+        ptrCount:MoveNext()
+    end
+    return iCount
+end
+-------------------------------------------
+-- Main Processing
+-------------------------------------------
+-- Prompt User for Confirmation of Run
+strMessage = [[
+This plugin can create/update facts containing counts for the number of ancestors 
+and the number of descendants for each person in the current project.
+
+Please select if you would like to Create/Update or Delete the count facts or cancel the plugin.
+
+N.B  By nature of the fact this plug in updates every Individual Record, please note your Last
+ Changed Dates will be updated on all records.
+
+]]
+
+iButton = iup.Alarm("Ancestor and Descendant Count", strMessage ,"Create" ,"Delete" ,"Cancel")
+if iButton == 3 then
+    return
+end
+-- Check and Create the Attributes for Ancestor Count and Descendant Count if they do not exist
+strAncestorTag   = CheckCreateAttributeTag('Ancestor Count')
+strDescendantTag = CheckCreateAttributeTag('Descendant Count')
+iStep = 1 / CountRecords('INDI')
+-------------------------------------------
+-- Main Loop
+-------------------------------------------
+if iButton == 1 then
+    ProgressDisplay.Start("Ancestor and Descendant Count in Progress")
+    ptrIndi = fhNewItemPtr()
+    ptrIndi:MoveToFirstRecord('INDI')
+    while ptrIndi:IsNotNull() do
+        -- Do Ancestors
+        result = GetAncestorList(ptrIndi)
+        CheckCreateAttributeText(ptrIndi,strAncestorTag,(#result - 1))
+        -- Do Descendant
+        result = GetDecendantList(ptrIndi)
+        CheckCreateAttributeText(ptrIndi,strDescendantTag,(#result - 1))
+        ProgressDisplay.Step(iStep)
+		if ProgressDisplay.Cancel() then
+			error('Process Cancelled')
+		end
+        ptrIndi:MoveNext()  -- Next Individual
+    end
+    ProgressDisplay.Close()
+elseif iButton == 2 then
+    ProgressDisplay.Start("Ancestor and Descendant Count Delete in Progress")
+    ptrIndi = fhNewItemPtr()
+    ptrIndi:MoveToFirstRecord('INDI')
+    while ptrIndi:IsNotNull() do
+        DeleteTag(ptrIndi,strAncestorTag)
+        DeleteTag(ptrIndi,strDescendantTag)
+        ProgressDisplay.Step(iStep)
+		if ProgressDisplay.Cancel() then
+			error('Process Cancelled')
+		end
+        ptrIndi:MoveNext()  -- Next Individual
+    end
+    ProgressDisplay.Close()
+end

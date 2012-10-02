@@ -1,0 +1,63 @@
+--[[
+@Title: Save Settings File
+@Author: Calico Pie 2011
+@LastUpdated: March 2011
+@Description: Example of Reading and Writing a simple settings file, it only supports simple string variables.
+]]
+-- Functions
+
+-- Check for File
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+-- Split a String
+function string:split(sep)
+    local sep, fields = sep or ":", {}
+    local pattern = string.format("([^%s]+)", sep)
+    self:gsub(pattern, function(c) fields[#fields+1] = c end)
+    return fields
+end
+
+-- Save Settings
+function savesettings(settings,strFileName)
+    file,err = io.open( strFileName, "w" )
+    if err then
+        error('unable to write settings file:'..strFileName)
+    end
+    
+    for k,v in pairs(settings) do
+        file:write(k..'='..v..'\n')
+        print(k,v)
+    end
+    file:close()
+end
+function loadsettings(strFileName)
+    if not(file_exists(strFileName)) then
+        -- Set Default settings
+        settings = {['filename']="myfile.txt",
+        ['prompt']="true",
+        }
+    else
+        -- Load Settings File
+        tblsettings = {}
+        -- read the file in table 'lines'
+        for line in io.lines(strFileName) do
+            fields = line:split('=')
+            tblsettings[fields[1]] = fields[2]
+        end
+    end
+    return tblsettings
+end
+
+-- Main Script
+settingfile = fhGetPluginDataFileName()
+mysettings = loadsettings(settingfile)
+-- Update a setting
+mysettings['prompt']='no'
+-- Add or update a setting
+mysettings['greeting']='hello world'
+savesettings(mysettings,settingfile)

@@ -1,0 +1,23 @@
+require( "iuplua" )
+
+function GetExistingFile(strTitle,strfilter,strfilterinfo,strdir)
+-- Creates a file dialog and sets its type, title, filter and filter info
+filedlg = iup.filedlg{dialogtype = "OPEN", title = strTitle, 
+                      filter = strfilter, filterinfo = strfilterinfo,
+                      directory=strdir} 
+
+-- Shows file dialog in the center of the screen
+filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+
+-- Gets file dialog status
+status = filedlg.status
+return status,filedlg.value
+end
+-- Main Program
+status,strfilename = GetExistingFile("Select Missing File","*.jpg;*.png;*.tif;*.bmp;*.gif","Image Files","c:\\")
+if status == '-1' then
+error('Prompt Cancelled')
+end
+if status == '0' then
+print('copy file '..strfilename..'?')
+end

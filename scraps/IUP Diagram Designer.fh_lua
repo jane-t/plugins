@@ -1,0 +1,32 @@
+require ('iuplua')
+function create_dialog_aatest2()
+  local containers = {}
+
+  containers[3] = iup.vbox{
+    iup.progressbar{
+      expand = "HORIZONTAL",
+      rastersize = "200x30",
+    },
+    iup.button{
+      expand = "YES",
+      size = "250x25",
+      title = "Cancel",
+    },
+    expandchildren = "YES",
+    gap = "5",
+  }
+
+  containers[2] = iup.frame{
+    containers[3],
+  }
+
+  containers[1] = iup.dialog{
+    containers[2],
+  }
+
+  return containers[1]
+end
+dlg = create_dialog_aatest2()
+-- iup.Show(dlg)
+ iup.Show(iup.LayoutDialog(dlg))
+iup.MainLoop()

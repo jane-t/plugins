@@ -1,0 +1,8 @@
+ID,Forenames,Surname,Sex,BirthDate,BirthPlace,DeathDate,DeathPlace,Mother,Father,Spouse1,Spouse2
+1,John,Smith,M,02/12/1960,"Taunton,Somerset,England",,,6,7,2,
+2,Mary,Jones,F,11/10/1964,,,,,,1,
+3,Mike,Smith,M,Dec 1986,,,,1,2,,
+4,James,Smith,M,1958,,2009,,,7,,
+5,Jane,Smith,F,1956,,Jan 2010,London,,7,,
+6,Ann,Pegg,F,1940,,1990,Bristol,,,7,
+7,Mark,Smith,M,1935,,1999,Bristol,,,6,

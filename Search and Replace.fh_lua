@@ -1,0 +1,264 @@
+--[[
+@title: Search and Replace
+@author: Jane Taubman
+@lastupdated: April 2012
+@Version: 1.5
+@description:
+Searches for and replaces any given text within the current project, with an option to ask for confirmation for each change.
+At the end, lists all changed fields with links back to the record (double-click on an item to view it in the Property Box).
+@update:
+1.1 Add Skip tick box to replace prompt.
+1.2 Change to Provide a Skip Button, to cancel click the close button on the window.
+1.3 Add Case insensitive searching and cancel or close the window will abort the replaces, while still listing the changes made.
+1.4 Add options for whole word search only and prevent wild card patterns being used automatically 
+]]
+----------------------------------------------------- Start Search Replace Prompt
+function linecount(string,maxlines)
+--[[
+  @function linecount
+  @description
+  Works out approximate number of lines to display a text string in an input box.
+  @parms
+      string:  string to process mandatory
+      maxlines:  maximum height for text box,  defaults to 9 lines if not provided
+  ]]
+  maxlines = maxlines or 9
+  local intLines = 1
+    for strLine in string.gmatch(string.."\n","(.-)\n") do
+      intLines = intLines + math.ceil(string.len(strLine)/80)
+    end 
+  return math.min(intLines,maxlines)
+end
+
+function srPrompt(txtType,strFrom,strTo,bConfirm)
+    local btn_ok   = iup.button { title="Replace",padding = '5x5',size='50'}
+    local btn_skip   = iup.button { title="Skip",padding = '5x5',size='50'}
+    local btn_cancel = iup.button { title="Cancel",padding = '5x5',size='50'}
+    
+    local inp_from_string = iup.text{expand="HORIZONTAL",minsize='150'}
+    local inp_to_string = iup.text{expand="HORIZONTAL"}
+    local inp_confirm = iup.toggle {'1'}
+    if txtType == "M" then
+        inp_from_string.multiline = 'YES'
+        inp_from_string.size = '0x80'
+        inp_from_string.wordwrap  = 'YES'
+        inp_from_string.visiblelines = linecount(strFrom,10)     
+        inp_to_string.multiline = 'YES'
+        inp_to_string.size = '0x80'
+        inp_to_string.wordwrap  = 'YES'
+        inp_to_string.visiblelines = linecount(strTo,10)     
+
+    end
+    local bSkip = false
+    local bQuit = false
+    
+    local vbox = iup.vbox {
+    iup.label {title="Original"},
+    inp_from_string,
+    iup.label {title="Replacement"},
+    inp_to_string,
+    iup.hbox {
+    iup.label {title="Confirm All Replacements"},
+    inp_confirm},
+    iup.hbox{
+    btn_ok,btn_skip,btn_cancel,expandchildren = 'YES', expand="YES"},
+    expandchildren = 'YES', alignment = 'ACENTER', gap = '10', margin = '10x10',expand="YES"
+    }
+    local dlg = iup.dialog{vbox;expandchildren = 'YES', title="Search and Replace",size="HALF", startfocus=btn_ok}
+    function btn_ok:action(dlg)
+        btn = 'replace'
+        return iup.CLOSE
+    end
+    function btn_skip:action(dlg)
+        btn = 'skip'
+        return iup.CLOSE
+    end
+    function btn_cancel:action(dlg)
+        btn = 'cancel'
+        return iup.CLOSE
+    end
+    inp_from_string.value = strFrom
+    inp_to_string.value = strTo
+    if bConfirm then
+        inp_confirm.value = 'ON'
+    else
+        inp_confirm.value = 'OFF'
+    end
+    dlg:show()
+    
+    dlg.minsize = dlg.size
+    iup.MainLoop()
+    
+    strFrom = inp_from_string.value
+    strTo = inp_to_string.value
+    bConfirm = (inp_confirm.value == 'ON')
+    dlg:destroy()
+    return strFrom,strTo,bConfirm,btn
+end
+----------------------------------------------------- End Search Replace Prompt
+
+function DoAllItems(strType,tblClass,action)
+    -- strType: Main Item Type (eg text)
+    -- strClass:  Keyworded Array of Classes
+    -- action:    function to perform
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types
+    local ii = 0
+    local ptr = fhNewItemPtr()
+	local bContinue = true
+    for ii =1,iCount do
+        strRecType = fhGetRecordTypeTag(ii)
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+            strDataClass = fhGetDataClass(ptr)
+            if fhGetValueType(ptr) == strType and tblClass[fhGetDataClass(ptr)] == true then
+                bContinue =  action(ptr)
+            end
+			if not(bContinue) then
+				ptr:SetNull()
+			else
+            ptr:MoveNextSpecial()
+		end
+        end
+    end
+end
+function param_action(dialog,index)
+    if index == -3 then
+        bSkip = true
+        return 1
+    end
+end
+--   Build Pattern from String for case insensitive search
+function nocase (s)
+      s = string.gsub(s, "%a", function (c)
+            return string.format("[%s%s]", string.lower(c),
+                                           string.upper(c))
+          end)
+      return s
+    end
+function strPlainText(strText)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
+	return strText:gsub("(%W)","%%%1")
+end 
+---------------------------
+function Replace(ptr)
+    ---------------------------
+    local ptrRecord = fhNewItemPtr()
+    local strFromString = fhGetValueAsText(ptr)
+    local strBoxType = 's'
+    local strToString = ''
+	 local strSearchFor = strSearchi
+    local strReplaceWith = strReplace
+    bSkip = false
+    if fhGetDataClass(ptr) == 'longtext' then
+        strBoxType = 'M'
+    end
+   if pWhole == 1 and pPlain == 1 then
+    strSearchFor = '([%s%p])('..strSearchi..')([%s%p])'
+    strReplaceWith = '%1'..strReplace..'%3'
+	end
+    local strToString = string.gsub(strFromString,strSearchFor,strReplaceWith)
+    if pWhole == 1  and pPlain == 1 then
+    -- Special Case search for last word and first word
+	    local strSearchFor3 = '([%s%p])('..strSearchi..')$'
+	    local strReplaceWith3 = '%1'..strReplace
+	    strToString = string.gsub(strToString,strSearchFor3,strReplaceWith3)
+	    local strSearchFor3 = '^('..strSearchi..')([%s%p])'
+	    local strReplaceWith3 = strReplace..'%2'
+	    strToString = string.gsub(strToString,strSearchFor3,strReplaceWith3)
+    end
+    if strFromString ~= strToString then
+        ptrRecord:MoveToRecordItem(ptr)
+        if pConfirm  == 1 and strFromString ~= strToString then
+            bConfirm = true
+            strFromString,strToString,bConfirm,btn = srPrompt(strBoxType,strFromString,strToString,bConfirm)
+            if btn == 'cancel' or btn == nil then
+                return false
+            elseif btn == 'replace' then
+                -- Replace String
+                table.insert(tblRecord,ptrRecord:Clone())
+                table.insert(tblItem,ptr:Clone())
+                table.insert(tblReplaced,strFromString)
+                fhSetValueAsText(ptr,strToString)
+                fhUpdateDisplay()
+            elseif btn == 'skip' then
+            end
+            if bConfirm == false then
+                pConfirm = 0
+            end
+        else
+            -- Replace String
+            table.insert(tblRecord,ptrRecord:Clone())
+            table.insert(tblItem,ptr:Clone())
+            table.insert(tblReplaced,strFromString)
+            fhSetValueAsText(ptr,strToString)
+            fhUpdateDisplay()
+            
+        end
+    end
+	return true
+end
+-------------
+-- Main Code
+-------------
+-- Prompt for Options
+-- Prompt for confirmation using iup.GetParm %b are tick boxes
+-- set initial values
+pa ={text=1,longtext=1,name=1,place=1,wordlist=1}
+pSensitive= 0
+pConfirm  = 1
+pWhole  = 1
+pPlain = 1
+bSkip = false
+tblRecord = {}
+tblItem = {}
+tblReplaced = {}
+-- Prompt User to Confirm Options
+bOK, strSearch,strReplace,pConfirm,pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole =
+iup.GetParam("Family Historian Text Search and Replace", param_action,
+"Search For: %s\n"..
+"Replace with: %s\n"..
+"Confirm Every Change: %b\n"..
+"Case Sensitive: %b\n"..
+"Replace in the following Classes %t\n"..
+"Text fields: %b{Name Prefix/Suffix/Given/Nickname, Attribute values, Cause, Where Within Source, Title, Type, Custom Id, City, State, Postcode, Country, Phone, E-mail, Website, File, Format, Keywords, Sentence, etc.}\n"..
+"Long Text: %b{Note, Address, Author, Text From Source, Publication Info, Link/Note}\n"..
+"Names: %b{Name fields only}\n"..
+"Places: %b{Place fields only}\n"..
+"Extra Search Options %t\n"..
+"Plain Text Search: %b{Plain Text or Regular Expression search & replace.}\n"..
+"Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}\n"
+,
+"","",pConfirm,pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole)
+-- Set Values for "odd text fields" from normal text field
+pa.word = pa.text
+pa.wordlist = pa.text
+  strSearchi = strSearch
+	if pPlain == 1 then
+  	strSearchi =  strPlainText(strSearchi)
+	end
+	if pSensitive == 0 then
+		strSearchi = nocase(strSearchi)
+	end
+
+if bOK then
+    -- Swap 1 for true
+    for strType,Value in pairs(pa) do
+        pa[strType] = (Value == 1)
+    end
+    DoAllItems('text',pa,Replace)
+    if #tblRecord == 0 then
+        fhMessageBox('No Items Replaced')
+    else
+        -- Output Result Set
+        strTitle = 'Search and Replace Results '
+        strSubTitle = 'Replacing '..strSearch..' with '..strReplace
+        fhOutputResultSetTitles(strTitle..strSubTitle,strTitle, strSubTitle.." Date: %#x")
+        fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
+        fhOutputResultSetColumn("Item", "item", tblItem, #tblRecord, 180, "align_left")
+        fhOutputResultSetColumn("Old Value", "text", tblReplaced, #tblRecord, 180, "align_left")
+    end
+else
+    return
+end
+

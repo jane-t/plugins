@@ -1,0 +1,42 @@
+--[[
+@Title: Record Link Table Builder
+@Author: Jane Taubman
+@LastUpdated: 
+@Description: Create Table containing links for Notes
+]]
+
+tblLinks = {}
+ptrNote = fhNewItemPtr()
+ptrRecord = fhNewItemPtr()
+iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types, looking for link
+    -- There can be only one.
+    local ii = 0
+    local ptrLLink = fhNewItemPtr()
+    local ptrLCheck = fhNewItemPtr()
+    
+    for ii =1,iCount do
+        strType = fhGetRecordTypeTag(ii)
+        ptrLLink:MoveToFirstRecord(strType)
+        while ptrLLink:IsNotNull() do
+            if fhGetDataClass(ptrLLink) == 'link' then
+                ptrLCheck = fhGetValueAsLink(ptrLLink)
+				  print(fhGetTag(ptrLCheck))
+				  if fhGetTag(ptrLCheck) == 'NOTE' then
+						recordid = fhGetRecordId(ptrLCheck)
+					   if tblLinks[recordid] == nil then
+							tblLinks[recordid] = {}
+						end
+					   table.insert(tblLinks[recordid],ptrLLink:Clone())
+				  end
+            end
+            ptrLLink:MoveNextSpecial()
+        end
+    end
+ptrRecord = fhNewItemPtr()
+for i,notes in pairs(tblLinks) do
+for j,ptr in pairs(notes) do
+ptrRecord:MoveToRecordItem(ptr)
+print (j,fhGetDisplayText(ptrRecord))
+end
+end

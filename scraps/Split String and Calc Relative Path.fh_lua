@@ -1,0 +1,39 @@
+--[[
+@Title: Split String and Calc Path
+@Author: Jane Taubman.
+@LastUpdated: June 2011
+@Description: 
+]]
+
+function string:split(sep)
+        local sep, fields = sep or ":", {}
+        local pattern = string.format("([^%s]+)", sep)
+        self:gsub(pattern, function(c) fields[#fields+1] = c end)
+        return fields
+end
+function relativepath(fromPath,toPath)
+local tblFrom = fromPath:split('\\')
+local tblTo  =  toPath:split('\\')
+local strlead = ''
+local strend = ''
+local max = 0
+local i = 0
+-- Find the Longest Path
+if (#tblFrom > #tblTo) then 
+	max = #tblFrom 
+else 
+	max = #tblTo 
+end
+for i=1,max do
+	if (tblFrom[i] ~= tblTo[i]) then
+		if (tblFrom[i] ~= nil) then strlead = strlead .. '../' end
+		if (tblTo[i] ~= nil) then strend = strend ..  tblTo[i] .. '/'  end
+	end
+end
+return(strlead..strend)	
+end
+------------------------------------------------------------------- Main Code Start
+toPath = 'D:\\temp\\fh-test\\usingfamilyhistorian\\generaltopics'
+fromPath = 'D:\\temp\\fh-test\\getting_started'
+
+print(relativepath(fromPath,toPath))

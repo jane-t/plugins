@@ -1,0 +1,34 @@
+--[[
+@Title: Quick Death Calc
+@Author: Jane Taubman	
+@LastUpdated: June 2011
+@Description: Quick Program to Calculate a persons age from a year entered.  
+Useful when searching death records for the correct person.
+]]
+require("iuplua")
+ptrRecords = fhGetCurrentRecordSel('INDI')
+if #ptrRecords == 0 then
+	fhMessageBox('Please Select Individual Record, before running')
+	return
+end
+strName = fhGetDisplayText(ptrRecords[1])
+strLifeDates = fhCallBuiltInFunction('LifeDates',ptrRecords[1])
+iBirthYear = fhGetItemText(ptrRecords[1],'~.BIRT.DATE:YEAR')
+if iBirthYear == nil then
+error('No Birth year Available for '..strName)
+end
+
+iupPromptStr = 'Age at Year for '..strName..
+' ('..strLifeDates..') %i\n'..'Calculated Age: %i\n'
+iAge = 0
+iYear = 0
+repeat 
+ret, iYear =
+iup.GetParam("Calculate Year", param_action,
+iupPromptStr,iYear,iAge)
+if iYear ~= nil then
+iAge = iYear - iBirthYear
+end
+until ret == 0 or ret ==false
+
+

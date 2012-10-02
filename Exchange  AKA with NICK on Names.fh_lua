@@ -1,0 +1,24 @@
+--[[
+@Title: Exchange _AKA for NICK
+@Author: Jane Taubman
+@LastUpdated: June 2011
+@Description:
+]]
+
+-- Process through all elements in the Individual section
+pi = fhNewItemPtr()
+paka = fhNewItemPtr()
+pnick = fhNewItemPtr()
+pname = fhNewItemPtr()
+pi:MoveToFirstRecord("INDI")
+while not pi:IsNull() do
+	paka:MoveTo(pi,'~.NAME._AKA')
+	if not paka:IsNull() then
+		strName = fhGetValueAsText(paka)
+		pname:MoveTo(pi,'~.NAME')  
+		pnick = fhCreateItem('NICK',pname)
+		fhSetValueAsText(pnick,strName)
+		fhDeleteItem(paka)
+	end
+    pi:MoveNext()
+end

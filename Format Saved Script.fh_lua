@@ -1,0 +1,122 @@
+--[[
+@Title: Format Saved Lua Script 
+@Author: Jane Taubman
+@Version: 1.1
+@LastUpdated: May 2012 
+@Description: Prompts to select a Lua script from the plugins folder and reformats it saving it back.
+]]
+function main()
+    iIndent = 0
+    iStep = 4
+    strAppData = fhGetContextInfo('CI_APP_DATA_FOLDER')
+    print(strAppData)
+    strLuaDir = strAppData..'\\Plugins\\*.fh_lua'
+    f, err = iup.GetFile(strLuaDir)
+    if err == 0 then
+        script = StrLoadFromFile(f)
+        script = format(script)
+        SaveStringToFile(script,f)
+        fhMessageBox('Script '..f..' reformatted')
+    end
+end
+function format(script)
+    local indent = fliptable({'function','if','while', 'for', 'elseif', 'else','{'},1)
+    local outdent = fliptable({'end','next','elseif','else','}'},-1)
+    local newscripttbl = {}
+    local tblOutput = {}
+    local currentpad = 0
+    local nextpad = 0
+    local iStep = 4
+    local bComment,bMulti = false,false
+    for line in script:gmatch("[^\r\n]+") do
+        local strNewLine = trim(line)
+        -- Look for MultiLine Strings
+        if strNewLine:find('%[%[') then
+            bMulti =true
+        end
+        -- Look for Comments and ignore them
+        local strWork = strNewLine
+        cPos = strWork:find('%-%-')
+        if cPos then
+            strWork = strNewLine:sub(1,cPos - 1)
+        end
+        if not(bMulti) then
+            strWork = removeQuotedStrings(strWork)
+            for word in strWork:gmatch("[%w{}]+") do
+                if outdent[word] then
+                    nextpad = nextpad + outdent[word]
+                    currentpad = nextpad
+                end
+                if indent[word] then
+                    nextpad = nextpad + indent[word]
+                end
+            end
+        end
+        if strNewLine:find(']]') then
+            bMulti =false
+        end
+        if bMulti then
+            strNewLine = line
+        else
+            strNewLine = string.rep(' ',currentpad * iStep)..strNewLine
+        end
+        currentpad = nextpad
+        table.insert(newscripttbl,strNewLine)
+    end
+    return table.concat(newscripttbl,'\r\n')
+end
+function trim(s)
+    s = s:gsub('%s+',' ')
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+function removeQuotedStrings(str)
+    local bQuote = false -- End of Quote
+    local bEsc = false -- Escaped Quote
+    local qType = ' ' -- Type of Quote eg ' or "
+    local newstr = {}
+    for sChar in str:gmatch(".") do
+        if ((sChar == '"') or (sChar == "'" )) then
+            if not(bEsc) then
+                if (bQuote and qType == sChar) then bQuote = false -- leave quote mode
+                elseif not(bQuote) then
+                    qType = sChar -- Start of quoted text
+                    bQuote = true
+                end
+            end
+        end
+        if not(bQuote) then
+            table.insert(newstr,sChar)
+        end
+    end
+    return table.concat(newstr)
+end
+function fliptable(tbl,value)
+    local newtbl = {}
+    for i,j in pairs(tbl) do
+        local val = value or i
+        newtbl[j] = val
+    end
+    return newtbl
+end
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"r")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end -- function StrLoadFromFile
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"w")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end -- function SaveStringToFile
+-------------------------------------------- End of functions
+main()

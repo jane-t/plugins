@@ -1,0 +1,33 @@
+--[[
+@Title: Find Duplicate Custom ID's
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: April 2012
+@Description: Searches Selected Record Type for Records with Duplicate Custom IDs
+]]
+local tblId = {}
+local tblDup1 = {}
+local tblDup2 = {}
+pi = fhNewItemPtr()  -- declare pointer
+pi:MoveToFirstRecord("INDI") -- and set to the first record.
+while pi:IsNotNull() do
+    strId = fhGetItemText(pi,'~.REFN')
+    if strId  and strId ~= '' then
+        if  tblId[strId] then
+            -- Duplicate Found
+            table.insert(tblDup1,tblId[strId])
+            table.insert(tblDup2,pi:Clone())
+        else
+            tblId[strId] = pi:Clone()
+        end
+    end
+    pi:MoveNext()
+end
+
+if  #tblDup1 > 0 then
+    fhOutputResultSetTitles('Individuals with Duplicate Custom Ids')
+    fhOutputResultSetColumn('First Record', 'item', tblDup1, #tblDup1)
+    fhOutputResultSetColumn('Second Record', 'item', tblDup2, #tblDup1)
+else
+    fhMessageBox('No Duplicates Found')
+end

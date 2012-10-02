@@ -1,0 +1,42 @@
+tbl = {
+{1841,10},
+{1831,30},
+{1931,30},
+{1231,30},
+{1731,30}
+}
+-- Simple Sort
+function simpleSort2d(tbl,index)
+	local iSwap = nil
+	while iSwap ~= 0 do
+	    iSwap = 0
+	    for i=2,#tbl do
+	        if tbl[i][index] < tbl[i-1][index] then
+	            tmp = tbl[i]	
+	            tbl[i] = tbl[i-1]
+	            tbl[i-1] = tmp
+  	          iSwap = iSwap + 1
+  	      end
+  	  end
+	end
+end
+function simpleSort2dDate(tbl,index)
+	local iSwap = nil
+	while iSwap ~= 0 do
+	    iSwap = 0
+	    for i=2,#tbl do
+	        if tbl[i][index]:SortCompare(tbl[i-1][index]) then
+	            tmp = tbl[i]	
+	            tbl[i] = tbl[i-1]
+	            tbl[i-1] = tmp
+  	          iSwap = iSwap + 1
+  	      end
+  	  end
+	end
+end
+simpleSort2d(tbl,1)
+print('Sorted')
+for i,tbl2 in pairs(tbl) do
+    print(tbl2[1],tbl2[2])
+    
+end

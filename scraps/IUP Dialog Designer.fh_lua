@@ -1,0 +1,63 @@
+function create_dialog_Replace()
+  local containers = {}
+-- Input Fields
+txtFrom =     iup.text{minsize = "250x25"}
+txtTo  =     iup.text{minsize = "250x25",readonly='YES',bgcolor='DLGBGCOLOR'}
+--- Define Buttons
+btnOk =  iup.button{
+      title = "Ok",
+      minsize = "50x25",
+    }
+btnSkip = iup.button{
+      title = "Skip",
+      minsize = "75x25",
+    }
+btnAbort = iup.button{
+      title = "Abort",
+      minsize = "75x25",
+    }
+
+  containers[4] = iup.hbox{
+    iup.label{title = "From:",minsize = "100x25"},
+    txtFrom,
+  }
+
+  containers[5] = iup.hbox{
+    iup.label{title = "To",minsize = "100x25"},
+	txtTo,
+  }
+
+containers[8] = iup.hbox{
+		btnOk,
+		btnSkip,
+		btnAbort
+  }
+  containers[3] = iup.vbox{
+    containers[4],
+    containers[5],
+    containers[8],
+    expandchildren = "YES",
+    gap = "5",
+  }
+
+  containers[2] = iup.frame{
+    containers[3],
+  }
+
+  containers[1] = iup.dialog{
+	 title = 'Replace Text',
+    containers[2],
+    
+  }
+
+  return containers[1]
+end
+
+
+
+
+diag = create_dialog_Replace()
+iup.Show(iup.LayoutDialog(diag)) 
+if (iup.MainLoopLevel()==0) then
+  iup.MainLoop()
+end 

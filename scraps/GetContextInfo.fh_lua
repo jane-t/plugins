@@ -1,0 +1,27 @@
+--[[
+@Title: Get Context Information
+@Author: Jane Taubman
+@LastUpdated: June 2011
+@Description: Displays all available content information for Family Historian 
+and also gets windows enviroment fields.
+]]
+a= {
+"CI_APP_MODE",
+"CI_PROJECT_NAME",
+"CI_PROJECT_FILE",
+"CI_GEDCOM_FILE",
+"CI_PROJECT_PUBLIC_FOLDER",
+"CI_PROJECT_DATA_FOLDER",
+}
+b={}
+for i,strCI in pairs(a) do
+   b[i] = fhGetContextInfo(strCI)
+end
+-- An example of getting the Program Data / Application Data Folder using os.getenv
+table.insert(a,'Lua Script Directory') 
+table.insert(b,os.getenv('ALLUSERSPROFILE')..'\\Calico Pie\\Family Historian 5\\Plugins')
+
+fhOutputResultSetColumn("Name", "text", a, #a, 125)
+fhOutputResultSetColumn("Value", "text", b,#a, 500)
+fhOutputResultSetTitles("fhGetContextInfo values")
+

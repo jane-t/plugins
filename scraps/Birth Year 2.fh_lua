@@ -1,0 +1,9 @@
+-- Calculate a Birth Year from an age and a year
+iYear = 1911
+iAge = 21
+iBirth = iYear - iAge
+print(iAge,iYear,iBirth)
+strMessage  = "Birth Year is: "..tostring(iYear)..
+"\nAge: "..tostring(iAge)..
+"\nYear: "..tostring(iYear)
+fhMessageBox(strMessage)

@@ -1,0 +1,253 @@
+--[[
+@title: Clean Up Notes
+@author: Jane Taubman
+@lastupdated: April 2012
+@version: 1.1
+@description:
+Optionally
+1. Removes Blank lines from the start of Notes
+2. Converts Note Records with a Single Link to a Local Note.
+]]
+----------------------------------------------------------- Start Progress Display
+--[[
+@Title: Progress Display (drop in)
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Description: Allows easy adding of a Progress Bar to any long running Plugin
+]]
+ 
+ProgressDisplay = {
+ 
+	Start = function(strTitle,intMax)	-- Create and start the Progress Display window controls
+		cancelflag = false
+		local cancelbutton = iup.button{ title="Cancel", size="50x20", 
+			action = function()
+				cancelflag = true -- Signal that Cancel button was pressed 
+				return iup.CLOSE
+			end
+		}
+		gaugeProgress	= iup.progressbar{ expand="YES", max=intMax }		-- Set progress bar maximum range
+		messageline	= iup.label{ title=" ", expand="YES", alignment="ACENTER" } 
+		dlgProgress	= iup.dialog{ title=strTitle, size="QUARTER", dialogframe="YES",	-- Remove Windows minimize/maximize menu
+			iup.vbox{ alignment="ACENTER", gap="10",
+				messageline,
+				gaugeProgress,
+				cancelbutton
+			}
+		}
+		dlgProgress.close_cb = cancelbutton.action	-- Windows Close button acts as Cancel button
+		dlgProgress:showxy(iup.CENTER, iup.CENTER)	-- Show the Progress Display dialogue window
+	end,
+ 
+	SetMessage = function(strMessage)	-- Set the progress message
+		messageline.title = strMessage
+	end,
+ 
+	Step = function(iStep)			-- Step the Progress Bar forward
+		gaugeProgress.value = gaugeProgress.value + iStep
+		local val = tonumber(gaugeProgress.value)
+		local max = tonumber(gaugeProgress.max)
+		if val > max then
+			gaugeProgress.value = 0
+		end
+		iup.LoopStep()
+	end,
+ 
+	Reset = function()			-- Reset progress bar
+		gaugeProgress.value = 0
+	end,
+ 
+	Cancel = function()			-- Check if Cancel button pressed
+		return cancelflag
+	end,
+ 
+	Close = function()			-- Close the dialogue window
+		dlgProgress:destroy()
+	end
+ 
+}
+
+
+----------------------------------------------------------- End Progress Display
+---------------------------
+-- Count Notes (for gaugeProgress)
+---------------------------
+function CountNotes()
+    local ptrCount = fhNewItemPtr()
+    local count = 0
+    ptrCount:MoveToFirstRecord('NOTE')
+    while ptrCount:IsNotNull() do
+        count = count + 1
+        ptrCount:MoveNext()
+    end
+    -- Return as reciprical to step the gaugeProgress
+    return count
+end
+---------------------------
+-- BuildNoteList
+---------------------------
+function BuildNoteList()
+    tblLinks = {}
+    iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    local ii = 0
+    local ptrLLink = fhNewItemPtr()
+    local ptrLCheck = fhNewItemPtr()
+    for ii =1,iCount do
+        strType = fhGetRecordTypeTag(ii)
+        ptrLLink:MoveToFirstRecord(strType)
+        while ptrLLink:IsNotNull() do
+            if fhGetDataClass(ptrLLink) == 'link' then
+                ptrLCheck = fhGetValueAsLink(ptrLLink)
+                if fhGetTag(ptrLCheck) == 'NOTE' then
+                    recordid = fhGetRecordId(ptrLCheck)
+                    if tblLinks[recordid] == nil then
+                        tblLinks[recordid] = {}
+                    end
+                    table.insert(tblLinks[recordid],ptrLLink:Clone())
+                end
+            end
+            ptrLLink:MoveNextSpecial()
+        end
+    end
+    return tblLinks
+end
+---------------------------
+-- Function: Clean Local Notes
+---------------------------
+function CleanLocalNotes ()
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types, looking for link
+    -- There can be only one.
+    local ii = 0
+    local ptrLLink = fhNewItemPtr()
+    local ptrLCheck = fhNewItemPtr()
+    ProgressDisplay.SetMessage('Cleaning Local Notes')
+    ProgressDisplay.Reset()
+    local iStep = 1 / iCount
+    for ii =1,iCount do
+        strType = fhGetRecordTypeTag(ii)
+        ptrLLink:MoveToFirstRecord(strType)
+        while ptrLLink:IsNotNull() do
+            if fhGetTag(ptrLLink) == 'NOTE2' then
+                fhSetValueAsText(ptrLLink,RemoveLeadingBlanklines(fhGetValueAsText(ptrLLink)))
+                ProgressDisplay.Step(0)
+            end
+            
+            ptrLLink:MoveNextSpecial()
+        end
+        -- notice the user wanting to cancel and do something meaningful
+        if ProgressDisplay.Cancel() then
+            error('User Cancelled')
+        end
+        ProgressDisplay.Step(iStep)
+    end
+    return false, nil
+end
+-- Copy Notes Childen
+---------------------------------------
+-- Function: CopyChildBranch
+---------------------------------------
+function CopyChildBranch(ptrSrc, ptrTargParent)
+    local ptrNew = fhCreateItem(fhGetTag(ptrSrc), ptrTargParent)
+    fhSetValue_Copy(ptrNew, ptrSrc)
+    CopyChildren_FromTo(ptrSrc, ptrNew)
+end
+
+---------------------------------------
+-- Function: CreateCopyChildren_FromTo
+---------------------------------------
+function CopyChildren_FromTo(ptrFrom, ptrTo)
+    local ptrF = fhNewItemPtr()
+    ptrF = ptrFrom:Clone()
+    ptrF:MoveToFirstChildItem(ptrF)
+    while not ptrF:IsNull() do
+        -- Unsupported items such as custom ID etc will be silently dropped
+        CopyChildBranch(ptrF, ptrTo)
+        ptrF:MoveNext()
+    end
+end
+---------------------------------------
+-- Function: RemoveLeadingBlanklines
+---------------------------------------
+function RemoveLeadingBlanklines (str)
+    --  Strip all Blank Lines from the Start of the String
+    while string.find(str,'^\n') == 1 do
+        str = str:gsub('^\n','')
+    end
+    return str
+end
+---------------------------------------
+-- Main Logic
+---------------------------------------
+-- Prompt for confirmation using iup.GetParm %b are tick boxes
+-- set initial values
+premoveblanks = 1
+pconvertnotes = 1
+-- Prompt User to Confirm Options
+ret, premoveblanks, pconvertnotes =
+iup.GetParam("Family Historian Note Tidy", param_action,
+"Remove Blank Start Lines: %b \n"..
+"Convert single use Notes to Local: %b \n",
+premoveblanks, pconvertnotes)
+if (ret == false) then
+    return
+end
+-- Create Pointers for Main Routine
+ptrNote = fhNewItemPtr()
+ptrNoteText = fhNewItemPtr()
+ptrTemp = fhNewItemPtr()
+ptrParent = fhNewItemPtr()
+ptrLink = fhNewItemPtr()
+ProgressDisplay.Start('Cleaning Notes')
+ProgressDisplay.SetMessage('Building Cross Reference Table . . ')
+istep = 1 / CountNotes() -- Get the step size for the Bar
+tblList = BuildNoteList()
+gaugeProgress.value = gaugeProgress.value + istep
+-- Process All Notes
+ptrNote:MoveToFirstRecord('NOTE')
+gaugeProgress.value = 0
+-- Do All Local Notes
+if premoveblanks == 1 then
+    CleanLocalNotes()
+end
+ProgressDisplay.SetMessage('Processing Note Records')
+-- Process All Note Records
+while ptrNote:IsNotNull() do
+    ProgressDisplay.Step(istep)
+    -- allow the dialog to process any messages
+    iup.LoopStep()
+    -- notice the user wanting to cancel and throw error so FH prompts to undo changes
+    if ProgressDisplay.Cancel() then
+        error('User Cancelled')
+    end
+    if premoveblanks == 1 then
+        -- Remove Blank Lines from Start
+        ptrTemp:MoveTo(ptrNote,'~.TEXT') -- Get Text for Note
+        if ptrTemp:IsNotNull() then
+            fhSetValueAsText(ptrTemp,RemoveLeadingBlanklines(fhGetValueAsText(ptrTemp)))
+        end
+    end
+    if pconvertnotes == 1 then
+        ptrTemp:SetNull()  -- Clear delete pointer
+        iLinkCount = fhCallBuiltInFunction('LinksTo',ptrNote)
+        if iLinkCount == 1 then  -- Found a note with only one link.
+            -- Convert Linked Note and flag Note Record for delete.
+            ptrLink = tblList[fhGetRecordId(ptrNote)][1]
+            -- bLinkFound, ptrLink = FindLink(ptrNote)
+            if ptrLink:IsNotNull() then
+                ptrParent:MoveToParentItem(ptrLink) -- Get Notes Parent
+                ptrNote2 = fhCreateItem('NOTE2', ptrParent) -- Create NOTE2 for Parent (Local Note)
+                ptrTemp:MoveTo(ptrNote,'~.TEXT') -- Get Text for Note
+                fhSetValueAsText(ptrNote2,fhGetValueAsText(ptrTemp)) -- Set NOTE2 with Text
+                CopyChildren_FromTo(ptrNote, ptrNote2) -- Copy all the child items from the NOTE
+                ptrTemp = ptrNote:Clone() -- Hold on to Note Record so it can be deleted.
+            end
+        end
+    end
+    ptrNote:MoveNext()  -- Next Note
+    if ptrTemp:IsNotNull() then  -- Delete Original Note
+        fhDeleteItem(ptrTemp)
+    end
+end
+ProgressDisplay.Close() -- Clean up Progress Bar
+fhMessageBox('Note Replacement Complete','MB_OK','MB_ICONINFORMATION')

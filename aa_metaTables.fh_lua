@@ -1,0 +1,26 @@
+t = {} -- original table (created somewhere)
+-- create metatable
+local mt = {}
+mt.col = 0
+mt.seq = {}
+mt.__newindex = function (t,k,v)
+    rawset(t,k,v) -- update original table
+    mt.col = mt.col + 1
+    table.insert(mt.seq,k)
+end
+mt.__call = function (t)
+    local i = 0
+    local m = getmetatable(t)
+    local n = table.getn(m.seq)
+    return function ()
+        i = i + 1
+        if i <= n then return t[m.seq[i]] end
+    end
+end
+setmetatable(t, mt)
+t.item1 = {desc = 'hello'}
+t.item2 = {desc = 'hello 2'}
+t.item3 = {desc = 'hello 3'}
+for line in t() do
+    print(line['desc'])
+end

@@ -1,0 +1,70 @@
+--[[
+@Title: Generations Gedcom - Pre-Load 
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Description: Clean up Generations Extra Source Info
+]]
+function string.starts(String,Start)
+   return string.sub(String,1,string.len(Start))==Start
+end
+
+strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
+
+tblData = {}
+tblNew = {}
+tblHold = {}
+
+file = io.open(strProjectFile,'r')
+if file then
+    for line in file:lines() do
+		table.insert(tblData,line)
+    end
+	file:close()
+else
+	error('Bang')
+end
+
+i = 1
+
+print(tblData[i])
+print(#tblData)
+newflag = false
+while tblData[i] ~= nil  do
+line = tblData[i]
+print(line)
+if line == '1 TEXT ' then
+	level,key,rest = '1','TEXT',' '
+else
+level,key,rest = line:match('(.-) (.-) (.+)')
+end
+if level == '0' then
+	newflag = true
+end
+if level == '1' then
+if key == 'TEXT' then
+	if newflag then
+	tblData[i] = level..' TEXT '..rest
+	newflag = false
+	else
+	tblData[i] = level..' CONT '..rest
+	end	
+elseif key == 'TYPE' then
+	tblData[i] = level..' _TYPE '..rest
+elseif key == 'AUTH' then
+	-- Valid Field
+elseif key ~= 'TITL' then
+	if newflag then
+	tblData[i] = level..' TEXT '..key..': '..rest
+	newflag = false
+	else
+	tblData[i] = level..' CONT '..key..': '..rest
+	end
+end
+end
+i = i + 1
+end
+data = table.concat(tblData, "\n") .. "\n"
+file = io.open(strProjectFile,'w')
+file:write(data)
+file:close()
+

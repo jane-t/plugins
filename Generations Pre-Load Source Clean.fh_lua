@@ -1,0 +1,69 @@
+--[[
+@Title: Generations Gedcom - Pre-Load
+@Author: Jane Taubman
+@LastUpdated: Sept 2013
+@Description: Clean TEXT lines in sources so they don't get excluded.
+]]
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
+function splitfilename(strfilename)
+-- Returns the Path Filename and extension as 3 values
+return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+require 'iup'
+strProjectFile = ''
+strProjectFile,strReturn = iup.GetFile(strProjectFile)
+if strReturn ~= 0 then
+   return
+end
+path,name,ext = splitfilename(strProjectFile)
+NewProjectFile = path..'updated-'..name
+
+tblData = {}
+tblNew = {}
+tblText = {}
+
+file = io.open(strProjectFile,'r')
+if file then
+    for line in file:lines() do
+        table.insert(tblData,line)
+    end
+    file:close()
+else
+    error('Bang')
+end
+
+i = 1
+
+print(tblData[i])
+print(#tblData)
+newflag = false
+bText = false
+while tblData[i] ~= nil  do
+
+    line = tblData[i]
+    if line == '1 TEXT ' then
+       --  Handle Blank lines
+       line = '1 TEXT   '
+	end
+    level,key,rest = line:match('(.-) (.-) (.+)')
+print(level,key,rest)
+	if level == '1' and key == 'TEXT' then
+	if	bText then
+		key = 'CONT'
+		tblData[i] = '2 CONT '..rest
+	else
+		bText = true
+
+	end
+	else
+		bText = false
+	end
+        i = i + 1
+    end
+    data = table.concat(tblData, "\n") .. "\n"
+    file = io.open(NewProjectFile,'w')
+    file:write(data)
+    file:close()
+    fhMessageBox('File:'..NewProjectFile..' Created')

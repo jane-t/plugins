@@ -1,0 +1,58 @@
+--[[
+@Title: Address Compactor
+@Author: Jane Taubman
+@LastUpdated: December 2011
+@Description: As V5 provides address management, similar to that for places,  
+addresses are more easily managed when stored in single line form.
+
+This plug in will convert all multi-line addresses to single line ones.
+]]
+function DoAllItems(strItemTag,action)
+    -- strTag: Tag to Find
+    -- action:    function to perform
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types
+    local ii = 0
+    local ptr = fhNewItemPtr()
+    for ii =1,iCount do
+        strRecType = fhGetRecordTypeTag(ii)
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+            strPtrTag = fhGetTag(ptr)
+            if strPtrTag == strItemTag then
+                action(ptr)
+            end
+            ptr:MoveNextSpecial()
+        end
+    end
+end
+function compact(ptr)
+   strAddress = fhGetValueAsText(ptr)
+   -- Replace commas and the spaces around them followed by newlines with just a newline
+   strNewAddress = strAddress:gsub('%s*,%s*\n','\n')
+   -- Replace a newline with a comma
+   strNewAddress = strAddress:gsub('\n',',')
+   -- remove spaces from around commas. NB if you want a space after the , add one to the third parm
+   strNewAddress = strNewAddress:gsub('%s*,%s*',',')
+   -- Record address back if changed (avoids updating records where not needed.
+   if strNewAddress ~= strAddress then
+      iCount = iCount + 1
+      fhSetValueAsText(ptr,strNewAddress)
+		table.insert(tblChanges,ptr:Clone())
+   end
+end
+------------------------------------------------------ Main Code
+ret = fhMessageBox('This plugin will convert all multiline addresses to single line ones\nDo you want to continue?','MB_YESNO','MB_ICONEXCLAMATION')
+tblChanges = {}
+if ret == 'Yes' then
+	 iCount = 0
+    DoAllItems('ADDR',compact)
+	 if iCount == 0 then
+		strMessage = 'No addresses required changing'
+	 else
+		strMessage = iCount..' Addresses updated'
+    end
+    fhMessageBox(strMessage)
+end
+fhOutputResultSetColumn("Changed Addresses", "item", tblChanges, #tblChanges, 180, "align_left", 1, true)
+

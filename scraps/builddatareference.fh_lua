@@ -1,0 +1,11 @@
+-- Get Data Reference for Tag
+function BuildDR(ptr)
+   local ptrTemp = fhNewItemPtr()
+   ptrTemp:Copy(ptr)
+   strDR = fhGetTag(ptrTemp)
+   while ptrTemp:HasParent() do
+      ptrTemp:MoveToParentItem()
+      strDR = fhGetTag(ptrTemp)..'.'..strDR
+   end
+   return strDR
+end

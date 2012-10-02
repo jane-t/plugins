@@ -1,0 +1,605 @@
+--[[
+@Title: FTP Website Manager
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: June 2012 
+@Description: Uploads Family Historian Generated Websites to an FTP site
+
+When run it builds a database of the pages and on a second run only uploads the pages which have changed.
+
+Note: If you include the current date in the pages this will class as all pages having changed.
+]]
+-- debug = true
+setting = {}
+function main()
+    local dbenv,dbcon = opendb(fhGetPluginDataFileName())
+    setting = loadSettings(dbcon)
+   local bclose = false
+   while not(bclose) do 
+       if setting.new then
+           local promptMessage = 'Please use the Change Settings button to set up'
+           iButton = iupButtons('FTP Website Manager',promptMessage,'V','Change Settings','Help','Exit')
+           if iButton > 0 then iButton = iButton + 2 end
+       else
+           local promptMessage = string.format('To\n %s/%s\nFrom\n%s',setting.host,setting.folder,'...'..setting.directory:sub(-50))
+           iButton = iupButtons('FTP Website Manager',promptMessage,'V','Update Site','Clear Page History','Change Settings','Help','Exit')
+       end
+       if iButton == 1 then 
+            list = buildpagelist(dbcon,setting)
+            if list then
+                if #list == 0 then
+                    fhMessageBox('No files found to update')
+                    return
+                else
+                    ret = uploadFiles()
+                    fhMessageBox(#list..' Files Updated')
+                end
+            end
+        elseif iButton == 2 then
+            resetDatabase()
+        elseif iButton == 3 then
+           settingsPrompt()
+        elseif iButton == 4 then
+           -- Show Help Window
+           GUI_HelpDialogue()
+        elseif iButton == 5 or iButton == 0 then
+           bclose = true 
+        end
+    end
+    closedb(dbenv,dbcon)
+end
+function settingsPrompt()
+    ret, setting.directory, setting.host,setting.folder,setting.userid,setting.password =
+    iup.GetParam("FTP Website Manager - Settings", param_action,
+    "Source Folder %f[DIR||'..strftpsource..']\n"..
+    "FTP Host: %s\n"..
+    "FTP Folder: %s\n"..
+    "FTP Username: %s\n"..
+    "FTP Password: %s\n",
+    setting.directory, setting.host,setting.folder,setting.userid,setting.password)
+    if (ret == true) then
+        setting.directory = string.gsub(setting.directory,'%\$','')
+        setting.folder = string.gsub(string.gsub(setting.folder,'\\','/'),'%/$','')
+        dump(setting.directory)
+        saveSettings(dbcon,setting)
+        setting.new = nil
+    else
+        return false
+    end
+end
+function uploadFiles()
+            -- Connect to FTP server
+            ProgressDisplay.Start('Uploading Files to FTP Server',100)
+            local step = 1/#list * 100
+            for i,filedata in pairs(list) do
+                local tofile = filedata.filename:gsub(setting.directory,'')
+                ProgressDisplay.SetMessage(filedata.action..': '..tofile)
+                ProgressDisplay.Step(step)
+                if ProgressDisplay.Cancel() then
+                    break
+                end
+                status = ftpPutFile(filedata.filename,tofile,filedata.action)
+                if status == 'OK' then
+                    updRecord(filedata.filename,filedata.md5hash)
+                else
+                    fhMessageBox('An Error occured uploading the file session aborted\n'..e)
+                    break
+                end
+            end
+            ProgressDisplay.Reset()
+            ProgressDisplay.Close() 
+end
+function ftpPutFile(fromfile,tofile,action)
+    local actions = {update='STOR',delete='DELE'}
+    tofile = tofile:gsub('\\','/')
+    local path,file,ext = string.match(fromfile, "(.-)([^\\]-([^%.]+))$")
+    local stype = 'i'
+    if ext == 'html' or ext == 'css' or ext == 'js' then
+        -- Use Binary for everything other than the html and css files.
+        stype = 'a'
+    end
+    f, e = ftp.put {
+        host = setting.host,
+        user = setting.userid,
+        password = setting.password,
+        command = actions[action],
+        argument = setting.folder..'/'..tofile,
+        type = stype,
+        source = ltn12.source.file(io.open(fromfile, "rb"))
+    }
+    return e or 'OK'
+end
+-- Update record for new files
+function updRecord(filename,md5hash)
+    local sql = string.format("UPDATE pagelist set md5hash = '%s' where filename='%s'",md5hash,filename)
+    local res = assert(dbcon:execute(sql))
+end
+
+function getFTPList(setting)
+local t = {}
+_,e = ftp.get( {
+  host = setting.host,
+  sink = ltn12.sink.table(t),
+  user = setting.userid,
+  password = setting.password,
+  command = 'NLST '..setting.folder,
+  type = 'a'
+} )
+if e then
+   return nil,e
+else
+   local t2 = table.concat(t)
+   local t3 = split(t2,'\r\n')
+   return t3
+end
+end
+
+function buildpagelist(dbcon,setting)
+    local function fliptable(table)
+       newtable = {}
+       for i,v in pairs(table) do
+           newtable[v] = i
+       end
+       return newtable
+    end
+    local function chkrecord(filename)
+         -- Add records for new files
+        local sql = string.format("INSERT OR IGNORE INTO pagelist (filename,md5hash) VALUES ('%s',' ')",filename)
+        local res = assert(dbcon:execute(sql))
+    end
+    local function getHash(filename)
+        -- Add records for new files
+        local sql = string.format("select md5hash from pagelist where filename = '%s'",filename)
+        local cur = assert(dbcon:execute(sql))
+        local row = cur:fetch()
+        cur:close()
+        return row
+    end
+
+    local basedir = setting.directory
+    local tblList = {}
+    local tblAll  = {}
+
+    ProgressDisplay.Start('Retrieving file list from FTP Server',100)
+    ftplist,e = getFTPList(setting)    
+
+    if e then
+        fhMessageBox('Error Occured Connecting to FTP site. Please check your settings\n'..e)
+        ProgressDisplay.Reset()
+        ProgressDisplay.Close()
+        return
+    end
+    ftplist = fliptable(ftplist)
+    ProgressDisplay.SetMessage(#tblList..' files found to update')
+    for filename,attr in dirtree(basedir) do
+        ProgressDisplay.Step(0.1)
+        if ProgressDisplay.Cancel() then
+            break
+        end
+        chkrecord(filename) -- Add if needed
+        oldhash = getHash(filename)
+        -- Remove file from FTP List as it does not need deleting
+        local toname = filename:gsub(basedir..'\\','')
+        ftplist[toname] = nil
+        -- compute MD5 routine
+        local md5hash = md5.sumhexa(LoadFromFile(filename))
+        if oldhash ~= md5hash then
+            table.insert(tblList,{filename=filename, md5hash = md5hash, action='update'})
+            ProgressDisplay.SetMessage(#tblList..' files found to update')
+        end
+    end
+    for i,v in pairs(ftplist) do
+      --  In the Delete List Remove any files starting with .
+      if i:sub(1,1) ~= '.' then
+         chkrecord(i) -- Add if needed
+         table.insert(tblList,{filename=basedir..'\\'..i, md5hash = '0', action='delete'})
+      end
+    end
+    ProgressDisplay.Reset()
+    ProgressDisplay.Close()
+    return tblList
+end
+
+function resetDatabase()
+    local sql = 'delete from pagelist'
+    local res = assert(dbcon:execute(sql))
+    fhMessageBox('Page Database cleared')
+end
+function opendb(dbname)
+    -- Check for Settings Database and create if needed
+    local db = fhGetPluginDataFileName()
+    local dbenv = assert (luasql.sqlite3())
+    -- connect to data source, if the file does not exist it will be created
+    dbcon = assert (dbenv:connect(db))
+    -- check table for page list
+    checkTable(dbcon,'pagelist',
+    [[CREATE TABLE pagelist(filename varchar(500), md5hash varchar(32),UNIQUE (filename))
+    ]])
+    -- create table for settings
+    checkTable(dbcon,'settings',
+    [[CREATE TABLE settings(key varchar(20), directory varchar(500), 
+               host varchar(500), folder varchar(50), userid varchar(50), password varchar(50), UNIQUE (key))
+    ]])
+    return dbenv,dbcon
+end
+function checkTable(dbcon,table,createString)
+    local sql = string.format([[SELECT count(name) as count FROM sqlite_master WHERE type='table' AND name='%s']],table)
+    local cur = assert(dbcon:execute(sql))
+    local rowcount = cur:fetch (row, "a")
+    cur:close()
+    if tonumber(rowcount) == 0 then
+        -- Table not found create it
+        res,err = assert(dbcon:execute(createString))
+    end
+end
+function closedb(dbenv,dbcon)
+    dbcon:close()
+    dbenv:close()
+end
+function loadSettings(dbcon)
+    local sql = [[SELECT * FROM settings]]
+    local cur,err = assert(dbcon:execute(sql))
+    local row = cur:fetch({},'a')
+    cur:close()
+    if row then
+        return row
+    else
+        -- return default values
+        return {
+            directory = fhGetContextInfo('CI_PROJECT_PUBLIC_FOLDER')..'\\FH Website',
+            host = 'websitehost',
+            folder = '/',
+            userid = 'user',
+            password = 'password',
+            new = 'yes'
+        }
+    end
+end
+function saveSettings(dbcon,settings)
+    -- Check for Settings
+    if settings.new == 'yes' then
+        -- Create
+        sql = string.format([[insert into settings (directory, host, folder, userid, password) Values('%s','%s','%s','%s','%s')]],settings.directory,settings.host,settings.folder,settings.userid,settings.password)
+    else
+        -- Update
+        sql = string.format([[update settings set directory = '%s', host = '%s',folder = '%s',userid = '%s', password = '%s']],settings.directory,settings.host,settings.folder,settings.userid,settings.password)
+    end
+    local res = assert(dbcon:execute(sql))
+end
+
+
+function split(str, pat)
+   local t = {}  -- NOTE: use {n = 0} in Lua-5.0
+   local fpat = "(.-)" .. pat
+   local last_end = 1
+   local s, e, cap = str:find(fpat, 1)
+   while s do
+      if s ~= 1 or cap ~= "" then
+	 table.insert(t,cap)
+      end
+      last_end = e+1
+      s, e, cap = str:find(fpat, last_end)
+   end
+   if last_end <= #str then
+      cap = str:sub(last_end)
+      table.insert(t, cap)
+   end
+   return t
+end
+
+
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."\\"..entry
+                local attr=lfs.attributes(entry)
+                coroutine.yield(entry,attr)
+                if attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+--[[
+@Title: Progress Display (drop in)
+@Author: Jane Taubman / Mike Tate
+@LastUpdated: May 2012
+@Description: Allows easy adding of a Progress Bar to any long running Plugin
+]]
+ProgressDisplay = {
+    
+    Start = function(strTitle,intMax) -- Create and start the Progress Display window controls
+        local StrWhite = "255 255 255"
+        if not dlgProgress then
+            cancelflag = false
+            local cancelbutton = iup.button { title="Cancel", rastersize="200x30",
+                action = function()
+                    cancelflag = true -- Signal that Cancel button was pressed
+                    return iup.CLOSE
+                end
+            }
+            gaugeProgress = iup.progressbar { rastersize="400x30", max=intMax } -- Set progress bar maximum range
+            messageline = iup.label { title=" ", expand="YES", alignment="ACENTER" }
+            dlgProgress = iup.dialog { title=strTitle, dialogframe="YES", background=strWhite, -- Remove Windows minimize/maximize menu
+                iup.vbox { alignment="ACENTER", gap="10", margin="10x10",
+                    messageline,
+                    gaugeProgress,
+                    cancelbutton
+                }
+            }
+            dlgProgress.close_cb = cancelbutton.action -- Windows Close button acts as Cancel button
+            dlgProgress:showxy(iup.CENTER, iup.CENTER) -- Show the Progress Display dialogue window
+        end
+    end,
+    SetMessage = function(strMessage) -- Set the progress message
+        if dlgProgress then messageline.title = strMessage end
+    end,
+    Step = function(iStep) -- Step the Progress Bar forward
+        if dlgProgress then
+            gaugeProgress.value = gaugeProgress.value + iStep
+            local val = tonumber(gaugeProgress.value)
+            local max = tonumber(gaugeProgress.max)
+            if val > max then
+                gaugeProgress.value = 0
+            end
+            iup.LoopStep()
+        end
+    end,
+    Reset = function() -- Reset progress bar
+        if dlgProgress then gaugeProgress.value = 0 end
+    end,
+    Cancel = function() -- Check if Cancel button pressed
+        return cancelflag
+    end,
+    Close = function() -- Close the dialogue window
+        cancelflag = false
+        if dlgProgress then dlgProgress:destroy() dlgProgress = nil end
+    end,
+}
+-------------------------------------------------------------------------------------------- End Progress Bar
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+-- Load string from file --
+function LoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"rb")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end -- function LoadFromFile
+-- Load Module
+function loadrequire(module,extended)
+    if not(extended) then extended = module end
+    local function installmodule(module,filename)
+        local bmodule = false
+        if not(filename) then
+            filename = module..'.mod'
+            bmodule = true
+        end
+        local storein = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\Plugins\\'
+        -- Check if subdirectory needed
+        local path = string.match(filename, "(.-)[^/]-[^%.]+$")
+        if path ~= "" then
+            path = path:gsub('/','\\')
+            -- Create sub-directory
+            lfs.mkdir(storein..path)
+        end
+        -- Get file down and install it
+        local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+        local url = "http://www.family-historian.co.uk/lnk/getpluginmodule.php?file="..filename
+        http:Open("GET",url,false)
+        http:Send()
+        http:WaitForResponse(30)
+        local status = http.StatusText
+        if status == 'OK' then
+            length = http:GetResponseHeader('Content-Length')
+            data = http.ResponseBody
+            if bmodule then
+                local modlist = loadstring(http.ResponseBody)
+                for _,f in pairs(modlist()) do
+                    if not(installmodule(module,f)) then
+                        break
+                    end
+                end
+            else
+                local function OpenFile(strFileName,strMode)
+                    local fileHandle, strError = io.open(strFileName,strMode)
+                    if not fileHandle then
+                        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+                    end
+                    return fileHandle
+                end -- OpenFile
+                local function SaveStringToFile(strString,strFileName)
+                    local fileHandle = OpenFile(strFileName,"wb")
+                    fileHandle:write(strString)
+                    assert(fileHandle:close())
+                end -- SaveStringToFile
+                SaveStringToFile(data,storein..filename)
+            end
+            return true
+        else
+            fhMessageBox('An error occurred in Download please try later')
+            return false
+        end
+    end
+    local function requiref(module)
+        require(module)
+    end
+    res = pcall(requiref,extended)
+    if not(res) then
+        local ans = fhMessageBox(
+        'This plugin requires '..module..' support, please click OK to download and install the module',
+        'MB_OKCANCEL','MB_ICONEXCLAMATION')
+        if ans ~= 'OK' then
+            return false
+        end
+        if installmodule(module) then
+            require(extended)
+        else
+            return false
+        end
+    end
+    return true
+end
+
+--[[
+@Title:		User Interface Buttons Snippet
+@Author:	Mike Tate  /  Jane Taubman
+@LastUpdated:	May 2012
+@Version:	1.4
+@Description:	GUI dialogue for multiple buttons
+@params
+  strTitle:	Title of Message Box
+  strMessage:	Message to show above buttons
+  strBoxType:	Either "H" for Horizontal buttons or "V" for Vertical ones.
+  ...       :	All other parameters will be treated as button titles.
+]]
+function iupButtons(strTitle,strMessage,strBoxType,...)
+	local intButton = 0		-- Returned value if X Close button is used
+	-- Create the GUI labels and buttons
+	local lblMessage = iup.label{title=strMessage,expand="YES"}
+	local lblLineSep = iup.label{separator="HORIZONTAL"}
+	local iupBox = iup.hbox{homogeneous="YES"}
+	if strBoxType == "V" then
+		iupBox = iup.vbox{homogeneous="YES"}
+	end
+	for intArgNum, strButton in ipairs(arg) do
+		local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
+		iup.Append(iupBox,btnName)
+	end
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox},dialogframe="YES",background="250 250 250",gap="8",margin="8x8"}
+	dialogue:show()
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+	dialogue:destroy()
+	return intButton
+end -- function iupButtons
+
+
+
+--[[
+@Title:		Display FHUG Wiki Help Snippet
+@Author:	Mike Tate
+@LastUpdated:	May 2012
+@Version:	1.1
+@Description:	Displays FHUG Wiki help pages in a popup GUI.
+]]
+ 
+-- GUI Help & Advice Dialogue --
+function GUI_HelpDialogue()
+ 
+	local StrPlugin	= "Display FHUG Wiki"	-- Plugin title & version
+	local StrIssue	= " V1.0"
+	local StrRed		= "255 000 000"		-- Color attributes
+	local StrGreen	= "000 120 000"
+	local StrBlue		= "000 000 255"
+	local StrBlack	= "000 000 000"
+	local StrWhite	= "255 255 255"
+	local StrBigMargin	= "10x10"		-- Layout attributes
+	local StrMinMargin	= "1x1"
+	local StrGap		= "10"
+	local StrFontFace	= string.gsub(iup.GetGlobal("DEFAULTFONT"),",.*","")
+	local StrFontHead	= StrFontFace..", Bold -16"
+	local StrFontBody	= StrFontFace..",      -16"
+ 
+	local StrFHUG = "http://www.fhug.org.uk/wiki/wiki/doku.php?id=" 
+	local function doActivateMainHelpButton()
+		if BtnMainHelp then BtnMainHelp.active = "YES" end
+	end
+ 
+	-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
+	local	oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+		oleControl:CreateLuaCOM()
+ 
+	-- Create each GUI button with title and tooltip
+	local btnClose	= iup.button	{ title="Close this Window"		, tip="Close this Help and Advice window" }
+ 
+	-- The following control is global to allow Main GUI to alter font
+	HboxHelp = iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnMain, btnPath, btnClose, }
+ 
+	local dialogHelp = iup.dialog { title=StrPlugin.." Help & Advice", background=StrWhite, startfocus=btnClose, rastersize="1000x700",
+				iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin, expandchildren="YES",
+					oleControl,
+					HboxHelp,
+				},
+				close_cb=function() doActivateMainHelpButton() end,
+			}
+ 
+	local strFHUG = StrFHUG.."plugins:help:"
+ 
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control= 1~fgcolor	, 2~Navigate URL		, 3~action function()
+		[btnClose]= { StrRed	, false				, function() dialogHelp:destroy() doActivateMainHelpButton() end },
+		} ) do
+		iupName.expand	= "HORIZONTAL"
+		iupName.size	= "x10"
+		iupName.fgcolor	= tblAttr[1]
+		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(tblAttr[2]) end end
+		if tblAttr[3] then iupName.action = tblAttr[3] end
+	end
+ 
+	dialogHelp:show()
+	dialogHelp.rastersize=iup.NULL	-- Allow window to be resized
+ 
+	oleControl.com:Navigate(strFHUG.."ftp_website_manager")
+ 
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+ 
+end -- function GUI_HelpDialogue
+
+function dump (tt, indent, done, label)
+    if label == nil then
+       label = 'Dump'
+    end
+    if debug == true then
+        done = done or {}
+        indent = indent or 0
+        if type(tt) == "table" then
+            if indent == 0 then
+                io.write(string.rep (" ", indent))
+                io.write(label..'\n')
+            end
+            for key, value in pairs (tt) do
+                io.write(string.rep (" ", indent)) -- indent it
+                if type (value) == "table" and not done [value] then
+                    done [value] = true
+                    io.write(string.format("[%s] => table\n", tostring (key)));
+                    io.write(string.rep (" ", indent+4)) -- indent it
+                    io.write("(\n");
+                    dump (tostring(key),value, indent + 7, done)
+                    io.write(string.rep (" ", indent+4)) -- indent it
+                    io.write(")\n");
+                else
+                    io.write(string.format("[%s] => %s\n",
+                    tostring (key), tostring(value)))
+                end
+            end
+        else
+            io.write(label..':'..tostring(tt))
+        end
+    else
+        return
+    end
+end
+------------------------------------------------------ End of Functions
+require 'lfs'
+require 'luacom'
+require 'iupluaole'
+if not(loadrequire('luasql','luasql.sqlite3')) then return end
+if not(loadrequire('md5')) then return end
+if not(loadrequire('socket')) then return end
+ftp = require("socket.ftp")
+main()

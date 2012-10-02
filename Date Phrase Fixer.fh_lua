@@ -1,0 +1,87 @@
+--[[
+@title: Date Phrase Cleanup
+@author: Calico Pie
+@lastupdated: September 2010
+@description: 
+Find All Date Phrases and Match and replace them where possible.
+]]
+-- Process through all elements in the Individual section
+tblPhraseList = {}
+tblFactList = {}
+tblRecordList = {}
+tblTypes = {"INDI","FAM"} -- Scan both Family and Individual Record Types
+dtDate = fhNewDate()
+dpDatePoint = fhNewDatePt()
+dpEndDatePoint = fhNewDatePt()
+pi = fhNewItemPtr()
+ptrFact = fhNewItemPtr() -- Fact Which Contains Date
+ptrOwner = fhNewItemPtr() -- Owner Which Contains Fact
+for iType,strTypeDesc in ipairs(tblTypes) do
+   pi:MoveToFirstRecord(strTypeDesc)
+   while not pi:IsNull() do
+      strType = fhGetTag(pi)
+      if strType == 'DATE' then
+         dtDate = fhGetValueAsDate(pi)
+         strPhrase = dtDate:GetPhrase()
+         if (strPhrase ~= nil) and (strPhrase ~= "") then
+            -- Clean up date
+            iYear = nil
+            iYear = tonumber(string.match(strPhrase,'%d%d%d%d'))
+            print(strPhrase,iYear)
+            if iYear ~= nil then
+               -- Got a Year
+               if string.find(strPhrase,'ABT.') then
+                  dpDatePoint:SetValue(iYear)
+                  dtDate:SetSimpleDate(dpDatePoint,'approximate')
+                  fhSetValueAsDate(pi,dtDate)
+               end
+               if string.find(strPhrase,'BEF.') then
+                  dpDatePoint:SetValue(iYear)
+                  dtDate:SetRange('before', dpDatePoint)
+                  fhSetValueAsDate(pi,dtDate)
+               end
+               if string.find(strPhrase,'BET.') then
+                  -- Assume Qtr Date and find the Qtr
+                  if string.find(strPhrase,'1 JUL %- 30 SEP') then
+                     -- Q3
+                     dpDatePoint:SetValue(iYear,7)
+                     dpEndDatePoint:SetValue(iYear,9)
+                     dtDate:SetRange('between', dpDatePoint,dpEndDatePoint)
+                     fhSetValueAsDate(pi,dtDate)
+                  elseif string.find(strPhrase,'1 APR %- 30 JUN') then
+                     -- Q2
+                     dpDatePoint:SetValue(iYear,4)
+                     dpEndDatePoint:SetValue(iYear,6)
+                     dtDate:SetRange('between', dpDatePoint,dpEndDatePoint)
+                     fhSetValueAsDate(pi,dtDate)
+                  elseif string.find(strPhrase,'1 JAN %- 31 MAR') then
+                     -- Q1
+                     dpDatePoint:SetValue(iYear,1)
+                     dpEndDatePoint:SetValue(iYear,3)
+                     dtDate:SetRange('between', dpDatePoint,dpEndDatePoint)
+                     fhSetValueAsDate(pi,dtDate)
+                  elseif string.find(strPhrase,'1 OCT %- 31 DEC') then
+                     -- Q1
+                     dpDatePoint:SetValue(iYear,10)
+                     dpEndDatePoint:SetValue(iYear,12)
+                     dtDate:SetRange('between', dpDatePoint,dpEndDatePoint)
+                     fhSetValueAsDate(pi,dtDate)
+                  end
+               end
+               
+               ptrFact:MoveToParentItem(pi)
+               ptrOwner:MoveToParentItem(ptrFact)
+               table.insert(tblRecordList,ptrOwner:Clone()) -- Add to Owner Column
+               table.insert(tblFactList,ptrFact:Clone()) -- Add to Owner Column
+               table.insert(tblPhraseList,' '..strPhrase) 		 -- Add to Data Column
+            end
+         end
+      end
+      pi:MoveNextSpecial()
+   end
+end
+-- Send the Tables to Query Window.
+fhOutputResultSetColumn("Owner", "item", tblRecordList, #tblRecordList)
+fhOutputResultSetColumn("Fact", "item", tblFactList, #tblRecordList)
+fhOutputResultSetColumn("Item", "item", tblPhraseList, #tblPhraseList)
+

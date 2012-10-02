@@ -1,0 +1,266 @@
+--[[
+@Title: Check Installed Plugins Against The Store
+@Author: Jane Taubman
+@Version: 2.0
+@LastUpdated: May 2012
+@Description: Checks currently installed plugins against those currently in the store and optionally downloads and installs later versions.
+
+V2.0 Added Author Column and updated to show the status of all plugins in the main plug directory.  
+
+]]
+require('luacom')
+require('lfs')
+bforcecheck = true
+function main()
+    local tblPlugin = {}
+    local tblCurVer = {}
+    local tblStoreVer = {}
+    local tblStatusDesc = {}
+    local tblAuthor = {}
+    local tblCount = {0,0,0,0,0,0}
+    local tblStatus = {'A. Newer Than Store','B. Upgraded','C. New Version Available','D. Up To Date','E. Not In Store','F. No Version'}
+    pluginDir = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\plugins\\'
+    local count = 0
+    for filename,attr in dirtree(pluginDir) do
+        path,name,ext = splitfilename(filename)
+        if ext == 'fh_lua' and path == pluginDir then   -- Only Look at plugin files which are in the main plugin directory            
+           count = count + 1
+        end
+    end
+    local step = 1 / count
+    ProgressBar.Start("Check Installed Plugins",intFile)
+    for filename,attr in dirtree(pluginDir) do
+        path,name,ext = splitfilename(filename)
+        if ext == 'fh_lua' and path == pluginDir then   -- Only Look at plugin files which are in the main plugin directory            
+            iStatus = 6
+            ProgressBar.Step(step)
+            if ProgressBar.Stop() then break end
+            -- Get version information from script
+            local script = StrLoadFromFile(filename)
+            local _,_,version = string.find(script:lower(), '@version[:%s]%W+([%d%.]*)')
+            local author= script:match('@[Aa]uthor:%s+([^\n]+)')
+            local versionStore,id = nil,nil
+            if bforcecheck then version = version or '0' end
+            if version then
+                versionStore,id = checkVersionInStore('file',name)
+                if versionStore == '' then versionStore = nil end
+                if version ~= versionStore then
+                    if versionStore ~= nil and version < versionStore then
+                        local res = fhMessageBox('Newer version of '..name:gsub('%.fh_lua','')..' found, would you like to upgrade','MB_YESNO','MB_ICONQUESTION')
+                        if res == 'Yes' then
+                            updatePlugin(id)
+                            iStatus = 2
+                        else
+                            iStatus = 3
+                        end
+                    end
+                end
+                if iStatus == 6 then
+                if versionStore and version == versionStore then
+                    iStatus = 4
+                else
+                    if versionStore and version > versionStore then
+                        iStatus = 1
+                    else
+                        iStatus = 5
+                    end
+                end
+                end
+            end
+            table.insert(tblPlugin,name:match('(.+)%.fh_lua'))
+            table.insert(tblCurVer,version or ' ')
+            table.insert(tblStoreVer,versionStore or ' ')
+            table.insert(tblStatusDesc,tblStatus[iStatus] or ' ')
+            table.insert(tblAuthor,author or ' ')
+            tblCount[iStatus] = tblCount[iStatus] + 1
+        end
+    end
+    ProgressBar.Close()
+    if #tblPlugin > 0 then
+        local strMsg = string.format('%u Plugins have been checked with the following Results:\n',sumtbl(tblCount))
+        for i,v in ipairs(tblCount) do
+            if v > 0 then
+                strMsg = string.format('%s%s: %u \n',strMsg,tblStatus[i],v)
+            end
+        end
+        strMsg = string.format('%s\nDisplay detailed results?\n',strMsg)
+        local res = fhMessageBox(strMsg,'MB_YESNO','MB_ICONQUESTION')
+        if res == 'Yes' then
+            -- Output Result Set
+            fhOutputResultSetColumn("Status", "text", tblStatusDesc, #tblPlugin, 80, "align_left",1,true)
+            fhOutputResultSetColumn("Current", "text", tblCurVer, #tblPlugin, 30, "align_right")
+            fhOutputResultSetColumn("Store", "text", tblStoreVer, #tblPlugin, 25, "align_right")
+            fhOutputResultSetColumn("Plugin", "text", tblPlugin, #tblPlugin, 250, "align_left",2,true)
+            fhOutputResultSetColumn("Author", "text", tblAuthor, #tblPlugin, 250, "align_left",2,true)
+
+        end
+    else
+        fhMessageBox('No Plugins Found')
+    end
+end
+-------------------------------------------------- Functions
+function updatePlugin(id)
+    -- Get Plugin down and upgrade it
+    local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+    local url = "http://www.family-historian.co.uk/lnk/fetchlatestpluginversion.php?id="..id
+    http:Open("GET",url,false)
+    http:Send()
+    http:WaitForResponse(30)
+    local status = http.StatusText
+    print('Status = '..status)
+    if status == 'OK' then
+        length = http:GetResponseHeader('Content-Length')
+        print(http:GetResponseHeader('Content-Disposition'))
+        filename = string.match(http:GetResponseHeader('Content-Disposition'),'="(.*)"')
+        print(filename)
+        data = http.ResponseBody
+        SaveStringToFile(data,pluginDir..'\\'..filename)
+        print('Data Size :'..#data)
+        print('Content-Length:'..length)
+        print(http:getAllResponseHeaders())
+    else
+        fhMessageBox('An error occurred in Download please try later')
+    end
+end
+function checkVersionInStore(type,value)
+--[[
+@description: Checks the version in the plugin store by name or id
+@Parms:
+1: String, must be either 'id' or 'name' or file
+2: String where name search or number where id search
+@Returns:
+1: nil where value not found or parameter 1 is invalid,
+or the value of the plugins version field
+]]
+    if type ~= 'id' and type ~= 'name' and type ~= 'file' then
+        return nil
+    end
+    if value then
+        local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+        strRequest ='http://www.family-historian.co.uk/lnk/checkpluginversion.php?'..type..'='..value
+        
+        http:Open("GET",strRequest,false)
+        http:Send()
+        local strReturn = http.Responsebody
+        local ver = ''
+        local ref = ''
+        if strReturn ~= nil then
+            ver,ref = strReturn:match('(%d.*),(%d*)')
+        end
+        return ver,ref
+        
+    else
+        return nil
+    end
+end
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "\\" then
+        dir=string.sub(dir, 1, -2)
+    end
+    
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."\\"..entry
+                local attr=lfs.attributes(entry)
+                coroutine.yield(entry,attr)
+                if attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+function splitfilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- OpenFile
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"r")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end
+-- StrLoadFromFile
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"w")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end -- SaveStringToFile
+-- Progress Bar
+ProgressBar = {
+    Start = function(strTitle,intMax) -- Create & start Progress Bar window
+        if not DlgGauge then
+            IsBarStop = false
+            IntStart = os.time()
+            IntDelta = 0
+            StrClock = "00:00:00"
+            local btnStop = iup.button { title="Stop "..strTitle, rastersize="200x30", action=function() IsBarStop = true end, } -- Signal Stop button pressed return iup.CLOSE -- Often caused main GUI to close !!!
+             BarGauge = iup.progressbar { rastersize="400x30", value=0, max=intMax, } -- Progress bar maximum range
+             LblText = iup.label { title=" ", expand="YES", alignment="ACENTER", tip="Percentage and Time Elapsed", }
+            DlgGauge = iup.dialog { title=strTitle.." Progress", dialogframe="YES", -- Remove Windows minimize/maximize menu
+                iup.vbox{ alignment="ACENTER", gap="10",
+                LblText,
+                BarGauge,
+                btnStop,
+            },
+            move_cb = function(self,x,y) IntDataX=x IntDataY=y end,
+            close_cb = btnStop.action, -- Windows Close button = Stop button
+        }
+        DlgGauge:showxy(IntDataX,IntDataY) -- Show the Progress Bar window
+    end
+end,
+SetText = function(strText) -- Show the Progress text message
+    if DlgGauge then LblText.title = strText end
+end,
+Step = function(intStep) -- Step the Progress Bar forward
+    if DlgGauge then
+        local intVal = tonumber(BarGauge.value)
+        local intMax = tonumber(BarGauge.max)
+        intVal = intVal + intStep
+        if intVal > intMax then intVal = intMax end -- Ensure value does not exceed maximum
+        BarGauge.value = intVal
+        local intDelta = os.difftime(os.time(),IntStart)
+        if IntDelta < intDelta then -- Update clock of elapsed time
+            IntDelta = intDelta
+            local intHour = math.floor( intDelta / 3600 )
+            local intMins = math.floor( intDelta / 60 - intHour * 60 )
+            local intSecs = intDelta - intMins * 60 - intHour * 3600
+            StrClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+        end
+        LblText.title = string.format("%4d %% %s ", math.floor( intVal / intMax * 100 ), StrClock) -- Display % and clock progress
+        DlgGauge.bringfront = "YES"
+        iup.LoopStep()
+    end
+end,
+Reset = function() -- Reset the Progress Bar
+    if DlgGauge then BarGauge.value = 0 end
+end,
+Stop = function() -- Check if Stop button pressed
+    return IsBarStop
+end,
+Close = function() -- Close the Progress Bar window
+    IsBarStop = false
+    if DlgGauge then DlgGauge:destroy() DlgGauge = nil end
+end,
+} -- ProgressBar
+function sumtbl(tbl)
+local tot = 0
+for _,v in ipairs(tbl) do
+    tot = tot + (tonumber(v) or 0)
+end
+return tot
+end
+-- Execute Main Function
+main()

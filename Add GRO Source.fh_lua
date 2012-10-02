@@ -1,0 +1,162 @@
+--[[
+@Title: Add GRO Source
+@Author: Jane Taubman
+@LastUpdated: April 2012
+@Version: 1.1
+@Description: Add A GRO Index Source to an Event and optionally create the event and or set the fields.
+
+Records the Selected Source in a Parameter file for each Project. If run without a project the source record will 
+need to be selected each time.
+
+V1.1 Prevent error, when not able to use Project folder to store settings.
+]]
+
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+function getFamS(ptr)
+    local famsList = {}
+    local ptrFam = fhNewItemPtr()
+    local ptrFamR = fhNewItemPtr()
+    ptrFam:MoveTo(ptr,'~.FAMS')
+    while ptrFam:IsNotNull() do
+        ptrFamR = fhGetValueAsLink(ptrFam)
+        table.insert(famsList,ptrFamR:Clone())
+        ptrFam:MoveNext('SAME_TAG')
+    end
+    return famsList
+end
+---------------------------------------------------------------Main Code
+require("iuplua")
+--  Set up Defaults
+period = {'Q1 Jan-Feb-Mar','Q2 Apr-May-Jun','Q3 Jul-Aug-Sep','Q4 Oct-Nov-Dec','January','February','March','April','May','June','July','August',
+'September','October','November','December'}
+strPeriod = table.concat(period,'|')..'|'
+shortperiod = {'Q1','Q2','Q3','Q4','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'}
+PromptDialogStr =
+[[
+%t
+Source Number %i
+GRO Index Type: %l|Birth|Marriage|Death|
+Year: %i
+Quarter: %l|{strPeriod}
+Registration District: %s
+Reference: %s
+]]
+PromptDialogStr = PromptDialogStr:gsub('{strPeriod}',strPeriod)
+-- Get Source from Last Time
+parmfile = fhGetPluginDataFileName()
+if file_exists(parmfile) then
+    dofile(parmfile)
+else
+    --  Get Source Record to use.
+    ptrList = fhPromptUserForRecordSel('SOUR',1)
+    if #ptrList == 0 then
+        fhMessageBox('Source Not Selected Click Ok to End')
+		  return
+    else
+        psourceno = fhGetRecordId(ptrList[1])
+    end
+end
+ptype = 0
+pqtr  = 0
+pdistrict = ''
+pref = ' '
+pyear = 0
+events = {'BIRT','MARR','DEAT'}
+GROType = {'Birth','Marriage','Death'}
+dtDate = fhNewDate()
+-- Get Current Record if Available
+ptrList = fhGetCurrentRecordSel('INDI')
+if #ptrList == 1 then
+    strName = 'Current Record:'..fhGetItemText(ptrList[1],'~.NAME')..' ('..fhCallBuiltInFunction('LifeDates',ptrList[1])..')'
+else
+    strName = '?'
+end
+-- Get GRO Information
+ret, psourceno, ptype,pyear, pqtr,pdistrict,pref =
+iup.GetParam("Add GRO Entry", param_action,
+strName..PromptDialogStr,
+psourceno, ptype,pyear, pqtr,pdistrict,pref)
+-- Check for Cancel
+if not(ret) then
+    return
+end
+-- Set Variables
+event = ptype + 1
+qtr = period[pqtr + 1]
+ptrSource = fhNewItemPtr()
+ptrSource:MoveToRecordById('SOUR',psourceno)
+if ptrSource:IsNull() then
+    error('Source Not Found')
+end
+-- Record Source Record ID
+if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
+  out = assert(io.open(parmfile, "wb"))
+  out:write('psourceno = '..psourceno)
+  assert(out:close())
+end
+-- Allocate to Current Record
+if (ptype == 1) then
+    ptrList = fhGetCurrentRecordSel('FAM')
+    if #ptrList == 0 then
+        ptrList = fhGetCurrentRecordSel('INDI')
+        if #ptrList == 1 then
+            ptrList = getFamS(ptrList[1])
+        end
+    end
+    if #ptrList ~= 1 then
+        ptrList = fhPromptUserForRecordSel('FAM',1)
+    end
+else
+    ptrList = fhGetCurrentRecordSel('INDI')
+    if #ptrList ~= 1 then
+        ptrList = fhPromptUserForRecordSel('INDI',1)
+    end
+end
+if #ptrList == 0 then
+    error("No Record Selected - Process Aborted")
+end
+ptrEvent = fhNewItemPtr()
+ptrField = fhNewItemPtr()
+ptrEvent:MoveTo(ptrList[1],'~.'..events[event])
+if ptrEvent:IsNull() then
+    -- Create Event
+    ptrEvent = fhCreateItem(events[event],ptrList[1])
+end
+ptrField:MoveTo(ptrEvent,'~.DATE')
+if ptrField:IsNull() then
+    ptrField = fhCreateItem('DATE',ptrEvent)
+end
+dtDate = fhGetValueAsDate(ptrField)
+if  dtDate:IsNull() then
+	
+    dtDate:SetValueAsText(shortperiod[pqtr + 1]..' '..pyear)
+    fhSetValueAsDate(ptrField,dtDate)
+end
+ptrField:MoveTo(ptrEvent,'~.PLAC')
+if ptrField:IsNull() then
+    ptrField = fhCreateItem('PLAC',ptrEvent)
+end
+if fhGetValueAsText(ptrField) == '' then
+    fhSetValueAsText(ptrField,pdistrict)
+end
+-- Add Source
+ptrField = fhCreateItem('SOUR',ptrEvent)
+fhSetValueAsLink(ptrField,ptrSource)
+ptrField = fhCreateItem('PAGE',ptrField)
+sourcepage = GROType[event]..' '..qtr..' '..pyear..' '..pdistrict..' '..pref
+fhSetValueAsText(ptrField,sourcepage)
+-- Check Data
+ptrField:MoveTo(ptrEvent,'~.DATE')
+strResult  = fhCallBuiltInFunction('GetDataWarning',ptrField,1)
+if strResult ~= '' then
+    strButton = fhMessageBox(strResult..'\nDo you wish to undo the entry','MB_YESNO','MB_ICONEXCLAMATION')
+    if strButton == "Yes" then
+        error('Data Validation Failed')
+    end
+end

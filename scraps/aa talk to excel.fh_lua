@@ -1,0 +1,22 @@
+require "luacom"
+
+local excel = luacom.CreateObject("Excel.Application")
+
+local book  = excel.Workbooks:Add()
+local sheet = book.Worksheets(1)
+
+excel.Visible = true
+
+local pi = fhNewItemPtr()  -- declare pointer 
+pi:MoveToFirstRecord("INDI") -- and set to the first record.
+local row = 0
+while not pi:IsNull() do
+	row = row + 1
+sheet.Cells(row, 1).Value2 = fhGetDisplayText(pi)
+sheet.Cells(row, 2).Value2 = fhCallBuiltInFunction('RecordId',pi)
+
+   	pi:MoveNext()
+end
+excel.DisplayAlerts = false
+fhMessageBox('Loading '..row..' Individuals Complete')
+excel = nil 

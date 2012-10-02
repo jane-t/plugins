@@ -1,0 +1,67 @@
+--[[
+@Title: Search for near sibling deaths
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: April 2012 
+@Description: 
+]]
+function checkSiblings(pi,rangeDays)
+	local deathDatePtr = fhNewItemPtr()
+	deathDatePtr:MoveTo(pi,'~.DEAT.DATE') -- INDI.DEAT[1].DATE
+	if deathDatePtr:IsNotNull() then
+		deathDate = fhGetValueAsDate(deathDatePtr)
+		deathDp = deathDate:GetDatePt1()
+		beforeDate = fhCallBuiltInFunction('CalcDate',deathDp,0,0,rangeDays * 1)
+		afterDate = fhCallBuiltInFunction('CalcDate',deathDp,0,0,rangeDays * -1)
+		local famPtr = fhNewItemPtr()
+		local sibPtr = fhNewItemPtr()
+		local sibRecPtr = fhNewItemPtr()
+		local sibDeathDatePtr = fhNewItemPtr()
+		famPtr:MoveTo(pi,'~.FAMC>')
+		if famPtr:IsNotNull() then
+		--  Process Siblings for Matches
+		sibPtr:MoveTo(famPtr,'~.CHIL')
+		while sibPtr:IsNotNull() do
+			sibRecPtr = fhGetValueAsLink(sibPtr)
+			if not(sibRecPtr:IsSame(pi)) then
+				sibDeathDatePtr:MoveTo(sibRecPtr,'~.DEAT.DATE') -- INDI.DEAT[1].DATE
+				if sibDeathDatePtr:IsNotNull() then
+					sibDeathDate = fhGetValueAsDate(sibDeathDatePtr)
+					sibDeathDp = sibDeathDate:GetDatePt1()
+					--  Compare Dates
+					if (sibDeathDp:Compare(beforeDate) < 1) and (sibDeathDp:Compare(afterDate) > -1) then 
+					print('Match:'..sibDeathDate:GetDisplayText())
+					print(fhGetDisplayText(deathDatePtr))
+					return true,sibRecPtr
+					end
+				end
+			end				
+			sibPtr:MoveNext('SAME_TAG')
+		end
+		end
+	else
+		return false,nil 
+	end
+end
+
+------------------------------------------------------------------- Main Code
+rangeDays = 2
+matchTable = {}
+matchTable2 = {}
+pi = fhNewItemPtr()  -- declare pointer 
+pi:MoveToFirstRecord("INDI") -- and set to the first record.
+iCount = 0
+while not pi:IsNull() do
+found,p2 = checkSiblings(pi,rangeDays)	
+if found == true then
+	table.insert(matchTable,pi:Clone())
+	table.insert(matchTable2,p2:Clone())
+	print(#matchTable)
+end
+   	pi:MoveNext()
+end
+fhOutputResultSetColumn("Person 1", "item", matchTable, #matchTable, 180, "align_left", 1, true)
+fhOutputResultSetColumn("Person 2", "item", matchTable2,#matchTable, 180, "align_left", 1, true)
+
+
+

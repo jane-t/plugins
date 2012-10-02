@@ -1,0 +1,13 @@
+function displayptr(ptr)
+	fhMessageBox(fhGetDisplayText(ptr))
+end
+function doallrecords(type,action)
+	local ptr = fhNewItemPtr()
+	ptr:MoveToFirstRecord(type)
+	while ptr:IsNotNull() do
+		action(ptr)
+		ptr:MoveNext()
+	end
+end
+
+doallrecords('INDI',displayptr)

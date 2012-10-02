@@ -1,0 +1,134 @@
+--[[
+@Title: Check for Unlinked Media
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: October 2012 
+@Description: Checks all the media files in the media folder are linked to media records the Project and optionally deletes unlinked files.
+]]
+require 'lfs'
+function mainfunction()
+    if fhGetContextInfo('CI_APP_MODE') ~= 'Project Mode' then
+        fhMessageBox('This Plugin Requires a Project','MB_OK','MB_ICONEXCLAMATION')
+        return
+    end
+    -- Load Media and File Lists
+    filelist = buildfilelist()
+    medialist = buildmedialist()
+    -- Remove Linked files from File List
+    for k,v in pairs(medialist) do
+        filelist[k] = nil
+    end
+    -- List remaining files
+    tblOutput,iC = createResultTable()
+    -- Define Columns
+    tblOutput.file = {title='File',type='text',width=540,align='align_left',content={}}
+    for k,v in pairs(filelist) do
+        -- Add Columns
+        iC = iC + 1
+        tblOutput.file.content[iC] = v
+    end
+    if iC > 0 then
+        -- Offer to delete the files
+        local strTitle = "Files in Media Folder and Not Linked to Project"
+        local a = fhMessageBox('Do you want to delete the '..iC..' unlinked files\n\n\nWarning This CAN NOT be undone', "MB_YESNO","MB_ICONEXCLAMATION")
+        if a == "Yes" then
+            strTitle = "Deleted Files in Media Folder and Not Linked to Project"
+            deleteFiles(filelist)
+            fhMessageBox(iC.." Files Deleted")
+        end
+       fhOutputResultSetTitles(strTitle,strTitle, "Date: %#x")
+       for t in tblOutput() do
+           fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+       end
+
+
+    else
+        fhMessageBox('No Unlinked Files Found','MB_OK','MB_ICONINFORMATION') 
+    end
+end
+-------------------------------------- Custom Functions
+function buildfilelist()
+    local rootfolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+    local mediafolder = rootfolder..'\\media'
+    local filelist = {}
+    for filename,attr in dirtree(mediafolder) do
+        if attr.mode == 'file' then
+            local strlc = string.lower(filename:gsub(rootfolder..'\\',''))
+            filelist[strlc] = filename
+        end
+    end
+    return filelist
+end
+function buildmedialist()
+    local medialist = {}
+    local pm = fhNewItemPtr()
+    for pi in records('OBJE') do
+        pm:MoveTo(pi,'~._FILE')
+        local mediaFile = fhGetValueAsText(pm)
+        local strlc = mediaFile:lower()
+        medialist[strlc] = fhGetValueAsText(pm)
+    end
+    return medialist
+end
+function deleteFiles(filelist)
+    for k,v in pairs(filelist) do
+        os.remove(v)
+    end
+end
+-------------------------------------- Standard Functions
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."\\"..entry
+                local attr=lfs.attributes(entry)
+                coroutine.yield(entry,attr)
+                if attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end    
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+function records(type)
+    local pi = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2 = pi:Clone()
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2:Clone() end
+    end
+end
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+-------------------------------------- Call Main Function
+mainfunction()

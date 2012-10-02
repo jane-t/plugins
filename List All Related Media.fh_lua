@@ -1,0 +1,79 @@
+--[[
+@Title: List All Related Media
+@Author: Jane Taubman
+@Version: 1.1
+@LastUpdated: July 2012
+@Description:
+Lists all media, which is linked to the individual or the Family as Spouse of the Individual
+or Sources linked to the Individual.  To quickly view in the media window, from the result set
+Hit CTRL-A to select all fields and then select View Selected Records from the drop down on the media button.
+
+1.1 Added Media Records linked to Facts
+]]
+function main()
+    tblSources = {}
+    tblMedia = {}
+    tblFact  = {}
+    ptrIndi = fhNewItemPtr()
+    ptr   = fhNewItemPtr()
+    ptrList = fhGetCurrentRecordSel('INDI')
+    if #ptrList < 1 then
+        ptrList = fhPromptUserForRecordSel('INDI',1)
+        if #ptrList < 1 then
+            return
+        end
+    end
+    ptrIndi = ptrList[1]:Clone()
+    addMedia(ptrIndi)
+    strTitle = fhGetDisplayText(ptrIndi).."Related Media"
+    fhOutputResultSetTitles(strTitle,strTitle, "Date: %#x")
+    fhOutputResultSetColumn("Media", "item", tblMedia, #tblMedia,  180, "align_left", 1, true)
+    fhOutputResultSetColumn("Fact", "item", tblFact, #tblMedia,  180, "align_left", 1, true)
+end
+function addMedia(ptr)
+    local ptrFam = fhNewItemPtr()
+    local ptrSource = fhNewItemPtr()
+    local ptrSourceRec = fhNewItemPtr()
+    local ptrObject = fhNewItemPtr()
+    local ptrFactObject = fhNewItemPtr()
+    local ptrRoot = ptr:Clone()   
+    
+    ptr:MoveToFirstChildItem(ptr)
+    while ptr:IsNotNull() do
+        --  Find media linked to Sources
+        ptrSource:MoveTo(ptr,'~.SOUR')
+        while ptrSource:IsNotNull() do
+            ptrSourceRec = fhGetValueAsLink(ptrSource)
+            ptrObject:MoveTo(ptrSourceRec,'~.OBJE')
+            while ptrObject:IsNotNull() do
+                table.insert(tblMedia,fhGetValueAsLink(ptrObject))
+                table.insert(tblFact,ptr:Clone())
+                ptrObject:MoveNext('SAME_TAG')
+            end
+            ptrSource:MoveNext('SAME_TAG')
+        end
+        --  Media Linked To Facts
+        ptrFactObject = fhGetItemPtr(ptr,'~.OBJE')
+        while ptrFactObject:IsNotNull() do
+            table.insert(tblMedia,fhGetValueAsLink(ptrFactObject))
+            table.insert(tblFact,ptr:Clone())
+            ptrFactObject:MoveNext('SAME_TAG')
+        end
+        --  Media Linked to the Record
+        if fhGetTag(ptr) == 'OBJE' then
+            table.insert(tblMedia,fhGetValueAsLink(ptr))
+            table.insert(tblFact,ptrRoot:Clone())
+        end
+        --  Add media linked to the Family As Spouse Records
+        if fhGetTag(ptr) == 'FAMS' then
+            addMedia(fhGetValueAsLink(ptr))
+        end
+        ptr:MoveNext()
+    end
+end
+-------------------------------------------------------------- Main Code
+main()
+
+
+
+

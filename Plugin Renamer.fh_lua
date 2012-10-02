@@ -1,0 +1,75 @@
+--[[
+@Title: Plugin Renamer
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: July 2012 
+@Description: 
+Renames plugins removing underlines from plugin names, to deal with problems caused by IE8 replacing spaces with underlines when downloading under windows 7.
+
+Once run all plugins will have no underlines in them and can be updated using the Plugin "Check Installed Plugins Against The Store".
+]]
+require "lfs"
+function main()
+    ans = fhMessageBox(
+    'This plugin will remove underline characters from installed plugins, do you wish to continue',
+    'MB_OKCANCEL','MB_ICONQUESTION')
+    if ans == 'Cancel' then
+        return
+    end
+    tblOrg = {}
+    tblNew = {}
+    tblErr = {}
+    root = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\plugins'
+    local intFileCount = 0
+    for strSourceFile, tblAttr in DirTree(root) do
+        if tblAttr.mode == "file" then
+            path,name,ext = splitfilename(strSourceFile)
+            newname = trim(name:gsub('_',' '))
+            if newname ~= name then
+                newpath = path..newname..'.'..ext
+                res,errStr = os.rename(strSourceFile,newpath)
+                
+                table.insert(tblOrg,strSourceFile)
+                table.insert(tblNew,newname..'.'..ext)
+                table.insert(tblErr,res or errStr)
+            end
+        end
+    end
+    if #tblOrg > 0 then
+        fhOutputResultSetColumn("Oldname", "text",tblOrg,#tblOrg, 50, "align_left")
+        fhOutputResultSetColumn("New Name", "text",tblNew,#tblOrg, 50, "align_left")
+        fhOutputResultSetColumn("Error", "text",tblErr,#tblOrg, 50, "align_left")
+    else
+        fhMessageBox('No Plugins required Renaming')
+    end
+end
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+    assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+    if string.sub(strDir, -1) == "/" then
+        strDir = string.sub(strDir, 1, -2) -- Remove trailing "/"
+    end
+    
+    local function doYieldTree(strDir)
+        for strEntry in lfs.dir(strDir) do
+            if strEntry ~= "." and strEntry ~= ".." then
+                strEntry = strDir.."\\"..strEntry
+                local tblAttr = lfs.attributes(strEntry)
+                coroutine.yield(strEntry,tblAttr)
+                if tblAttr.mode == "directory" then
+                    doYieldTree(strEntry)
+                end
+            end
+        end
+    end -- local function doYieldTree
+    return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+function splitfilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-).([^%.]+)$")
+end
+function trim(s)
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+-- Invoke Program
+main()

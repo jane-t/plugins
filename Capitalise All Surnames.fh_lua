@@ -1,0 +1,41 @@
+--[[
+@Title: Capitalise All Surnames
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: Sept 2012 
+@Description: Forces All Surnames to Uppercase permanently.
+]]
+
+tblOldName = {}
+tblNewName = {}
+tblRecord = {}
+pi = fhNewItemPtr()
+pName = fhNewItemPtr()
+pi:MoveToFirstRecord("INDI")
+while not pi:IsNull() do
+    -- Update the Surname
+    pName:MoveTo(pi,'~.NAME')
+    while pName:IsNotNull() do
+        oldname = fhGetValueAsText(pName)
+        -- gsub matches the surname between the // and looks up the replacement in the table.
+        strName = string.gsub(oldname,"%b//",string.upper(string.match(oldname,"%b//")))
+        if strName ~= oldname then
+            table.insert(tblOldName,oldname)
+            table.insert(tblNewName,strName)
+            table.insert(tblRecord,pi:Clone())
+            fhSetValueAsText(pName,strName)
+        end
+        pName:MoveNext('SAME_TAG')
+    end
+    pi:MoveNext()
+end
+if #tblOldName > 0 then
+    -- Output Result Set
+    fhOutputResultSetTitles("Capitalisation Changes", "Capitalisation Changes", "Date: %#x")
+    fhOutputResultSetColumn("Old Name", "text", tblOldName, #tblRecord, 180, "align_left")
+    fhOutputResultSetColumn("New Name", "text", tblNewName, #tblRecord, 180, "align_left")
+    fhOutputResultSetColumn("Individual", "item", tblRecord, #tblRecord, 180, "align_left")
+    
+else
+    fhMessageBox('No Records Required Updated')
+end

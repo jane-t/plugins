@@ -1,0 +1,38 @@
+require("iuplua")
+require("iuplua_pplot")
+
+tblSurnames = {Blogs=4,
+Smith=5,
+Jones=12,
+Weaver=3,
+Whitesmith=4
+} 
+plot = iup.pplot{
+  TITLE = "Surname Distribution",
+  MARGINBOTTOM="65",
+  MARGINLEFT="65",
+  AXS_XLABEL=" ",
+  AXS_YLABEL="Count",
+  LEGENDSHOW="YES",
+  LEGENDPOS="TOPLEFT",
+AXS_XMIN = "0",
+AXS_YMIN = "0",
+AXS_YAUTOMIN = "NO",
+AXS_XAUTOMIN = "NO",
+AXS_XAUTOTICK = "NO",
+}
+iup.PPlotBegin(plot, 1)
+i = 0
+for strSurname, iQty in pairs(tblSurnames) do
+	iup.PPlotAddStr(plot, strSurname, iQty)
+	i = i + 1
+end
+iup.PPlotEnd(plot)
+plot.DS_MODE = "BAR"
+plot.DS_LEGEND = "Surnames" 
+plot.DS_SHOWVALUES = "YES"
+d = iup.dialog{plot, size="800x200", title="PPlot"}
+d:show()
+ 
+
+iup.MainLoop()

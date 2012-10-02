@@ -1,0 +1,94 @@
+--[[
+@Title: Surname Summary Report
+@Author: Jane Taubman
+@LastUpdated: May 2012
+@Version: 1.1
+@Description: Counts and Lists All Surnames in the File
+1.1 Added earliest and latest dates for each surname and with report titles.
+]]
+function main()
+    local tblSurnames = {} -- Define array for Surnames
+    local tblMin = {}
+    local tblMax = {}
+    local pi = fhNewItemPtr() -- declare pointer
+    pi:MoveToFirstRecord("INDI") -- set the first to point to the first Source record
+    while not pi:IsNull() do
+        -- For each Person Add the Surname to the list
+        strSurname = fhGetItemText(pi,'INDI.NAME:Surname')
+        tblSurnames[strSurname] = inc(tblSurnames[strSurname],1)
+        local min,max = daterange(pi)
+        if tblMin[strSurname] and min then
+            if min < tblMin[strSurname] then tblMin[strSurname] = min end
+        else
+            if min then tblMin[strSurname] = min end
+        end
+        if tblMax[strSurname] and max then
+            if max > tblMax[strSurname] then tblMax[strSurname] = max end
+        else
+            if max then tblMax[strSurname] = max end
+        end
+        pi:MoveNext()
+    end
+    -- Build Tables for the result set columns for Name and Qty
+    tblSurname = {}
+    tblcount = {}
+    tblMin2 = {}
+    tblMax2 = {}
+    for strSurname, iQty in pairs(tblSurnames) do
+        table.insert(tblSurname,strSurname)
+        table.insert(tblcount,iQty)
+        table.insert(tblMin2,tblMin[strSurname] or 0)
+        table.insert(tblMax2,tblMax[strSurname] or 0)
+    end
+    local project = fhGetContextInfo('CI_PROJECT_NAME')
+    fhOutputResultSetTitles("Surname Summary Report","Surname Summary Report for "..project, "Printed Date: %#x")
+    fhOutputResultSetColumn('Surname', 'text',tblSurname,#tblSurname,80,'align_left',2,true)
+    fhOutputResultSetColumn('Count', 'integer',tblcount,#tblSurname,40,'align_right',1,false)
+    fhOutputResultSetColumn('Earliest', 'integer',tblMin2,#tblSurname,40,'align_right',1,false)
+    fhOutputResultSetColumn('Latest', 'integer',tblMax2,#tblSurname,40,'align_right',1,false)
+end
+---------------------------------- Additional Functions
+function inc(i,s)
+    if i then i = i + s else i = s end
+    return i
+end
+function daterange(ptr)
+    local eventPtr = fhNewItemPtr()
+    local famPtr = fhNewItemPtr()
+    local famsPtr = fhNewItemPtr()
+    local minyear
+    local maxyear
+    eventPtr:MoveToFirstChildItem(ptr)
+    while eventPtr:IsNotNull() do
+        local year = fhGetItemText(eventPtr,'~.DATE:YEAR')
+        minyear,maxyear = compdate(year,minyear,maxyear)
+        eventPtr:MoveNext()
+    end
+    -- Family As Spouse Events
+    famsPtr:MoveTo(ptr,'~.FAMS')
+    while famsPtr:IsNotNull() do
+        famPtr = fhGetValueAsLink(famsPtr)
+        eventPtr:MoveToFirstChildItem(famPtr)
+        while eventPtr:IsNotNull() do
+            local year = fhGetItemText(eventPtr,'~.DATE:YEAR')
+            minyear,maxyear = compdate(year,minyear,maxyear)
+            eventPtr:MoveNext()
+        end
+        famsPtr:MoveNext()
+    end
+    return minyear,maxyear
+end
+function compdate(year,minyear,maxyear)
+    iYear = tonumber(year)
+    if iYear then
+        if iYear > (maxyear or 0) then
+            maxyear = iYear
+        end
+        if iYear < (minyear or 99999) then
+            minyear = iYear
+        end
+    end
+    return minyear,maxyear
+end
+---------------------------------- Call Main
+main()

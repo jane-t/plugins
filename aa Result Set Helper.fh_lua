@@ -1,0 +1,32 @@
+local results = {}
+results.create = function (...)
+ results.titles = {...}
+ results.content = {}
+for i=1,select('#',...) do
+ results.content[i] = {}
+  end
+ 
+
+end
+
+
+results.addrow = function (...)
+ local newrow = #results.content[1] + 1
+ for i=1,select('#',...) do
+ results.content[newrow] = select(i,...)
+  end     
+end
+results.output = function (title,subtitle)
+
+
+end
+results.create('1','2','3','4','5','6','7')
+results.addrow('1','2','3','4','5','6','7')
+
+
+
+
+
+
+
+

@@ -1,0 +1,232 @@
+--[[
+@Title: Clean Living People
+@Author: Jane Taubman
+@LastUpdated: September 2012
+@Version: 1.1
+@Description: Privatise Living People and Remove Private Ones.
+When sharing files on line, it's a good idea to remove any detailed information.
+This plugin offers several options to reduce the amount of information in a gedcom file for living people.
+
+It is designed to be used in conjunction with the Split Tree Helper or
+standard Export option and will prompt for confirmation if you try to use it on
+a gedcom which is open in Project mode.
+
+It will take note of the Living Flag on a person,  but can be additionally set to assume anyone
+with an estimated birth date after a selected date and with no death date could be living.
+
+Options for living people include:
+
+1. Changing Names to either just intials or intials and Surname, or change the name to Living.
+2. Removing All Facts for Living People
+3. Removing Sources and Dates from Facts
+4. Removing Media
+5. Cleaning "orphaned" media, sources and notes from the file.
+
+Version Notes
+1.1 Fixed Problem where Notes were removed when media was removed.
+]]
+----------------------------------- Function Extract Initials
+function GetInitials(str)
+    local function tchelper(first, rest)
+    return first:upper()
+end
+str = str:gsub("(%a)([%w_']*)", tchelper)
+return str
+end
+------------------------------------ Function ProcessFact
+function processFact(ptrField)
+    if s['ClnFacts'] == 1 then
+        --- Remove All Dates
+        ptrClear = fhGetItemPtr(ptrField,'~.DATE')
+        table.insert(tblDeleteList,ptrClear:Clone())
+    elseif s['ClnFacts'] == 2 then
+        --- Remove Dates and Source Links
+        ptrClear = fhGetItemPtr(ptrField,'~.DATE')
+        table.insert(tblDeleteList,ptrClear:Clone())
+        ptrClear = fhGetItemPtr(ptrField,'~.SOUR')
+        while ptrClear:IsNotNull() do
+            table.insert(tblDeleteList,ptrClear:Clone())
+            ptrClear:MoveNext('SAME_TAG')
+        end
+    elseif s['ClnFacts'] == 3 then
+        --- Remove All Facts
+        table.insert(tblDeleteList,ptrField:Clone())
+    end
+end
+----------------------------------------------------- Function Delete Unused Records
+function dltUnused(type)
+    local ptr = fhNewItemPtr()
+    local dltptr = fhNewItemPtr()
+    
+    ptr:MoveToFirstRecord(type)
+    while ptr:IsNotNull() do
+        lnks = fhCallBuiltInFunction('LinksTo',ptr)
+        if lnks == 0 then
+            dltptr:MoveTo(ptr)
+            ptr:MoveNext()
+            fhDeleteItem(dltptr)
+        else
+            ptr:MoveNext()
+        end
+    end
+end
+---------------------------------- Default Settings
+s = {}
+s['LivingFlag'] = '~._FLGS.__LIVING'
+s['PrivateFlag'] = '~._FLGS.__PRIVATE'
+s['LivingName'] = 'Living'
+s['RemovePrivate'] = 1
+s['ClnFacts'] = 0
+s['ClnName'] = 0
+s['ClnMedia'] = 0
+s['ClnNotes'] = 0
+s['AssumeLiving'] = 1
+s['LivingBirthDate'] = 1910
+s['ClnNoteRecords'] = 1
+s['ClnSourceRecords'] = 1
+s['ClnMediaRecords'] = 1
+-------------------------------------------------------------------------------- Check for Project and Warn if in Project Mode
+
+if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
+    ret = 	fhMessageBox(
+    [[ Warning:
+    This plugin is designed to delete data from the current file.
+    You have a Project open. Please confirm you want to clean the data on ]]..fhGetContextInfo('CI_PROJECT_NAME'),
+    'MB_OKCANCEL',
+    'MB_ICONEXCLAMATION')
+    if ret ~= 'OK' then
+        return
+    end
+end
+-------------------------------------------------------------------------------- Prompt User to Confirm Options
+ret, s['RemovePrivate'], s['ClnFacts'],s['ClnMedia'],s['ClnNotes'],s['ClnName'],s['AssumeLiving'],
+s['LivingBirthDate'],s['ClnSourceRecords'],s['ClnNoteRecords'],s['ClnMediaRecords']  =
+iup.GetParam("Family Historian Privatise", param_action,
+"Private People (Private Flag Set) Options %t\n"..
+"Remove Individuals Marked Private: %b\n"..
+"Living People (Living Flag Set) Options %t\n"..
+"Living Facts: %l|No Change|Remove All Dates     |Remove All Dates and Sources  |Remove All Facts|\n"..
+"Living Media: %l|No Change|Remove Media|\n"..
+"Living Notes: %l|No Change|Remove Notes|\n"..
+"Living Names: %l|No Change|Initials and Surname |Convert Whole Name to Initials|Replace with '"..s['LivingName'].."'|\n"..
+"Force Living Flag %b \n"..
+"  if no death date and born after: %i\n"..
+"Sources and Notes %t\n"..
+"Remove unused Source Records: %b\n"..
+"Remove unused Note Records: %b\n"..
+"Remove unused Media Records: %b\n"
+,
+s['RemovePrivate'],s['ClnFacts'],s['ClnMedia'],s['ClnNotes'],s['ClnName'],s['AssumeLiving'],
+s['LivingBirthDate'],s['ClnSourceRecords'],s['ClnNoteRecords'],s['ClnMediaRecords'])
+
+if (ret == 0) or ret == false then
+    return
+end
+-------------------------------------------------------------------------- Process File
+ptrRecord = fhNewItemPtr()
+ptrField  = fhNewItemPtr()
+ptrClear  = fhNewItemPtr()
+tblDeleteList = {}
+tblChangeList = {}
+tblFamilyList = {}
+ptrRecord:MoveToFirstRecord('INDI')
+while ptrRecord:IsNotNull() do
+    bLiving = fhGetItemText(ptrRecord,s['LivingFlag'])
+    bPrivate = fhGetItemText(ptrRecord,s['PrivateFlag'])
+    if bPrivate == 'Y' and s['RemovePrivate'] == 1 then
+        table.insert(tblDeleteList,ptrRecord:Clone())
+    else
+        ----------------------------------------------------------------- Check Unflagged for Living
+        if bLiving ~= 'Y' and s['AssumeLiving'] == 1 then
+            local BirthYear = tonumber(fhGetItemText(ptrRecord,'~.BIRT.DATE:YEAR'))
+            if BirthYear == nil then
+                BirthDate = fhCallBuiltInFunction('EstimatedBirthDate',ptrRecord,'EARLIEST',3)
+                BirthYear = fhCallBuiltInFunction('Year',BirthDate)
+            end
+            if BirthYear == nil then
+                --  Assume recent
+                BirthYear = s['LivingBirthDate']
+            end
+            local DeathYear = tonumber(fhGetItemText(ptrRecord,'~.DEAT.DATE:YEAR'))
+            if BirthYear >= s['LivingBirthDate'] and DeathYear == nil then
+                bLiving = 'Y'
+            end
+        end
+        ------------------------------------------------------------------ Process Living
+        if bLiving == 'Y' then
+            ptrField:MoveToFirstChildItem(ptrRecord)
+            while ptrField:IsNotNull() do
+                if fhIsFact(ptrField) and s['ClnFacts'] > 0 then
+                    processFact(ptrField)
+                end
+                if fhGetTag(ptrField) == 'NAME' and s['ClnName'] > 0 then
+                    local Surname = string.match(fhGetValueAsText(ptrField),'/(.-)/')
+                    local Given = fhGetItemText(ptrField,'~:GIVEN_ALL')
+                    if s['ClnName'] == 1 then
+                        --  Change Given to Initials
+                        newName = GetInitials(Given)..' /'..Surname..'/'
+                    elseif s['ClnName'] == 2 then
+                        --  Change All to Initials
+                        newName = GetInitials(Given)..' /'..GetInitials(Surname)..'/'
+                        
+                    elseif s['ClnName'] == 3 then
+                        newName = '/'..s['LivingName']..'/'
+                    end
+                    table.insert(tblChangeList,{ptr=ptrField:Clone(), value = newName, type='text'})
+                end
+                if (fhGetTag(ptrField) == 'OBJE' or fhGetTag(ptrField) == 'OBJE2') and s['ClnMedia'] > 0 then
+                    table.insert(tblDeleteList,ptrField:Clone())
+                end
+                if (fhGetTag(ptrField) == 'NOTE' or fhGetTag(ptrField) == 'NOTE2') and s['ClnNotes'] > 0 then
+                    table.insert(tblDeleteList,ptrField:Clone())
+                end
+                if fhGetTag(ptrField) == 'FAMS' then
+                    table.insert(tblFamilyList,fhGetValueAsLink(ptrField))
+                end
+                ptrField:MoveNext()
+            end
+        end
+    end
+    ptrRecord:MoveNext()
+end
+---------------------------------------------- Process Family Records With Living Individuals
+for _,item in ipairs(tblFamilyList) do
+    ptrField:MoveToFirstChildItem(item)
+    while ptrField:IsNotNull() do
+        if fhIsFact(ptrField) and s['ClnFacts'] > 0 then
+            processFact(ptrField)
+        end
+        if (fhGetTag(ptrField) == 'OBJE' or fhGetTag(ptrField) == 'OBJE2') and s['ClnMedia'] > 0 then
+            table.insert(tblDeleteList,ptrField:Clone())
+        end
+        if (fhGetTag(ptrField) == 'NOTE' or fhGetTag(ptrField) == 'NOTE2') and s['ClnNotes'] > 0 then
+            table.insert(tblDeleteList,ptrField:Clone())
+        end
+        ptrField:MoveNext()
+    end
+end
+
+ret = fhMessageBox('Please Confirm Changes:\n'..#tblDeleteList..' items will be deleted and '..#tblChangeList..' items changed','MB_OKCANCEL')
+if ret=='OK' then
+    for _,item in ipairs(tblDeleteList) do
+        fhDeleteItem(item)
+    end
+    for _,item in ipairs(tblChangeList) do
+        if item.type == 'text' then
+            fhSetValueAsText(item.ptr,item.value)
+        end
+    end
+    tblDeleteList = {}
+    if s['ClnNoteRecords'] == 1 then
+        dltUnused('NOTE')
+    end
+    
+    if s['ClnSourceRecords'] == 1 then
+        dltUnused('SOUR')
+    end
+    if s['ClnMediaRecords'] == 1 then
+        dltUnused('OBJE')
+    end
+else
+    return
+end

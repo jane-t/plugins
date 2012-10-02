@@ -1,0 +1,47 @@
+require"lfs"
+
+function splitfilename(strfilename)
+return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+
+function updatehtml(filename,search,replace)
+    local inp = assert(io.open(filename, "rb"))
+	topath,toname,toext = splitfilename(filename)
+	tofilename = topath..'b'..toname
+    local out = assert(io.open(tofilename, "wb"))
+    local data = inp:read("*all")
+	local level = ''
+	-- Clean Table Section
+   data = data:gsub(search,replace)
+	out:write(data)
+	inp:close()
+	out:close()
+	os.remove(filename)
+	os.rename(tofilename,filename)
+end
+function checkhtml(filename,search,replace)
+    local inp = assert(io.open(filename, "rb"))
+    local data = inp:read("*all")
+	local level = ''
+	-- Clean Table Section
+	strmatch = string.match(data,search)
+	if (strmatch) then 
+		print(filename,string.match(data,strmatch))
+		updatehtml(filename,search,replace)
+	end
+	inp:close()
+end
+------------------------------------------------------------------------- Main Code
+path = "D:\\Work\\Dropbox\\_Html Help"
+    for file in lfs.dir(path) do
+        if file ~= "." and file ~= ".." then
+            local f = path..'\\'..file
+			  spath,sname,sext = splitfilename(f)
+			if (sext == 'html') then
+			 checkhtml(f,'<font color = "#FF0000">(.-)</font>','<span class="red">%1</span>')
+			end
+        end
+    end
+
+
+

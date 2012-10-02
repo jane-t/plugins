@@ -1,0 +1,14 @@
+--[[
+@Title: Launch FH help for Functions
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: Sept 2012 
+@Description: Launches the FH help file to the "All Functions" Page
+]]
+path = os.getenv('PROGRAMFILES')
+helpfile =  path..'\\Family Historian\\Program\\fh.chm::/function_all.html'
+ok,err,errtext = fhShellExecute('hh',helpfile)
+if not(ok) then 
+  fhMessageBox('Help Failed '..err..' '..errtext) 
+end
+

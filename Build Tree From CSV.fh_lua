@@ -1,0 +1,272 @@
+--[[
+@Title: Build Tree From CSV File
+@Author: Jane Taubman
+@LastUpdated: March 2011
+@Version: 1.0
+@Description: Takes simply formatted CSV file containing relationships and builds a tree.
+Designed to Work on a Blank File,  but will add records to an existing one.
+]]
+--- Include IUP Extensions
+require( "iuplua" )
+--
+----------------------------------------------------------------------------
+-- Functions
+----------------------------------------------------------------------------
+--
+--- GetExistingFile
+-- @name GetExistingFile
+-- @uses IUP
+-- @param strTitle Prompt Title
+-- @param strFilter Filter template e.g *.CSV;*.TXT
+-- @param strFilterInfo  Display Text for the Selection
+function GetExistingFile(strTitle,strFilter,strFilterInfo,strDir)
+   -- Creates a file dialog and sets its type, title, filter and filter info
+   filedlg = iup.filedlg{dialogtype = "OPEN", title = strTitle,
+   filter = strFilter, filterinfo = strFilterInfo,
+   directory=strDir}
+   -- Shows file dialog in the center of the screen
+   filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+   -- Gets file dialog status
+   status = filedlg.status
+   return status,filedlg.value
+end
+--- fromCSV
+-- @name	        fromCSV
+-- @description   Converts a string to a table of fields, spliting according to normal CSV rules
+-- @param         string  comma separated string
+-- @return        table of fields
+function fromCSV (s)
+   s = s .. ','        -- ending comma
+   local t = {}        -- table to collect fields
+   local fieldstart = 1
+   repeat
+      -- next field is quoted? (start with `"'?)
+      if string.find(s, '^"', fieldstart) then
+         local a, c
+         local i  = fieldstart
+         repeat
+            -- find closing quote
+            a, i, c = string.find(s, '"("?)', i+1)
+         until c ~= '"'    -- quote not followed by quote?
+         if not i then
+            error('unmatched "')
+         end
+         local f = string.sub(s, fieldstart+1, i-1)
+         table.insert(t, (string.gsub(f, '""', '"')))
+         fieldstart = string.find(s, ',', i) + 1
+      else                -- unquoted; find next comma
+         local nexti = string.find(s, ',', fieldstart)
+         table.insert(t, string.sub(s, fieldstart, nexti-1))
+         fieldstart = nexti + 1
+      end
+   until fieldstart > string.len(s)
+   return t
+end
+--- LoadFile
+-- @name          loadfile
+-- @description   Loads a CSV file into a table of tables
+-- @usage         provide valid filename, use ipairs loop to use resulting table
+-- @param         filename  filename to load
+-- @return        table of tables
+function loadfile(filename)
+   contents = {}
+   bheader = false
+   for line in io.lines(filename) do
+      
+      fields = fromCSV(line)
+      data   = {}
+      --
+      if bheader then
+         --  Build Data Table with the Header Descriptions
+         for i,field in ipairs(fields) do
+            if field ~= '' then
+               data[header[i]] = field
+            end
+         end
+         contents[fields[1]] =data
+      else
+         -- Grab Column Names
+         header = fields
+         bheader = true
+      end
+   end
+   return contents
+end
+--- CreateInd
+-- @name          CreateInd
+-- @description   Creates a new individual Record INDI
+-- @param         name string in format  forenames /surname/ NAME
+-- @param         sex string either M or F or Male or Female SEX
+-- @param         customid string for records custom ID REFN
+-- @return        item pointer for new record
+function CreateInd(sName, sSex, sCustomID)
+   local ptrInd = fhCreateItem("INDI")             -- create an Individual record and ret ptr to it
+   local ptrName = fhCreateItem("NAME", ptrInd)    -- create a NAME field within this record, and ret ptr to it
+   fhSetValueAsText(ptrName, sName)                -- set value of the name using passed in parameter
+   local ptrSex = fhCreateItem("SEX", ptrInd)      -- create a SEX field within this record, and ret ptr to it
+   fhSetValueAsText(ptrSex, sSex)                  -- set value of sex using passed in parameter
+   local ptrCustomID = fhCreateItem("REFN",ptrInd) -- create a Custom ID field
+   fhSetValueAsText(ptrCustomID,sCustomID)         -- set value of Custom ID using passed in parameter
+   return ptrInd                                   -- return pointer to the newly-created Individual record
+end
+--- CheckFamily
+-- @name          CheckFamily
+-- @description   Checks for the existance of a Family and Creates if required then add individual to Family
+-- @param         spouse1 first spouse for Family Identifier (customID) REFN
+-- @param         spouse2 second spouse for Family (customID) REFN
+-- @param         individual:pointer INDI
+-- @param         sex string either M or F or Male or Female SEX
+-- @param         type string either CHIL for Child or SPOU for spouse
+-- @return        none
+function CheckFamily(spouse1,spouse2,ptrind,sex,type)
+   famid = spouse1..'-'..spouse2
+   fami2 = spouse2..'-'..spouse1
+   if family[famid] ~= nil then
+      ptrFam = family[famid]
+      famkey = famid
+   else
+      if family[fami2] ~= nil then
+         ptrFam = family[fami2]
+         famkey = fami2
+         
+      else
+         -- Create New Family
+         ptrFam = fhCreateItem("FAM")             -- create an Family record and ret ptr to it
+         local ptrCustomID = fhCreateItem("REFN",ptrFam) -- create a Custom ID field
+         fhSetValueAsText(ptrCustomID,famid)         -- set value of Custom ID using passed in parameter
+         family[famid] = ptrFam:Clone()
+      end
+   end
+   if type == 'SPOU' then
+      if sex == 'M' then
+         AddFamilyMember('HUSB',ptrFam,ptrind)
+      else
+         AddFamilyMember('WIFE',ptrFam,ptrind)
+      end
+   end
+   if type == 'CHIL' then
+      AddFamilyMember('CHIL',ptrFam,ptrind)
+   end
+end
+--- AddFamilyMember
+-- @name          AddFamilyMember
+-- @description   Adds a person to a family
+-- @param         type Type is either  SPOU or CHIL  for Spouse or Child.
+-- @param         family record pointer
+-- @param         individual record pointer)
+-- @return        none
+function AddFamilyMember(type,ptrfam,ptrind)
+   ptrLink = fhCreateItem(type, ptrFam )
+   fhSetValueAsLink(ptrLink, ptrind)
+end
+--- AddEvent
+-- @name          AddEvent
+-- @description   Adds an event to a record
+-- @usage         event must be a valid data reference for the pointer provided
+-- @param         ptrRecord point for individual record INDI
+-- @param         event event type eg BIRT, DEAT etc
+-- @param         eventdate string containing date in FH reconised format DATE
+-- @param         eventplace  place for event PLAC
+-- @return        none
+function AddEvent(ptrRecord,event,eventdate,eventplace)
+   if eventdate ~= nil or eventplace ~= nil then
+      ptrEvent = fhCreateItem(event,ptrRecord)   -- create a birth field
+   end
+   if eventdate ~= nil then
+      eventdatefield = fhNewDate()
+      eventdatefield:SetValueAsText(eventdate,true)
+      ptrDate = fhCreateItem('DATE', ptrEvent)  -- create a date subfield for it
+      fhSetValueAsDate(ptrDate, eventdatefield)           -- set value of the date-of-birth using passed in parameter
+   end
+   if eventplace ~= nil then
+      ptrPlace = fhCreateItem('PLAC', ptrEvent)  -- create a date subfield for it
+      fhSetValueAsText(ptrPlace, eventplace)           -- set value of the date-of-birth using passed in parameter
+   end
+end
+--
+----------------------------------------------------------------------------
+-- Main Code
+----------------------------------------------------------------------------
+--
+--- Warn User (This can be removed once the script is customised to the CSV file you need to process)
+--
+sMessage = [[
+This script is designed to process a CSV file containing the following columns
+
+ID,Forenames,Surname,Sex,BirthDate,BirthPlace,DeathDate,DeathPlace,Mother,Father,Spouse1,Spouse2
+
+It will need to be customised to match your exact file before use.
+
+Are you sure you wish to continue?
+]]
+a = fhMessageBox(sMessage, "MB_YESNO","MB_ICONEXCLAMATION")
+if a == "No" then
+   error('Script Aborted')
+end
+--
+-- End of New User Warning
+--
+-- Check for Empty gedcom
+--
+ptrind = fhNewItemPtr()
+ptrind:MoveToFirstRecord("INDI")    -- set the first to point to the first Source record
+if ptrind:IsNotNull() then
+   sMessage = [[
+   Warning: Data exists in the GEDCOM file.
+   This script takes no account of existing data
+   and is better used on a New empty file.
+   Do you wish to continue?
+   ]]
+   a = fhMessageBox(sMessage, "MB_YESNO","MB_ICONEXCLAMATION")
+   if a == "No" then
+      error('Script Aborted')
+   end
+end
+--
+-- Prompt for file to Process
+--
+status,strfilename = GetExistingFile("Select Missing File","*.csv","Comma Separated File","Documents")
+if status == '-1' then
+   error('Prompt Cancelled')
+end
+-- Call loadfile function to return a table with the data in.
+contents = loadfile(importfile)
+family = {}
+individual = {}
+-- Create People
+for key,data in pairs(contents) do
+   -- Create Name
+   name = data['Forenames']..' /'..data['Surname']..'/'
+   -- Create Individual Record
+   ptrind =  CreateInd(name, data['Sex'],data['ID'])
+   individual[data['ID']] = ptrind:Clone()
+   -- Add Birth Event
+   AddEvent(ptrind,'BIRT',data['BirthDate'],data['BirthPlace'])
+   AddEvent(ptrind,'DEAT',data['DeathDate'],data['DeathPlace'])
+end
+-- Build Families
+for key,data in pairs(contents) do
+   -- Spouse 1
+   if data['Spouse1'] ~= nil then
+      CheckFamily(data['ID'],data['Spouse1'],individual[data['ID']],data['Sex'],'SPOU')
+   end
+   if data['Spouse2'] ~= nil then
+      CheckFamily(data['ID'],data['Spouse2'],individual[data['ID']],data['Sex'],'SPOU')
+   end
+   if data['Mother'] ~= nil and data['Father'] ~= nil then
+      CheckFamily(data['Father'],data['Mother'],individual[data['ID']],data['Sex'],'CHIL')
+   end
+   if data['Mother'] == nil and data['Father'] ~= nil then
+      -- Father Record Only Create Family For Father and Add Child
+      CheckFamily(data['Father'],'NOTKNOWN',individual[data['Father']],data['Sex'],'SPOU')
+      CheckFamily(data['Father'],'NOTKNOWN',individual[data['ID']],data['Sex'],'CHIL')
+   end
+   if data['Mother'] ~= nil and data['Father'] == nil then
+      -- Mother Record Only Create Family For Mother and add Child
+      CheckFamily(data['Mother'],'NOTKNOWN',individual[data['Father']],data['Sex'],'SPOU')
+      CheckFamily(data['Mother'],'NOTKNOWN',individual[data['ID']],data['Sex'],'CHIL')
+   end
+end
+
+
+

@@ -1,0 +1,50 @@
+--[[
+@title: Create Family
+@author: Calico Pie
+@lastupdated: June 2010
+@description:
+Creates an example family: the Plugin family.  The family consists of Dad Plugin, Mum Plugin, and
+Alice, Brian, Charles & Daisy Plugin
+]]
+---------------------------------------
+-- Function: CreateInd
+---------------------------------------
+function CreateInd(sName, sSex, dtDOB)
+    local ptrInd = fhCreateItem("INDI")             -- create an Individual record and ret ptr to it
+    local ptrName = fhCreateItem("NAME", ptrInd)    -- create a NAME field within this record, and ret ptr to it
+    fhSetValueAsText(ptrName, sName)                -- set value of the name using passed in parameter
+    local ptrSex = fhCreateItem("SEX", ptrInd)      -- create a SEX field within this record, and ret ptr to it
+    fhSetValueAsText(ptrSex, sSex)                  -- set value of sex using passed in parameter
+    local ptrBirth = fhCreateItem("BIRT", ptrInd)   -- create a birth field
+    local ptrBirthDate = fhCreateItem("DATE", ptrBirth)  -- create a date subfield for it
+    fhSetValueAsDate(ptrBirthDate, dtDOB)           -- set value of the date-of-birth using passed in parameter
+    return ptrInd                                   -- return pointer to the newly-created Individual record
+end
+---------------------------------------
+-- main body of script starts here
+---------------------------------------
+strAnswer = fhMessageBox("Do you wish to create the Plugin Family?", "MB_YESNO")
+if strAnswer == 'Yes' then
+    ptrDad = CreateInd("Dad Plugin", "M", fhNewDate(1942, 5, 17))        -- create the family members
+    ptrMum = CreateInd("Mum Plugin", "F", fhNewDate(1948, 4, 17))        -- ... 2 parents and 4 children ...
+    ptrAlice = CreateInd("Alice Plugin", "F", fhNewDate(1973, 12, 20))
+    ptrBrian = CreateInd("Brian Plugin", "M", fhNewDate(1975, 4, 23))
+    ptrCharles = CreateInd("Charles Plugin", "M", fhNewDate(1977, 3, 22))
+    ptrDaisy = CreateInd("Daisy Plugin", "F", fhNewDate(1981, 2, 2))
+    ptrFam = fhCreateItem("FAM")                        -- now create the family record
+    ptrLink = fhCreateItem("HUSB", ptrFam )             -- create a HUSB field in the family record
+    fhSetValueAsLink(ptrLink, ptrDad)                   -- and link dad into it
+    ptrLink = fhCreateItem("WIFE", ptrFam )             -- create a WIFE field in the family record
+    fhSetValueAsLink(ptrLink, ptrMum)                   -- and link mum into it
+    ptrLink = fhCreateItem("CHIL", ptrFam )             -- create a CHIL field in the family record
+    fhSetValueAsLink(ptrLink, ptrAlice)                 -- and link Alice into it
+    ptrLink = fhCreateItem("CHIL", ptrFam )             -- ... and repeat for the other children ...
+    fhSetValueAsLink(ptrLink, ptrBrian)
+    ptrLink = fhCreateItem("CHIL", ptrFam )
+    fhSetValueAsLink(ptrLink, ptrCharles)
+    ptrLink = fhCreateItem("CHIL", ptrFam )
+    fhSetValueAsLink(ptrLink, ptrDaisy)
+    fhMessageBox('Plugin Family Created')
+else
+    fhMessageBox('Plugin Family Creation Cancelled')
+end

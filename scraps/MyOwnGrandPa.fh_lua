@@ -1,0 +1,13 @@
+-- My Own Grandpa?
+ptrRoot = fhNewItemPtr()
+ptrGranddadP = fhNewItemPtr()
+ptrGranddadM = fhNewItemPtr()
+tblRecordList = fhGetRecordSelection('INDI', 1)
+ptrRoot = tblRecordList[1]
+ptrGranddadP = fhGetItemPtr(ptrRoot,'INDI.~FATH[1]>~FATH[1]>')
+ptrGranddadM = fhGetItemPtr(ptrRoot,'INDI.~MOTH[1]>~FATH[1]>')
+if ptrGranddadP:IsSame(ptrRoot) or ptrGranddadM:IsSame(ptrRoot) then
+	fhMessageBox('I am my own Grandpa')
+else
+	fhMessageBox('I am not my own Grandpa')
+end

@@ -1,0 +1,34 @@
+--[[
+@Title: Age At Date Checker
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Version: 1.0 
+@Description: Age At Date Checker
+]]
+tblIndi =  fhGetCurrentRecordSel('INDI')
+if  #tblIndi == 0 then
+	fhMessageBox('No Record selected, please select a record and try again')
+	return
+end
+strBornDate = fhGetItemText(tblIndi[1],'~.BIRT.DATE:YEAR')
+strDeathDate = fhGetItemText(tblIndi[1],'~.DEAT.DATE:YEAR')
+strName = fhGetItemText(tblIndi[1],'~.NAME')
+strDates = fhCallBuiltInFunction('lifedates',tblIndi[1])
+tblDates = {1841,1851,1861,1871,1891,1901,1911}
+strAges = strName..' ('..strDates..') was aged \n'
+
+for i,year in pairs(tblDates) do 
+datept = fhNewDatePt()
+datept:SetValue(year)
+ageat = fhCallBuiltInFunction('AgeAt',tblIndi[1],datept) 
+if tonumber(strBornDate) > year then
+	print('Not Born')
+elseif tonumber(strDeathDate) < year then
+	print('Died')
+else
+strAges = strAges..'\t'..year..'\t'..ageat..'\n'
+
+print(year,ageat)
+end
+end
+fhMessageBox(strAges,'MB_OK','MB_ICONINFORMATION')

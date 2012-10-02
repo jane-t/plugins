@@ -1,0 +1,25 @@
+--- Reorgainse Children
+-- @description: Reorganise the children for a selected person around their spouses
+--- Get All Spouses
+-- @description: Get all spouses for a selected record
+-- @param: item pointer
+-- @return: array of pointers
+function GetAllSpouses(ptr)
+	local spouselist = {}
+	local ptrSpouse = fhNewItemPtr()
+	local i = 1
+	ptrSpouse:MoveTo(ptr,'~.~SPOU['..i..']>')
+	while ptrSpouse:IsNotNull() do
+		table.insert(spouselist,ptrSpouse:Clone())	
+		i = i + 1
+		ptrSpouse:MoveTo(ptr,'~.~SPOU['..i..']>')
+	end
+	return spouselist
+end
+
+
+--- Main Program Body
+ptrlist = fhPromptUserForRecordSel('INDI',1)
+spouselist = GetAllSpouses(ptrlist[1])
+
+print(#spouselist) 

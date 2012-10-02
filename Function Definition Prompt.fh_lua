@@ -1,0 +1,440 @@
+--[[
+@Title: Functions Prompter
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: Sept 2012 
+@Description: Prompt for Family Historian Functions
+]]
+debug = true
+require 'iuplua'
+function mainfunction()
+    macros, functions = LoadDef()
+    maindialog = buildmaindialog(functions)
+    -- Shows dialog in the center of the screen
+    maindialog:showxy(iup.CENTER, iup.CENTER)
+    if (iup.MainLoopLevel()==0) then
+        iup.MainLoop()
+    end
+end
+----------------------------------------------------- Functions
+function LoadDef()
+    -- local definition = StrLoadFromFile("D:\\Work\\Presentations\\Family Historian\\PsPadExtensions\\install\\context\\Family Historian Functions.DEF")
+    local definition = defsource
+    local macroActive = false
+    local functionsActive = false
+    local macros = {}
+    local functions = {}
+    local fname,fdesc = ' ',' '
+    for strLine in string.gmatch(definition.."\n","(.-)\n") do
+        local strStart = strLine:sub(1,1)
+        local strfunc = strLine:match('Functions')
+        if strLine == '[Macro definition]' then
+            macroActive = true
+        elseif macroActive and strLine:match('Functions') == 'Functions' then
+            macroActive = false
+            functionsActive = true
+        elseif macroActive and strStart == '%' then
+            local fields = fromCSV(strLine)
+            
+            strLine = strLine .. ','
+            local id,chartype = strLine:match('%%(.-)%%=@(%w)')
+            local desc = strLine:match('@%w (.-)[,]')
+            local rest = strLine:match(',,(.-)')
+            macros[id] = {ctype = chartype,desc = desc,default = fields[3],values = explode(';',fields[4])}
+        elseif functionsActive and strStart == '[' then
+            fname,fdesc = strLine:match('%[(.-)%|(.-)%]')
+        elseif functionsActive then
+            functions[#functions + 1] = {trim(fdesc),strLine,trim(fname)}
+        end
+    end
+    return macros, functions
+end
+function buildmaindialog(functions)
+    local settings = {}
+    local list = iup.list {'' ;SORT,VISIBLELINES = 5, EXPAND = "VERTICAL",
+        action =
+        function (t,i,v)
+            local tfunc = getfunc(i)
+            text.value = tfunc[2]:gsub('%%','')
+            functiontext.title = i
+            functiondesc.title = tfunc[1]
+        end
+    }
+    btn_help = iup.button { title = 'View Help', PADDING='4x4',
+        action = function ()
+            local path = os.getenv('PROGRAMFILES')
+            local helpfile = string.gsub(path..'\\Family Historian\\Program\\fh.chm::/function_{function}.html','{function}',functiontext.title)
+            local ok,err,errtext = fhShellExecute('hh',helpfile)
+            if not(ok) then
+                fhMessageBox('Help Failed '..err..' '..errtext)
+            end
+        end
+    }
+    btn_copy = iup.button { title = 'Copy to Clipboard and Close', PADDING='4x4',
+        action = function ()
+            local clipboard = iup:clipboard()
+            clipboard.text = text.value
+            return iup.CLOSE
+        end
+    }
+    btn_prompt = iup.button { title = 'Prompt', PADDING='4x4',
+        action = function ()
+            res = promptfunction(functiontext.title)
+            iup.Message('Prompt','to be done')
+        end
+    }
+    local i = 0
+    for f,d in pairs(functions) do
+        i = i + 1
+        -- list[i] = (d[3]..': '..d[1])
+        list[i] = (d[3])
+    end
+    text = iup.text{value = " ", size = 250}
+    functiontext = iup.label{title = "All", size = 130, font= "Arial,Helvetica, 20"}
+    functionlabel = iup.label{title = "", size = 300}
+    functiondesc = iup.label{title = "", size = 300}
+    local dlg = iup.dialog {iup.hbox {
+            list,
+            iup.vbox {
+                iup.hbox {functiontext; CGAP = 10,CMARGIN = "5x5"},
+                iup.hbox {functiondesc ; CGAP = 10, CMARGIN = "5x5"},
+                iup.hbox {text ; CGAP = 10, CMARGIN = "5x5"},
+                iup.hbox {btn_help,btn_copy ; CGAP = 10, CMARGIN = "5x5"}
+            }
+        }
+        ; title = "Function Helper"
+    }
+    return dlg
+end
+
+function promptfunction(func)
+local i = getfunc(func)
+
+print(i)
+end
+
+function getfunc(func)
+            for i,tfunc in pairs(functions) do
+                if tfunc[3] == func then
+                    return(tfunc)
+                end
+            end
+end
+-------------------------------------------------------------- Standard Functions
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"r")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end -- function StrLoadFromFile
+function dump (tt, label,indent, done)
+    if debug == true then
+        if label == nil then
+            label = 'Dump'
+        end
+        done = done or {}
+        indent = indent or 0
+        if type(tt) == "table" then
+            if indent == 0 then
+                io.write(string.rep (" ", indent))
+                io.write(label..'\n')
+            end
+            for key, value in pairs (tt) do
+                io.write(string.rep (" ", indent)) -- indent it
+                if type (value) == "table" and not done [value] then
+                    done [value] = true
+                    io.write(string.format("[%s] => table\n", tostring (key)));
+                    io.write(string.rep (" ", indent+4)) -- indent it
+                    io.write("(\n");
+                    dump (value, tostring(key),indent + 7, done)
+                    io.write(string.rep (" ", indent+4)) -- indent it
+                    io.write(")\n");
+                else
+                    io.write(string.format("[%s] => %s\n",
+                    tostring (key), tostring(value)))
+                end
+            end
+        else
+            io.write(tostring(label)..':'..tostring(tt))
+        end
+    else
+        return
+    end
+end
+-- Convert from CSV string to table (converts a single line of a CSV file)
+function fromCSV (s)
+    s = s .. ',' -- ending comma
+    local t = {} -- table to collect fields
+    local fieldstart = 1
+    repeat
+    -- next field is quoted? (start with `"'?)
+    if string.find(s, '^"', fieldstart) then
+        local a, c
+        local i = fieldstart
+        repeat
+        -- find closing quote
+        a, i, c = string.find(s, '"("?)', i+1)
+        until c ~= '"' -- quote not followed by quote?
+        if not i then error('unmatched "') end
+        local f = string.sub(s, fieldstart+1, i-1)
+        table.insert(t, (string.gsub(f, '""', '"')))
+        fieldstart = string.find(s, ',', i) + 1
+    else -- unquoted; find next comma
+        local nexti = string.find(s, ',', fieldstart)
+        table.insert(t, string.sub(s, fieldstart, nexti-1))
+        fieldstart = nexti + 1
+    end
+    until fieldstart > string.len(s)
+    return t
+end
+function explode(div,str) -- credit: http://richard.warburton.it
+    if (div=='') or (type(str) ~= 'string') then return false end
+    local pos,arr = 0,{}
+    -- for each divider found
+        for st,sp in function() return string.find(str,div,pos,true) end do
+        table.insert(arr,string.sub(str,pos,st-1)) -- Attach chars left of current divider
+        pos = sp + 1 -- Jump past current divider
+    end
+    table.insert(arr,string.sub(str,pos)) -- Attach chars right of last divider
+    return arr
+end
+function trim(s)
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+-------------------------------------------------- Data File
+defsource = [[
+; PSPad clip definition file for FH Formula
+; author:  Jane
+; last revision 14. May 2009  18:04
+;
+;------------------------------------  Functions
+[Macro definition]
+%1st2nd%=@C 1st or 2nd Owner,,1,1;2
+%alternate%=@E Alternate Text,,,,
+%bool%=@E Boolean Expresion
+%comparision%=@C Comparision Operator,,=,=;>;<,
+%datareference%=@E Data Reference,,% %,,
+%datareference2%=@E Data Reference,,% %,,
+%datareferenceconstant%=@E Data Reference Constant,,' ',,
+%date%=@C Date,,,%INDI.BIRT.DATE%;%INDI.DEAT.DATE%;%INDI.FAMS>MARR.DATE%;%INDI.CENS.DATE%,,
+%date2%=@C To Date,,,%INDI.BIRT.DATE%;%INDI.DEAT.DATE%;%INDI.FAMS>MARR.DATE%;%INDI.CENS.DATE%,
+%datefmt%=@C Result in,,YEARS,YEARS;MONTHS;DAYS
+%day%=@E Day,,0,,
+%days%=@E Days,,0,,
+%earlylate%=@C Earliest/Latest/Middle,,MID,MID;EARLIEST;LATEST
+%fact%=@E Fact,,%FACT%,,
+%falseresult%=@E False Result
+%flag%=@E Flag Name,,["Select Flag"]
+%index%=@E Keyword Index Number,,1
+%indifam%=@C Indi/Family Record:,,,%INDI%;%FAM%;"record(,""I"")",,
+%indirecord%=@C Individual Record:,,%INDI%,%INDI%;"record(,""I"")";FileRoot();["Person"],,
+%indirecord2%=@C Individual Record:,,%INDI%,%INDI%;"record(,""I"")";FileRoot();["Person"],,
+%list%=@E List Name,
+%maleorfemale%=@C Male or Female First,,MALES_FIRST,MALES_FIRST;FEMALES_FIRST
+%minmaxavg%=@C Min Max or Avg,,AVG,AVG;MIN;MAX,
+%month%=@E Month,,0,,
+%months%=@E Months,,0,,
+%number%=@E Number,,1,,
+%OBJE%=@C Media Record:,,%OBJE%,%OBJE%;"record(,O)",,
+%prefix%=@E Prefix,,,,
+%record%=@C Record:,,%INDI%,%INDI%;%FAM%;%OBJE%;%SOUR%;"record(,)";FileRoot();["Record"],,
+%recordno%=@E Record No
+%recordtype%=@C Record Type,,I,I;F;O;N;R;S;U;B,,
+%relationcodetype%=@C Relationcode Type,,,GENERATION;GENS_UP;GENS_DOWN;HALF;SPOUSE_START;SPOUSE_END
+%sour%=@C Source Record:,,%SOUR%,%SOUR%;"record(,""S"")";["Source"],,
+%srchgens%=@E Number of Search Generations,,2
+%STDEXT%=@C Standard or Extended,,STD,STD;EXT, 
+%string%=@E Text String,
+%suffix%=@E Suffix,,,,
+%text%=@C Search Text,,"",["Search_Text"];"",
+%textcode%=@C Relation Format,,TEXT,TEXT;CODE
+%trueresult%=@E True Result
+%value%=@E 1st Value,,,,
+%value2%=@E 2nd Value,,
+%year%=@E Year,,0,,
+%years%=@E Years,,0,,
+
+;---------------------------------------------------------------  Functions
+[AgeAt | Calculates a person's age at a given date]
+AgeAt(%indirecord%,%date%)
+[AhnentafelNumber|This function returns the Ahnentafel number linking a person and his ancestor.]
+AhnentafelNumber(%indirecord%,%indirecord2%,%number%)
+[Bool | It takes a bool parameter and simply returns it.]
+Bool()
+[Calc | Calc Calculates a numeric sum]
+Calc()
+[CalcDate | Calculates one date from another date, use -ive to subtract.]
+CalcDate(%date%,%years%,%months%,%days%)
+[ChildCount | the number of children of a given Individual or Family]
+ChildCount(%indifam%)
+[CombineText | combine text by adding a prefix and/or suffix]
+CombineText(%prefix%,%datareference%,%suffix%,%alternate%)
+[ContainsText | The function checks a specified record’s text fields]
+ContainsText(%indifam%,%text%,%STDEXT%)
+[Date | Date Type Specifier]
+Date()
+[DateAt | Build Date from YMD]
+DateAt(%year%,%month%,%day%)
+[DateIf | Returns 1st Date if true, 2nd if false]
+DateIf(%value% %comparision% %value2%, %trueresult%,%falseresult%)
+[Day | Returns Day from Date]
+Day(%date%)
+[DayNumber | Returns Day Number from Date]
+DayNumber(%date%)
+[DayOfWeek | Returns Week Day Name from Date]
+DayOfWeek(%date%)
+[EstimatedAgeAt | Estimate a person’s age at a given date.]
+EstimatedAgeAt(%indirecord%,%date%,%minmaxavg%,%srchgens%)
+[EstimatedBirthDate | estimate a person’s date of birth ]
+EstimatedBirthDate(%indirecord%,%earlylate%,%srchgens%)
+[EstimatedDeathDate | estimate a person’s date of death ]
+EstimatedDeathDate(%indirecord%,%earlylate%,%srchgens%)
+[Exists | Existence Test returns Boolean]
+Exists(%datareference%)
+[ExistsText | Existence Test returns Text]
+ExistsText(%datareference%,%alternate%)
+[FactAbbrev | abbreviation for any given fact]
+FactAbbrev(%fact%)
+[FactLabel | Label for any given fact]
+FactLabel(%fact%)
+[FactOwner | Owner for any given fact]
+FactOwner(%fact%,%1st2nd%,%maleorfemale%)
+[FactSet | Name of Fact Set for any given fact]
+FactSet(%fact%)
+[FactValue | Fact Value for Attributes]
+FactValue(%fact%)
+[Field | particular field within a given record]
+Field(%datareference%,%datareferenceconstant%)
+[FieldText | text from a field (+ modifier) within a given record]
+FieldText(%datareference%,%datareferenceconstant%)
+[FileRoot | simply returns a reference to the file root ]
+FileRoot()
+[ForceText | outputs the text specified]
+ForceText("%string%")
+[GetField | Returns a given field within any given record]
+GetField(%indirecord%,%datareferenceconstant%)
+[GetFieldText | Returns text from a field (+ modifier) within any given record]
+GetFieldText(%indirecord%,"%datareference%")
+[GetKeyword | Returns a keyword for a given multimedia record, specified by index number]
+GetKeyword(%OBJE%,%index%)
+[GetLabelledText | a section of text from a specified long text field]
+GetLabelledText(%datareference%,"%string%")
+[GetParagraph | retrieves a numbered paragraph from a specified long text field ]
+GetParagraph(%datareference%,%index%)
+[GetRecord | record that a given field belongs to]
+GetRecord(%fact%)
+[HasFlag | TRUE if given record has flag]
+HasFlag(%indirecord%,%flag%)
+[HasKeyword | TRUE if given record has flag]
+HasKeyword(%OBJE%,"%string%")
+[HasNoteInList | Indicates whether a given record is both a member of a given Named List, and has a note associated with it in that list.]
+HasNoteInList(%indirecord%,%list%)
+[Individual | a reference to an Individual as a parameter]
+Individual(%indirecord%)
+[IsAncestorOf | Takes 2 Individual records as parameters and returns TRUE if the 1st is the ancestor of the 2nd.]
+IsAncestorOf(%indirecord%,%indirecord2%)
+[IsAttribute | Indicates whether a given data item represents an attribute data item, or not.]
+IsAttribute(%fact%)
+[IsDescendantOf | Takes 2 Individual records as parameters and returns TRUE if the 1st is the Descendant of the 2nd.]
+IsDescendantOf(%indirecord%,%indirecord2%)
+[IsEmbedded | Takes a Multimedia Object as parameter and returns TRUE if the object is embedded]
+IsEmbedded(%OBJE%)
+[IsEmpty | Returns true if a given data item does not exist, or it does exist but it has no value]
+IsEmpty(%datareference%)
+[IsEvent | Indicates whether a given data item represents an event data item, or not.]
+IsEvent(%fact%)
+[IsFact | Indicates whether a given data item represents a fact data item, or not.]
+IsFact(%fact%)
+[IsFamilyFact | Indicates whether a given data item represents a family fact data item, or not.]
+IsFamilyFact(%fact%)
+[IsIndividualFact | Indicates whether a given data item represents an Individual's fact data item, or not.]
+IsIndividualFact(%fact%)
+[IsInList | Indicates whether a given record is in a given Named List or not.]
+IsInList(%indirecord%,%list%)
+[IsRelativeOf | Takes 2 Individual records as parameters and returns TRUE if they are relatives.]
+IsRelativeOf(%indirecord%,%indirecord2%)
+[IsSameItem | Takes 2 references to items as parameters and returns TRUE if they refer to the same item]
+IsSameItem(%datareference%,%datareference2%)
+[IsSet | Returns true if a given data item exists and has a value]
+IsSet(%datareference%)
+[IsSpouseOf | Takes 2 Individual records as parameters and returns TRUE if they are spouses]
+IsSpouseOf(%indirecord%,%indirecord2%)
+[IsTrue | It takes a Boolean value (true of false) and returns that value]
+IsTrue(%bool%)
+[Item | It takes a data item parameter and returns it]
+Item(%datareference%)
+[ItemIf | Returns 1st Item if true, 2nd if false]
+ItemIf(%value% %comparision% %value2%, %trueresult%,%falseresult%)
+[KeywordCount | the number of keywords that a given Multimedia record has]
+KeywordCount(%OBJE%)
+[LastUpdated | Returns the date that the record was last updated]
+LastUpdated()
+[LifeDates | the life dates for a given individual]
+LifeDates[%indirecord%,%STDEXT%]
+[LifeDates2 | the life dates for a given individual with - if none]
+LifeDates[%indirecord%,%STDEXT%]
+[LinksFrom | Returns the number of links from one record to another.]
+LinksFrom(%record%,%record2%,%STDEXT%)
+[LinksTo | Returns the number of links to record]
+LinksTo(%record%)
+[MediaCount | count of the number of pictures and other multimedia objects associated with a given record]
+MediaCount(%indifam%)
+[MediaType | a description of the media type of a given multimedia object]
+MediaType(%OBJE%)
+[Month | the month of a given date]
+Month(%date%)
+[Name | Returns the name of a given individual]
+Name(%indirecord%)
+[NextSib | Returns a given Individual's next sibling in the sibling order of the person's parents' family]
+NextSib(%indirecord%,%number%)
+[NotExistsText | text to be output if data is not found for the specified data reference. ]
+NotExistsText(%datareference%,%alternate%)
+[NullDate |  Returns true if a given date is NULL]
+NullDate(%date%)
+[Number | takes a text parameter and simply returns as a number]
+Number()
+[NumberIf | Returns 1st Item if true, 2nd if false]
+NumberIf(%value% %comparision% %value2%, %trueresult%,%falseresult%)
+[PrevSib | Returns a given Individual's previous sibling in the sibling order of the person's parents' family]
+PrevSib(%indirecord%,%number%)
+[Record | ]
+record(%recordno%,"%recordtype%")
+[Recordid | Returns the record id of a given record]
+Recordid(%record%)
+[RecordName | Returns the name of a given record]
+RecordName(%record%)
+[RecordType | Returns the name of a given record]
+RecordType(%record%)
+[RelationCode | Returns coded numeric values which provide information about how 2 people are related.]
+RelationCode(%indirecord%,%indirecord2%,%relationcodetype%,%number%)
+[RelationPool | returns the 'pool number' associated with a given individual]
+RelationPool(%indirecord%)
+[Relationship | Provides information about how person B is related to person A]
+Relationship(%indirecord%,%indirecord2%,%textcode%)
+[SourceLinks | Returns the number of links between a source record and another records.]
+SourceLinks(%SOUR%,%indirecord%)
+[Text | It takes a text parameter and returns it]
+Text()
+[TextToNumber | Takes a text string and converts it to a numeric value]
+TextToNumber(%datareference%)
+[Timespan | Returns the amount of time between 2 dates in years, months or days.]
+Timespan(%date%, %date2%, %datefmt%)
+[Today | Returns todays date]
+Today()
+[ToUpper | Converts a string to upper case]
+ToUpper(%datareference%)
+[ToLower | Converts a string to lower case]
+ToLower(%datareference%)
+[Year | Returns the year of a given date]
+Year(%date%)]]
+-------------------------------------------------- Launch Main
+mainfunction()

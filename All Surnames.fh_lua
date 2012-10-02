@@ -1,0 +1,81 @@
+--[[
+@title: List All The Possible Names
+@author: Calico Pie
+@lastupdated: August 2010
+@description:
+Script reads through all individuals and lists all variations of Names from the Name field
+and for married women lists them under there married names as well.
+
+Note All family as Spouse occurrences will be listed even if there is no marriage recorded.
+]]
+
+pi = fhNewItemPtr()    -- declare pointer
+pi:MoveToFirstRecord('INDI')    -- set the first to point to the first Note record
+pi2 = fhNewItemPtr()
+pfl = fhNewItemPtr()
+pf = fhNewItemPtr()
+count = 0
+-- Define Columns
+tblSurname = {}
+tblGivenAll = {}
+tblRecord = {}
+tblFamilyRecord = {}
+tblLifeDates = {}
+tblMarriageDate = {}
+tblNameType = {}
+tblTypes = {'Primary','Secondary','Married'}
+
+while not pi:IsNull() do
+    -- Do Work Here
+    if not pi:IsNull() then
+        -- Get All Names from Name Fields
+        pi2:MoveTo(pi,"~.NAME") -- Get the Name for the INDI Record.
+        index = 1
+        while not pi2:IsNull() do
+            count = count + 1
+            tblSurname[count] = fhGetItemText(pi2,'~:SURNAME')
+            tblGivenAll[count] = fhGetItemText(pi2,'~:GIVEN_ALL')
+            tblRecord[count]   = pi:Clone()
+            tblLifeDates[count] = fhCallBuiltInFunction('Lifedates',pi)
+            if index == 1 then
+                tblNameType[count] = tblTypes[1]
+            else
+                tblNameType[count] = tblTypes[2]
+            end
+            index = index + 1
+            pi2:MoveNext("SAME_TAG") -- next Name
+        end
+        -- Look For Married Names
+        strSex = fhGetItemText(pi,'INDI.SEX')
+        if (strSex == 'Female') then
+            
+            pfl:MoveTo(pi,"~.FAMS")
+            while not pfl:IsNull() do
+                pf = fhGetValueAsLink(pfl)
+                count = count + 1
+                tblSurname[count]  = fhGetItemText(pf,'FAM.HUSB>NAME:SURNAME')
+                tblGivenAll[count] = fhGetItemText(pi,'INDI.NAME:GIVEN_ALL')
+                tblRecord[count]   = pi:Clone()
+                tblFamilyRecord[count]   = pf:Clone()
+                tblLifeDates[count] = fhCallBuiltInFunction('Lifedates',pi)
+                tblMarriageDate[count]  = fhGetItemText(pf,'FAM.MARR.DATE')
+                tblNameType[count] = tblTypes[3]
+                pfl:MoveNext("SAME_TAG") -- next Family as spouse
+            end
+        end
+    end
+    pi:MoveNext() -- next individual record
+end
+
+fhOutputResultSetTitles("List All Individuals under All Possible Names",
+   "List All Individuals under All Possible Names",
+   "Printed: %#x")
+
+fhOutputResultSetColumn("Surname", "text", tblSurname, #tblSurname, 60, "align_left", 1, true)
+fhOutputResultSetColumn("Given Names", "text", tblGivenAll, #tblSurname, 80, "align_left", 2, true)
+fhOutputResultSetColumn("Type", "text", tblNameType, #tblSurname, 40, "align_left", 3, true)
+fhOutputResultSetColumn("Lifedates", "text", tblLifeDates, #tblSurname, 40, "align_left")
+fhOutputResultSetColumn("Marriage", "text", tblMarriageDate, #tblSurname, 80, "align_left")
+fhOutputResultSetColumn("Record", "item", tblRecord, #tblSurname, 160, "align_left")
+fhOutputResultSetColumn("Family", "item", tblFamilyRecord, #tblSurname, 160, "align_left")
+

@@ -1,0 +1,119 @@
+--[[
+@Title: Move Individual MARRiage Events to the Family As Spouse Record
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: July 2012 
+@Description: Files exported from Ancestry, can sometimes contain 
+invalid Marriage Events against individuals rather than against their Family as Spouse family.
+This plugin searches for these events and moves them to the Family As Spouse record, 
+if one exists and prompts if more than one Family as Spouse exists.
+]]
+function main()
+    local pi = fhNewItemPtr()
+    local ptrFam = fhNewItemPtr()
+    local ptrMarr = fhNewItemPtr()
+    pi:MoveToFirstRecord("INDI") -- and set to the first record.
+    while pi:IsNotNull() do
+        ptrMarr:MoveTo(pi,'~.MARR')
+        while ptrMarr:IsNotNull() do
+            print(fhGetDisplayText(pi),fhGetDisplayText(ptrMarr))
+            famList = getSpouseList(pi)
+            print(#famList)
+            buttons = {'Create New Family Record','Delete Marriage Data'}
+            for i,v in ipairs(famList) do
+                table.insert(buttons,1,fhGetDisplayText(v))
+            end
+            local strMessage = string.format('Marriage Information in the individual record found for\n%s \n\nDate: %s\nPlace: %s\n\nPlease select the Family to move the marriage to, select delete to remove the data',
+            fhGetItemText(pi,'~'),
+            fhGetItemText(ptrMarr,'~.DATE'),
+            fhGetItemText(ptrMarr,'~.PLAC'))
+            local intButton = iupButtons("Move Marriage Data",strMessage,"V",buttons)
+            if intButton == 0 then
+                return
+            end
+            if intButton == (#famList + 1) then
+                -- Create New Family
+                ptrFam = createNewFamily(pi)
+                moveMarriage(ptrMarr,ptrFam)
+            elseif intButton == (#famList + 2) then
+                -- Delete Data
+                fhDeleteItem(ptrMarr)
+            else
+                ptrFam = famList[intButton]
+                moveMarriage(ptrMarr,ptrFam)
+            end
+            ptrMarr:MoveNext('SAME_TAG')
+        end
+        pi:MoveNext()
+    end
+end
+function getSpouseList(pi)
+    local list = {}
+    local pfs = fhNewItemPtr()
+    local pf = fhNewItemPtr()
+    pfs:MoveTo(pi,'~.FAMS')
+    while pfs:IsNotNull() do
+        print(fhGetDisplayText(pi),fhGetDisplayText(pfs))
+        pf = fhGetValueAsLink(pfs)
+        table.insert(list,pf:Clone())
+        pfs:MoveNext('SAME_TAG')
+    end
+    return list
+end
+function moveMarriage(ptrMarr,ptrFam)
+    local ptrNewMarr = fhCreateItem('MARR',ptrFam)
+    local plac = fhCreateItem('PLAC',ptrNewMarr)
+    fhSetValueAsText(plac,fhGetItemText(ptrMarr,'~.PLAC'))
+    local dt = fhNewDate()
+    dt:SetValueAsText(fhGetItemText(ptrMarr,'~.DATE'),true)
+    local dateptr = fhCreateItem('DATE',ptrNewMarr)
+    fhSetValueAsDate(dateptr,dt)
+    local sour = fhCreateItem('SOUR2',ptrNewMarr)
+    fhSetValueAsText(sour,fhGetItemText(ptrMarr,'~.SOUR'))
+    fhDeleteItem(ptrMarr)
+end
+function createNewFamily(pi)
+    ptrFam = fhCreateItem('FAM')
+    sex = fhGetItemText(pi,'~.SEX')
+    if sex == 'Male' then
+        ptrLink = fhCreateItem("HUSB", ptrFam)
+    else
+        ptrLink = fhCreateItem("WIFE", ptrFam)
+    end
+    fhSetValueAsLink(ptrLink, pi)
+    return ptrFam
+end
+--[[
+@Title:		User Interface Buttons Snippet
+@Author:	Mike Tate  /  Jane Taubman
+@LastUpdated:	May 2012
+@Version:	1.4
+@Description:	GUI dialogue for multiple buttons
+@params
+  strTitle:	Title of Message Box
+  strMessage:	Message to show above buttons
+  strBoxType:	Either "H" for Horizontal buttons or "V" for Vertical ones.
+  ...       :	All other parameters will be treated as button titles.
+]]
+function iupButtons(strTitle,strMessage,strBoxType,buttons)
+    local intButton = 0 -- Returned value if X Close button is used
+    -- Create the GUI labels and buttons
+    local lblMessage = iup.label{title=strMessage,expand="YES"}
+    local lblLineSep = iup.label{separator="HORIZONTAL"}
+    local iupBox = iup.hbox{homogeneous="YES"}
+    if strBoxType == "V" then
+        iupBox = iup.vbox{homogeneous="YES"}
+    end
+    for intArgNum, strButton in ipairs(buttons) do
+        local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
+        iup.Append(iupBox,btnName)
+    end
+    -- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+    local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox},dialogframe="YES",background="250 250 250",gap="8",margin="8x8"}
+    dialogue:show()
+    if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+    dialogue:destroy()
+    return intButton
+end 
+------------------------------------ Call Main Function
+main()

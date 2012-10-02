@@ -1,0 +1,23 @@
+--[[
+@Title: Behind The Name Launcher
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: February 2012 
+@Description: 
+Launch the Behind the Name Web site for the currently selected Given Name.
+
+Behind the Name is a website for learning about all aspects of given names. 
+Its scope is broad: all given names from all cultures and periods are eligible to be included in the main name database. 
+Names from mythology and fiction are also eligible. 
+There are currently 18086 names in the database, a fraction of what the scope entails.
+]]
+linktemplate = 'http://www.behindthename.com/php/extra.php?extra=n&terms={n}'
+
+plist = fhPromptUserForRecordSel('INDI',1) 
+if plist[1] == nil then
+	return
+end
+strGivenNames = fhGetItemText(plist[1],'~.NAME:GIVEN_ALL')
+  for name in string.gmatch(strGivenNames, "%a+") do
+		fhShellExecute(linktemplate:gsub('{n}',name)) 
+end

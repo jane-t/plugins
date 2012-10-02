@@ -1,0 +1,32 @@
+require 'lfs'
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+	if string.sub(strDir, -1) == "/" then
+		strDir = string.sub(strDir, 1, -2)		-- Remove trailing "/"
+	end
+    
+	local function doYieldTree(strDir)
+		for strEntry in lfs.dir(strDir) do
+			if strEntry ~= "." and strEntry ~= ".." then
+				strEntry = strDir.."\\"..strEntry
+				local tblAttr = lfs.attributes(strEntry)
+				coroutine.yield(strEntry,tblAttr)
+				if tblAttr.mode == "directory" then
+					doYieldTree(strEntry)
+				end
+			end
+		end
+	end -- local function doYieldTree
+
+	return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+
+
+root = fhGetContextInfo('CI_APP_DATA_FOLDER')
+		local intFileCount = 0
+		for strSourceFile, tblAttr in DirTree(root) do
+			if tblAttr.mode == "file" then
+				print(strSourceFile)
+			end
+		end

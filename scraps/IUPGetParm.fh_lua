@@ -1,0 +1,32 @@
+-- Date Prompt Function in Lua. 
+
+require( "iuplua" )
+require( "iupluacontrols" )
+
+iup.SetLanguage("ENGLISH")
+
+-- set initial values
+function PromptSimpleDate(dtdate)
+	local iYear  = 0
+	local iMonth = 0
+	local iDay   = 0
+	local iQual = 0
+	local tblSubTypes = {"","Approximate","Estimated","Calculated"}  
+	ret, iYear, iMonth, iDay, strQual = 
+	      iup.GetParam("Enter Date", nil,
+                  "Set Date (0=N/A) %t\n"..
+				  "Day: %i\n"..
+                  "Month: %l|None|January|February|March|April|May|June|July|August|September|October|November|December|\n"..
+                  "Year: %i\n"..
+                  "Qualifier: %l|None|Approximate|Estimated|Calculated|\n",
+                  iDay,iMonth,iYear,iQual)
+	if (ret == 1) then
+	return fhNewDate(iYear,iMonth, iDay,tblSubTypes[iQual + 1])
+	else
+		return nil
+	end
+end
+
+--  Test Function
+myDate = fhNewDate()
+myDate = PromptSimpleDate(myDate)

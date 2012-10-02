@@ -1,0 +1,87 @@
+--[[
+@Title: Generations Gedcom - Pre-Load
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Description: Replace Invalid Events directly in the GEDCOM File
+]]
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
+
+-- strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
+strProjectFile = 'D:\\temp\\gedcom\\Peart.ged'
+NewProjectFile = 'D:\\temp\\gedcom\\PeartUpdated.ged'
+
+tblData = {}
+tblNew = {}
+tblText = {}
+
+file = io.open(strProjectFile,'r')
+if file then
+    for line in file:lines() do
+        table.insert(tblData,line)
+    end
+    file:close()
+else
+    error('Bang')
+end
+
+i = 1
+
+print(tblData[i])
+print(#tblData)
+newflag = false
+while tblData[i] ~= nil  do
+    line = tblData[i]
+    if line == '1 TEXT ' then
+        level,key,rest = '1','TEXT',' '
+    else
+        level,key,rest = line:match('(.-) (.-) (.+)')
+    end
+    if level == '0' then
+        if #tblText > 0 then
+            for li,text in ipairs(tblText) do
+                table.insert(tblNew,text)
+            end
+			  tblText = {}
+        end
+        newflag = true
+               table.insert(tblNew,line)
+
+    end
+    if level == '1' then
+        if key == 'TEXT' then
+            if newflag then
+                table.insert(tblText,level..' TEXT '..rest)
+                newflag = false
+            else
+                table.insert(tblText,'2 CONT '..rest)
+            end
+        elseif key == 'TYPE' then
+            table.insert(tblNew,level..' _TYPE '..rest)
+        elseif key == 'AUTH' or key == 'TITL' then
+            -- Valid Field
+            table.insert(tblNew,level..' '..key..' '..rest)
+        elseif key ~= 'TITL' then
+            if newflag then
+                table.insert(tblText,level..' TEXT '..key..': '..rest)
+                newflag = false
+            else
+                table.insert(tblText,'2 CONT '..key..': '..rest)
+            end
+            
+        end
+		end
+        i = i + 1
+    end
+if #tblText > 0 then
+            for li,text in ipairs(tblText) do
+                table.insert(tblNew,text)
+            end
+			  tblText = {}
+        end
+    data = table.concat(tblNew, "\n") .. "\n"
+    file = io.open(NewProjectFile,'w')
+    file:write(data)
+    file:close()
+    

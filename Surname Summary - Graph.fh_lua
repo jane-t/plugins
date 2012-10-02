@@ -1,0 +1,75 @@
+--[[
+@Title: Surname Summary Report
+@Author: Calico Pie
+@LastUpdated: March 2011
+@Description: Counts and Lists All Surnames in the File
+]]
+
+tblSurnames = {}     -- Define array for Surnames
+iCount = 0
+pi = fhNewItemPtr()  -- declare pointer
+pi:MoveToFirstRecord("INDI")    -- set the first to point to the first Source record
+while not pi:IsNull() do
+   -- For each Person Add the Surname to the list
+   iCount = iCount + 1
+   strSurname = fhGetItemText(pi,'INDI.NAME:Surname')
+   if (tblSurnames[strSurname] == nil) then
+      tblSurnames[strSurname] = 1
+   else
+      tblSurnames[strSurname] = tblSurnames[strSurname] + 1
+   end
+   pi:MoveNext()
+end
+-- Build Tables for the result set columns for Name and Qty
+tblSurname = {}
+ii = 1
+for surname, line in pairs(tblSurnames) do
+     table.insert(tblSurname,{name=surname,qty=line})
+	 ii = ii + 1
+    end
+--  Sort Table using the Qty field for the sort
+table.sort(tblSurname,function(a,b) return a.qty>b.qty end)
+ 
+-- Only show surnames with 5% of the count
+iMinCount = iCount * .01 
+require("iuplua")
+require("iuplua_pplot")
+plot = iup.pplot{
+  TITLE = "Top 20 Surnames",
+  MARGINBOTTOM="65",
+  MARGINLEFT="65",
+  AXS_XLABEL=" ",
+  AXS_YLABEL="Count",
+  LEGENDSHOW="YES",
+  LEGENDPOS="TOPLEFT",
+AXS_XMIN = "0",
+AXS_YMIN = "0",
+AXS_YAUTOMIN = "NO",
+AXS_XAUTOMIN = "NO",
+AXS_XAUTOTICK = "NO",
+FONT = "Arial, 7",
+MARGINLEFT = 50, 
+MARGINRIGHT = 50,
+MARGINTOP = 50, 
+MARGINBOTTOM = 50
+}
+
+-- Show names with 
+iup.PPlotBegin(plot, 1)
+iCount = 0
+iOthers = 0
+for i,tblLine in ipairs(tblSurname) do
+if (iCount < 20) then
+	iup.PPlotAddStr(plot, tblLine.name, tblLine.qty)
+	iCount = iCount + 1
+else
+	iOthers = iOthers + tblLine.qty
+end
+end
+iup.PPlotEnd(plot)
+plot.DS_MODE = "BAR"
+plot.DS_LEGEND = "" 
+plot.DS_SHOWVALUES = "NO"
+d = iup.dialog{plot, size="800x200", title="Top 20 Surnames"}
+d:show()
+iup.MainLoop()

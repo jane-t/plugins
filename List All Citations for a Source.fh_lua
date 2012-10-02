@@ -1,0 +1,224 @@
+--[[
+@title: List All Citations for a Source
+@author: Jane Taubman
+@lastupdated: May 2012
+@version: 1.5
+@description:
+Find all the citations to a Source and list
+* Record
+* Fact
+* Entry Date
+* Where within source
+* Text From Source
+
+V1.5 Added Columns for the note and the quality assessment to the result set.
+V1.4 Add a description field for the Field Type and re-arrange the columns so item shows before citation.
+V1.3 Reduced the number of times the progress bar is updated and added warning for very large numbers of links
+V1.2 Updated the Progress Bar to the latest code and added a more detailed Progress Message
+V1.1 Added Progress Bar and Citation Column.
+
+
+]]
+function quickCount(tag)
+    local ptr  = fhNewItemPtr()
+    local count = 0
+    ptr:MoveToFirstRecord(tag)
+    while ptr:IsNotNull() do
+        count = count + 1
+        ptr:MoveNext()
+    end
+    return count
+end
+function round(num, idp)
+  local mult = 10^(idp or 0)
+  return math.floor(num * mult + 0.5) / mult
+end
+-------------------------------------------------------------- DoItems
+function DoItems(strTag,ptrSource,tblRecTypes,action)
+    -- strTag: Tag of Item being searched for
+    -- action:    function to perform
+    -- Loop through Record Types
+    local step = 0
+	 local step2 = 0
+	 local interval = 0
+	 local count = 0
+    local ptr = fhNewItemPtr()
+    local recordPtr = fhNewItemPtr()
+    local ptrCmpSource =  fhNewItemPtr()
+    for i,strRecType in ipairs(tblRecTypes) do
+		  count = quickCount(strRecType)
+		  interval = round(count / 100)
+        step = (1 / count) * interval
+        step2 = 0
+        ProgressDisplay:Reset()
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+            if fhGetTag(ptr) == strTag then
+                action(ptr,ptrSource)
+            end
+            recordPtr:MoveToRecordItem(ptr)
+            if recordPtr:IsSame(ptr) then
+					step2 = step2 + 1
+					if step2 == interval then
+                ProgressDisplay.Step(step)
+                ProgressDisplay.SetMessage(strRecType..' '..fhGetRecordId(recordPtr)..' Found: '..#tblRecord)
+                step2 = 0
+					end
+            end
+            if ProgressDisplay.Cancel() then
+                break
+            end
+            ptr:MoveNextSpecial()
+        end
+    end
+end
+--------------------------------------------------------------- Pointer Description
+function ptrDescription(ptr)
+local strDesc = ''
+local strTag = fhGetTag(ptr)
+if not(fhHasParentItem(ptr)) then
+   strDesc = 'Record ('..fhGetTag(ptr)..')'
+else
+local strTitle = string.match(fhGetDisplayText(ptr),'([%a%w%s]*):')
+if not(strTitle) then
+	strTitle = string.match(fhGetDisplayText(ptr),'(%a*)')
+end
+strDesc = strTitle..' ('..strTag..')'
+end
+return strDesc
+end
+--------------------------------------------------------------- CheckForSource
+function CheckForSource(ptr,ptrSource)
+    
+    local ptrRecord = fhNewItemPtr()
+    local ptrLink = fhNewItemPtr()
+    local ptrWork = fhNewItemPtr()
+    ptrLink = fhGetValueAsLink(ptr)
+    if ptrLink:IsSame(ptrSource) then
+        -- Matching Record Found Add to Tables.
+        -- Get "Owning Record"
+        ptrRecord:MoveToRecordItem(ptr)
+        table.insert(tblRecord,ptrRecord:Clone())
+        -- Parent Item  (Fact)
+        ptrWork:MoveToParentItem(ptr)
+        table.insert(tblFact,ptrWork:Clone())
+        table.insert(tblGetDisplay,ptrDescription(ptrWork))
+        -- Where within Source
+        ptrWork:MoveTo(ptr,'~.PAGE')
+        table.insert(tblWhereWithinSource,ptrWork:Clone())
+        -- Entry Date
+        ptrWork:MoveTo(ptr,'~.DATA.DATE')
+        table.insert(tblEntryDate,ptrWork:Clone())
+        -- Text From Source
+        ptrWork:MoveTo(ptr,'~.DATA.TEXT')
+        table.insert(tblTextFromSource,ptrWork:Clone())
+        ptrWork:MoveTo(ptr,'~.QUAY')
+        table.insert(tblQual,ptrWork:Clone())
+        ptrWork:MoveTo(ptr,'~.NOTE2')
+        table.insert(tblNote,ptrWork:Clone())
+        table.insert(tblCitation,ptr:Clone())
+    end
+end
+----------------------------------------------------------------- Progress Display
+ProgressDisplay = {
+
+Start = function(strTitle,intMax)	-- Create and start the Progress Display window controls
+cancelflag = false
+local cancelbutton = iup.button{ title="Cancel", size="50x20",
+action = function()
+cancelflag = true -- Signal that Cancel button was pressed
+return iup.CLOSE
+end
+}
+gaugeProgress	= iup.progressbar{ expand="YES", max=intMax }		-- Set progress bar maximum range
+messageline	= iup.label{ title=" ", expand="YES", alignment="ACENTER" }
+dlgProgress	= iup.dialog{ title=strTitle, size="QUARTER", dialogframe="YES",	-- Remove Windows minimize/maximize menu
+iup.vbox{ alignment="ACENTER", gap="10",
+messageline,
+gaugeProgress,
+cancelbutton
+}
+}
+dlgProgress.close_cb = cancelbutton.action	-- Windows Close button acts as Cancel button
+dlgProgress:showxy(iup.CENTER, iup.CENTER)	-- Show the Progress Display dialogue window
+end,
+
+SetMessage = function(strMessage)	-- Set the progress message
+messageline.title = strMessage
+end,
+
+Step = function(iStep)			-- Step the Progress Bar forward
+gaugeProgress.value = gaugeProgress.value + iStep
+local val = tonumber(gaugeProgress.value)
+local max = tonumber(gaugeProgress.max)
+if val > max then
+    gaugeProgress.value = 0
+end
+iup.LoopStep()
+end,
+
+Reset = function()			-- Reset progress bar
+gaugeProgress.value = 0
+end,
+
+Cancel = function()			-- Check if Cancel button pressed
+return cancelflag
+end,
+
+Close = function()			-- Close the dialogue window
+dlgProgress:destroy()
+end
+
+}
+----------------------------------------------------------------------------------- Main Code
+-- Create Tables for Result Set
+tblRecord = {}
+tblFact = {}
+tblEntryDate = {}
+tblWhereWithinSource = {}
+tblTextFromSource  = {}
+tblCitation = {}
+tblGetDisplay  = {}
+tblQual = {}
+tblNote = {}
+-- Prompt for Source
+tblSource = fhPromptUserForRecordSel('SOUR',1)
+if #tblSource == 0 then
+    
+else
+	 local iCitations = fhCallBuiltInFunction('LinksTo',tblSource[1])
+	 if iCitations > 1000 then
+		btnValue = fhMessageBox('The number of Citations for '..fhGetDisplayText(tblSource[1])..' is very large '..iCitations..' and the results may take some time to display once the search is complete','MB_OKCANCEL','MB_ICONEXCLAMATION')
+       if btnValue == 'Cancel' then
+			return
+		 end
+	 end
+	 if iCitations == 0 then
+		btnValue = fhMessageBox('There are no Citations for '..fhGetDisplayText(tblSource[1]),'MB_OK','MB_ICONEXCLAMATION')
+			return
+	 end
+    ProgressDisplay.Start('Searching for Citations matching: '..fhGetDisplayText(tblSource[1]))
+    
+    -- DoItems looking for Tag = SOUR for the Record selected, in 2 record types, and calling CheckForSource
+    DoItems('SOUR',tblSource[1],{'INDI','FAM','OBJ','NOTE'},CheckForSource)
+    ProgressDisplay.Close()
+    if ProgressDisplay.Cancel() then
+        return
+    end
+    if #tblRecord > 0 then
+        -- Output Tables built to Results Window
+        fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
+        fhOutputResultSetColumn("Item", "item", tblFact, #tblFact, 180, "align_left")
+        fhOutputResultSetColumn("Description", "text", tblGetDisplay, #tblFact, 100, "align_left")
+        fhOutputResultSetColumn("Citation", "item",tblCitation , #tblRecord, 80, "align_left")
+        fhOutputResultSetColumn("Entry Date", "item", tblEntryDate, #tblEntryDate, 80, "align_left")
+        fhOutputResultSetColumn("Where Within Source", "item", tblWhereWithinSource, #tblWhereWithinSource, 180, "align_left")
+        fhOutputResultSetColumn("Text From Source", "item",tblTextFromSource , #tblTextFromSource, 180, "align_left")
+        fhOutputResultSetColumn("Quality", "item",tblQual , #tblQual, 80, "align_left")
+        fhOutputResultSetColumn("Citation Note", "item",tblNote , #tblNote, 180, "align_left")
+    else
+        fhMessageBox('No Citations Found')
+    end
+end
+
+
