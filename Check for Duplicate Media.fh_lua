@@ -1,0 +1,289 @@
+--[[
+@Title: Check for Possible Duplicate Media
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: October 2012 
+@Description: Checks all the linked media records and compares the linked files to look for duplicate records which may need merging.
+]]
+function mainfunction()
+    if fhGetContextInfo('CI_APP_MODE') ~= 'Project Mode' then
+        fhMessageBox('This Plugin Requires a Project','MB_OK','MB_ICONEXCLAMATION')
+        return
+    end
+    -- Define Columns
+    tblOutput,iC = createResultTable()
+    tblOutput.record = {title='Record',type='item',width=140,align='align_left',content={}}
+    tblOutput.duplicate = {title='Duplicate',type='item',width=140,align='align_left',content={}}
+    -- Build Duplicate List
+    local rootfolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+    local medialist = {}
+    local mediaCount = 0
+    local pm = fhNewItemPtr()
+    -- Quick Count Records
+    local icnt = 0
+    for pi in records('OBJE') do
+			icnt = icnt + 1
+    end
+    ProgressDisplay.Start('Searching All Media Please Wait',icnt)
+
+    for pi in records('OBJE') do
+    	ProgressDisplay.SetMessage(fhGetDisplayText(pi))
+	    ProgressDisplay.Step(1)
+    	if ProgressDisplay.Cancel() then
+	    	break
+    	end
+        pm:MoveTo(pi,'~._FILE')
+        local mediaFile = fhGetValueAsText(pm)
+        if mediaFile:starts('Media\\') then
+            mediaFile = rootfolder..'\\'..mediaFile
+        end
+        local strlc = mediaFile:lower()
+        local smd5 = md5.sumhexa(LoadFromFile(mediaFile))
+        local newmedia = {filename = fhGetValueAsText(pm), record = pi:Clone(), md5 = smd5}
+        -- Check for Duplicate
+        bDup = false
+        for i = 1,mediaCount do
+            if smd5 == medialist[i].md5 then
+                iC = iC + 1
+                tblOutput.record.content[iC] = medialist[i].record
+                tblOutput.duplicate.content[iC] = newmedia.record
+                bDup = true
+            end
+        end
+        if not(bDup) then
+            mediaCount = mediaCount + 1
+            medialist[mediaCount] = newmedia
+        end
+    end
+
+    ProgressDisplay.Reset()
+    ProgressDisplay.Close()
+
+    if iC > 0 then
+        -- Offer to delete the files
+        local strTitle = "Possible Duplicate Media Records"
+        fhOutputResultSetTitles(strTitle,strTitle, "Date: %#x")
+        for t in tblOutput() do
+            fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+        end
+    else
+        fhMessageBox('No Duplicates Found','MB_OK','MB_ICONINFORMATION')
+    end
+end
+-------------------------------------- Custom Functions
+-------------------------------------- Standard Functions
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."\\"..entry
+                local attr=lfs.attributes(entry)
+                coroutine.yield(entry,attr)
+                if attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+--[[
+@Title: Progress Display (drop in)
+@Author: Jane Taubman / Mike Tate
+@LastUpdated: May 2012
+@Description: Allows easy adding of a Progress Bar to any long running Plugin
+]]
+ 
+StrWhite = "255 255 255"
+ 
+ProgressDisplay = {
+ 
+	Start = function(strTitle,intMax)	-- Create and start the Progress Display window controls
+		if not dlgProgress then
+			cancelflag = false
+			local cancelbutton = iup.button{ title="Cancel", rastersize="200x30", 
+				action = function()
+					cancelflag = true -- Signal that Cancel button was pressed 
+					return iup.CLOSE
+				end
+			}
+			gaugeProgress	= iup.progressbar{ rastersize="400x30", max=intMax }		-- Set progress bar maximum range
+			messageline	= iup.label{ title=" ", expand="YES", alignment="ACENTER" } 
+			dlgProgress	= iup.dialog{ title=strTitle, dialogframe="YES", background=StrWhite,	-- Remove Windows minimize/maximize menu
+				iup.vbox{ alignment="ACENTER", gap="10", margin="10x10",
+					messageline,
+					gaugeProgress,
+					cancelbutton
+				}
+			}
+			dlgProgress.close_cb = cancelbutton.action	-- Windows Close button acts as Cancel button
+			dlgProgress:showxy(iup.CENTER, iup.CENTER)	-- Show the Progress Display dialogue window
+		end
+	end,
+ 
+	SetMessage = function(strMessage)	-- Set the progress message
+		if dlgProgress then messageline.title = strMessage end
+	end,
+ 
+	Step = function(iStep)			-- Step the Progress Bar forward
+		if dlgProgress then
+			gaugeProgress.value = gaugeProgress.value + iStep
+			local val = tonumber(gaugeProgress.value)
+			local max = tonumber(gaugeProgress.max)
+			if val > max then
+				gaugeProgress.value = 0
+			end
+			iup.LoopStep()
+		end
+	end,
+ 
+	Reset = function()			-- Reset progress bar
+		if dlgProgress then gaugeProgress.value = 0 end
+	end,
+ 
+	Cancel = function()			-- Check if Cancel button pressed
+		return cancelflag
+	end,
+ 
+	Close = function()			-- Close the dialogue window
+		cancelflag = false
+		if dlgProgress then dlgProgress:destroy() dlgProgress = nil end
+	end,
+ 
+}
+
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+function loadrequire(module,extended)
+    if not(extended) then extended = module end
+    local function installmodule(module,filename)
+        local bmodule = false
+        if not(filename) then
+            filename = module..'.mod'
+            bmodule = true
+        end
+        local storein = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\Plugins\\'
+        -- Check if subdirectory needed
+        local path = string.match(filename, "(.-)[^/]-[^%.]+$")
+        if path ~= "" then
+            path = path:gsub('/','\\')
+            -- Create sub-directory
+            lfs.mkdir(storein..path)
+        end
+        -- Get file down and install it
+        local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+        local url = "http://www.family-historian.co.uk/lnk/getpluginmodule.php?file="..filename
+        http:Open("GET",url,false)
+        http:Send()
+        http:WaitForResponse(30)
+        local status = http.StatusText
+        if status == 'OK' then
+            length = http:GetResponseHeader('Content-Length')
+            data = http.ResponseBody
+            if bmodule then
+                local modlist = loadstring(http.ResponseBody)
+                for _,f in pairs(modlist()) do
+                    if not(installmodule(module,f)) then
+                        break
+                    end
+                end
+            else
+                local function OpenFile(strFileName,strMode)
+                    local fileHandle, strError = io.open(strFileName,strMode)
+                    if not fileHandle then
+                        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+                    end
+                    return fileHandle
+                end -- OpenFile
+                local function SaveStringToFile(strString,strFileName)
+                    local fileHandle = OpenFile(strFileName,"wb")
+                    fileHandle:write(strString)
+                    assert(fileHandle:close())
+                end -- SaveStringToFile
+                SaveStringToFile(data,storein..filename)
+            end
+            return true
+        else
+            fhMessageBox('An error occurred in Download please try later')
+            return false
+        end
+    end
+    local function requiref(module)
+        require(module)
+    end
+    res = pcall(requiref,extended)
+    if not(res) then
+        local ans = fhMessageBox(
+        'This plugin requires '..module..' support, please click OK to download and install the module',
+        'MB_OKCANCEL','MB_ICONEXCLAMATION')
+        if ans ~= 'OK' then
+            return false
+        end
+        if installmodule(module) then
+            require(extended)
+        else
+            return false
+        end
+    end
+    return true
+end
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+-- Load string from file --
+function LoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"rb")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end -- function LoadFromFile
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
+-------------------------------------- Call Main Function
+require 'lfs'
+if not(loadrequire('md5')) then return end
+mainfunction()

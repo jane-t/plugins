@@ -1,7 +1,7 @@
 --[[
 @Title: Check for Unlinked Media
 @Author: Jane Taubman
-@Version: 1.0
+@Version: 1.1
 @LastUpdated: October 2012 
 @Description: Checks all the media files in the media folder are linked to media records the Project and optionally deletes unlinked files.
 ]]
@@ -11,6 +11,13 @@ function mainfunction()
         fhMessageBox('This Plugin Requires a Project','MB_OK','MB_ICONEXCLAMATION')
         return
     end
+    -- Prompt User for Action
+    local tactions = {'list','delete'}
+    local intButton = iupButtons("Check for Unlinked Media","Please Select from the following options","V","List Unlinked Media","Delete Unlinked Media")
+    local action = tactions[intButton]
+    if action == nil then
+       return
+    end 
     -- Load Media and File Lists
     filelist = buildfilelist()
     medialist = buildmedialist()
@@ -30,18 +37,18 @@ function mainfunction()
     if iC > 0 then
         -- Offer to delete the files
         local strTitle = "Files in Media Folder and Not Linked to Project"
+        if action == 'delete' then
         local a = fhMessageBox('Do you want to delete the '..iC..' unlinked files\n\n\nWarning This CAN NOT be undone', "MB_YESNO","MB_ICONEXCLAMATION")
         if a == "Yes" then
             strTitle = "Deleted Files in Media Folder and Not Linked to Project"
             deleteFiles(filelist)
             fhMessageBox(iC.." Files Deleted")
         end
+        end
        fhOutputResultSetTitles(strTitle,strTitle, "Date: %#x")
        for t in tblOutput() do
            fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
        end
-
-
     else
         fhMessageBox('No Unlinked Files Found','MB_OK','MB_ICONINFORMATION') 
     end
@@ -52,9 +59,11 @@ function buildfilelist()
     local mediafolder = rootfolder..'\\media'
     local filelist = {}
     for filename,attr in dirtree(mediafolder) do
+        if type(attr) == 'table' then
         if attr.mode == 'file' then
             local strlc = string.lower(filename:gsub(rootfolder..'\\',''))
             filelist[strlc] = filename
+        end
         end
     end
     return filelist
@@ -130,5 +139,26 @@ function createResultTable()
     local iC = 0 -- Define count of lines
     return tblOutput,iC
 end
+
+function iupButtons(strTitle,strMessage,strBoxType,...)
+	local intButton = 0		-- Returned value if X Close button is used
+	-- Create the GUI labels and buttons
+	local lblMessage = iup.label{title=strMessage,expand="YES"}
+	local lblLineSep = iup.label{separator="HORIZONTAL"}
+	local iupBox = iup.hbox{homogeneous="YES"}
+	if strBoxType == "V" then
+		iupBox = iup.vbox{homogeneous="YES"}
+	end
+	for intArgNum, strButton in ipairs(arg) do
+		local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
+		iup.Append(iupBox,btnName)
+	end
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox},dialogframe="YES",background="250 250 250",gap="8",margin="8x8"}
+	dialogue:show()
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+	dialogue:destroy()
+	return intButton
+end -- function iupButtons
 -------------------------------------- Call Main Function
 mainfunction()
