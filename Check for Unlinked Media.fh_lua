@@ -1,7 +1,7 @@
 --[[
 @Title: Check for Unlinked Media
 @Author: Jane Taubman
-@Version: 1.1
+@Version: 1.2
 @LastUpdated: October 2012 
 @Description: Checks all the media files in the media folder are linked to media records the Project and optionally deletes unlinked files.
 ]]
@@ -96,10 +96,11 @@ function deleteFiles(filelist)
 end
 function copyFiles(filelist,dir)
     local rootfolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
-    local mediafolder = rootfolder..'\\media'
+    local mediafolder = rootfolder..'\\media\\'
 
     for k,v in pairs(filelist) do
-        local newFile = v:gsub(mediafolder,dir)
+        local newFile = v:gsub(mediafolder,'')
+        local newFile = dir..'\\'..newFile:gsub('\\','-')
         CopyFile(v,newFile,true)
     end
 end

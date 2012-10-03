@@ -3,7 +3,17 @@
 @Author: Jane Taubman
 @Version: 1.0
 @LastUpdated: October 2012 
-@Description: Checks all the linked media records and compares the linked files to look for duplicate records which may need merging.
+@Description: 
+This plugin checks all the media records in your project and compares the files linked to them looking for files 
+which are identical it will pick up both records which are linked to the same file and to those where the names 
+are different, but the contents are the same. 
+
+When complete it returns a result set containing the matching records.
+
+By selecting each pair in turn, just drag over both cells, you can then select Edit>Merge Compare Records from 
+the menu and merge the records together.
+
+Once the process is complete, it is recommended to use the "Check for Unlinked Media" plugin to clean up any duplicate files.
 ]]
 
 function mainfunction()
