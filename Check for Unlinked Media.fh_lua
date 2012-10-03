@@ -12,8 +12,8 @@ function mainfunction()
         return
     end
     -- Prompt User for Action
-    local tactions = {'list','delete'}
-    local intButton = iupButtons("Check for Unlinked Media","Please Select from the following options","V","List Unlinked Media","Delete Unlinked Media")
+    local tactions = {'list','delete','move'}
+    local intButton = iupButtons("Check for Unlinked Media","Please Select from the following options","V","List Unlinked Media","Delete Unlinked Media","Move Unlinked Media")
     local action = tactions[intButton]
     if action == nil then
        return
@@ -38,12 +38,22 @@ function mainfunction()
         -- Offer to delete the files
         local strTitle = "Files in Media Folder and Not Linked to Project"
         if action == 'delete' then
-        local a = fhMessageBox('Do you want to delete the '..iC..' unlinked files\n\n\nWarning This CAN NOT be undone', "MB_YESNO","MB_ICONEXCLAMATION")
+        local a = fhMessageBox('Please confirm the delete of the '..iC..' unlinked files\n\n\nWarning This CAN NOT be undone', "MB_YESNO","MB_ICONEXCLAMATION")
         if a == "Yes" then
             strTitle = "Deleted Files in Media Folder and Not Linked to Project"
             deleteFiles(filelist)
             fhMessageBox(iC.." Files Deleted")
         end
+        end
+        if action == 'move' then
+           dir = getOutPutDir()        
+           if dir ~= nil then
+              strTitle = "Moved Files in Media Folder to "..dir
+              copyFiles(filelist,dir)
+              deleteFiles(filelist,dir)
+              fhMessageBox(iC.." Files Moved to "..dir)
+              fhShellExecute(dir)
+           end
         end
        fhOutputResultSetTitles(strTitle,strTitle, "Date: %#x")
        for t in tblOutput() do
@@ -84,7 +94,50 @@ function deleteFiles(filelist)
         os.remove(v)
     end
 end
+function copyFiles(filelist,dir)
+    local rootfolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+    local mediafolder = rootfolder..'\\media'
+
+    for k,v in pairs(filelist) do
+        local newFile = v:gsub(mediafolder,dir)
+        CopyFile(v,newFile,true)
+    end
+end
+function getOutPutDir()
+    local dir = fhGetContextInfo('CI_PROJECT_PUBLIC_FOLDER')
+    filedlg = iup.filedlg{dialogtype = "DIR", title = "Please select destination directory", DIRECTORY=dir}
+    
+    -- Shows file dialog in the center of the screen
+    filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+    
+    -- Gets file dialog status
+    status = filedlg.status
+    if status == "-1" then
+        iup.Message("IupFileDlg","Operation canceled")
+        return nil
+    end
+    return filedlg.value
+end
 -------------------------------------- Standard Functions
+function CopyFile(strfromfile,strtofile,bReplace)
+    if not(bReplace) then
+        if file_exists(strtofile) then
+            return false
+        end
+    end
+    local inp = assert(io.open(strfromfile, "rb"))
+    local out = assert(io.open(strtofile, "wb"))
+ 
+    local data = inp:read("*all")
+    out:write(data)
+    assert(inp:close())
+    assert(out:close())
+    -- Copy the last modification date and access date from the original.
+    local attr = lfs.attributes(strfromfile)
+    lfs.touch(strtofile,attr['modification'],attr['access'])
+    return true
+end
+
 function dirtree(dir)
     assert(dir and dir ~= "", "directory parameter is missing or empty")
     if string.sub(dir, -1) == "/" then

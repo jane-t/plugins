@@ -1,13 +1,14 @@
 --[[
 @Title: Format Script in Clipboard
 @Author: Jane Taubman
-@Version: 1.0
-@LastUpdated: May 2012
+@Version: 1.1
+@LastUpdated: October 2012
 @Description: Reads the contents of the Clipboard and reformats the contents assuming it is a Lua script.
 ]]
 -- Get IUP for Clipboard
 require "iuplua" -- Get IUP for Clipboard
-function main()
+
+function mainfunction()
     local clipboard = iup:clipboard()
     local script = ''
     if clipboard.textavailable then
@@ -18,6 +19,7 @@ function main()
     end
     clipboard.text = format(script)
 end
+
 function format(script)
     local indent = fliptable({'function','if','while', 'for', 'elseif', 'else'},1)
     local outdent = fliptable({'end','next','elseif','else'},-1)
@@ -63,17 +65,20 @@ function format(script)
         if bMulti then
             strNewLine = line
         else
-            strNewLine = string.rep(' ',currentpad * iStep)..strNewLine
+            if strNewLine:starts('function') then sBlank = '\r\n' else sBlank = '' end
+            strNewLine = sBlank..string.rep(' ',currentpad * iStep)..strNewLine
         end
         currentpad = nextpad
         table.insert(newscripttbl,strNewLine)
     end
     return table.concat(newscripttbl,'\r\n')
 end
+
 function trim(s)
     s = s:gsub('%s+',' ')
     return (s:gsub("^%s*(.-)%s*$", "%1"))
 end
+
 function removeQuotedStrings(str)
     local bQuote = false -- End of Quote
     local bEsc = false -- Escaped Quote
@@ -95,6 +100,7 @@ function removeQuotedStrings(str)
     end
     return table.concat(newstr)
 end
+
 function fliptable(tbl,value)
     local newtbl = {}
     for i,j in pairs(tbl) do
@@ -103,5 +109,9 @@ function fliptable(tbl,value)
     end
     return newtbl
 end
+
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
 ------------------------------------------------ End of Functions call Main function
-main()
+mainfunction()
