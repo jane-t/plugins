@@ -1,13 +1,15 @@
 --[[
 @Title: FTP Website Manager
 @Author: Jane Taubman
-@Version: 1.0
-@LastUpdated: June 2012 
+@Version: 1.1
+@LastUpdated: October 2012 
 @Description: Uploads Family Historian Generated Websites to an FTP site
 
 When run it builds a database of the pages and on a second run only uploads the pages which have changed.
 
 Note: If you include the current date in the pages this will class as all pages having changed.
+
+V1.1  Fix Module Loader problem
 ]]
 -- debug = true
 setting = {}
@@ -446,6 +448,7 @@ function loadrequire(module,extended)
             return false
         end
         if installmodule(module) then
+            package.loaded[extended] = nil  -- Reset Failed Load
             require(extended)
         else
             return false
