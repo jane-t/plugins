@@ -1,9 +1,12 @@
 --[[
 @Title: Check for Unlinked Media
 @Author: Jane Taubman
-@Version: 1.2
+@Version: 1.3
 @LastUpdated: October 2012 
 @Description: Checks all the media files in the media folder are linked to media records the Project and optionally deletes unlinked files.
+
+V1.2  Added options for Moving or just listing files
+V1.3  Handles problems where users have the media incorrectly linked to the media folder (e.g using full path names)
 ]]
 require 'lfs'
 function mainfunction()
@@ -79,12 +82,17 @@ function buildfilelist()
     return filelist
 end
 function buildmedialist()
+    local rootfolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+    local mediafolder = rootfolder..'\\Media\\'
+    mediafolder = mediafolder:lower()
     local medialist = {}
     local pm = fhNewItemPtr()
     for pi in records('OBJE') do
         pm:MoveTo(pi,'~._FILE')
         local mediaFile = fhGetValueAsText(pm)
         local strlc = mediaFile:lower()
+        -- Trap for Media in the Media folder where people have done the linking wrong
+        strlc = strlc:gsub(mediafolder,'')
         medialist[strlc] = fhGetValueAsText(pm)
     end
     return medialist
