@@ -1,0 +1,391 @@
+--[[
+@title: Check and Repair Media Links
+@author: Jane Taubman
+@lastupdated: October 2012
+@version: 1.0
+@description:
+Checks all Media records for 
+  broken links with a search to find and copy the media to the media folder
+  finds media outside of the media folder and copies it to the media folder
+  media in the media folder, but listed with full paths are corrected to direct to the media folder
+]]
+------------------------------------------------------------------- Functions
+
+function mainfunction()
+    local tblOutput,iC = createResultTable()
+    -- Define Columns
+    tblOutput.record = {title='Media Object',type='item',width=140,align='align_left',content={}}
+    tblOutput.file = {title='File',type='item',width=140,align='align_left',content={}}
+    tblOutput.problem = {title='Problem',type='text',width=140,align='align_left',content={}}
+    tblOutput.status = {title='Status',type='text',width=140,align='align_left',content={}}
+    -- Define Pointers
+    local ptrFileName = fhNewItemPtr()
+    -- Get Environment
+    local bIsProject = fhGetContextInfo('CI_APP_MODE') == 'Project Mode'
+    local strProjectFolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+    local strMediaFolder = strProjectFolder..'\\Media\\'
+    local strMediaFolder = strMediaFolder:lower()
+    local sNotFound = 'File Not Found'
+    local sPathWrong = 'File has Full Path and Needs Remapping'
+    local sPathExternal = 'File is not in Media Folder'
+    if not(bIsProject) then
+        a = fhMessageBox("The File is not open in Project Mode, only file existence will be checked and any files in the Media Folder will be missing. Do you wish to continue?", "MB_YESNO","MB_ICONEXCLAMATION")
+        if a == "No" then
+            return
+        end
+    end
+    for ptrMedia in records('OBJE') do
+        local bFull = false
+        ptrFileName:MoveTo (ptrMedia,'~._FILE')
+        local strFilename = fhGetItemText(ptrFileName,'~')
+        local strFilenamefull = nil
+        if string.sub(strFilename,1,5) == 'Media' and bIsProject then
+            strFilenamefull = strProjectFolder..'\\'..strFilename
+        else
+            strFilenamefull = strFilename
+            bFull = true
+        end
+        if not(file_exists(strFilenamefull)) then
+            -- Check File Exists
+            iC = iC + 1
+            tblOutput.record.content[iC] = ptrMedia:Clone()
+            tblOutput.file.content[iC] = ptrFileName:Clone()
+            tblOutput.problem.content[iC] = sNotFound
+        elseif string.sub(strFilename:lower(),1,#strMediaFolder) == strMediaFolder then
+            -- Check for Media Folder Files with Full Paths
+            iC = iC + 1
+            tblOutput.record.content[iC] = ptrMedia:Clone()
+            tblOutput.file.content[iC] = ptrFileName:Clone()
+            tblOutput.problem.content[iC] = sPathWrong
+        elseif bIsProject and bFull then
+            iC = iC + 1
+            tblOutput.record.content[iC] = ptrMedia:Clone()
+            tblOutput.file.content[iC] = ptrFileName:Clone()
+            tblOutput.problem.content[iC] = sPathExternal
+        end
+    end
+    if iC > 0 then
+        -- Problems
+        local ans = fhMessageBox(iC..' Problems have been found, do you want to try and fix them now?','MB_YESNO','MB_ICONQUESTION')
+        if ans == 'Yes' then
+            local sRootDir = ''
+            -- Process List
+            local filelist = nil
+            for i = 1,iC do
+                if tblOutput.problem.content[i] == sPathWrong then
+                    -- Truncate the File Path
+                    local sNewPath = string.gsub(fhGetItemText(tblOutput.file.content[i],'~'),strProjectFolder..'\\','')
+                    fhSetValueAsText(tblOutput.file.content[i],sNewPath)
+                    tblOutput.status.content[i] = 'Fixed'
+                elseif tblOutput.problem.content[i] == sNotFound then
+                    -- Search for File                    
+                    if sRootDir == '' then
+                        sRootDir = getRootDir()
+                        if not(sRootDir) then return end -- User Pressed Cancel
+                        filelist = buildFileList(sRootDir)
+                        if filelist == nil then
+                            fhMessageBox('Media Clean Cancelled')
+                            return
+                        end
+                    end
+                    local _,file,_ = SplitFilename(fhGetValueAsText(tblOutput.file.content[i],'~'))
+                    local sourceFile = findFile(filelist,file)
+                    if sourceFile then
+                        -- Prompt to Save in Media Folder
+                        newFile = getSaveFile(strMediaFolder,file)
+                        if CopyFile(sourceFile,newFile,true) then
+                            -- Update Record
+                            local sNewPath = string.gsub(newFile,strProjectFolder..'\\','')
+                            fhSetValueAsText(tblOutput.file.content[i],sNewPath)
+                            tblOutput.status.content[i] = 'Fixed'
+                        end
+                    end
+                elseif tblOutput.problem.content[i] == sPathExternal then
+                    -- Move file into the media folder
+                    local sourceFile = fhGetValueAsText(tblOutput.file.content[i])
+                    local _,file,_ = SplitFilename(sourceFile)
+                    -- Prompt to Save in Media Folder
+                    newFile = getSaveFile(strMediaFolder,file)
+                    if CopyFile(sourceFile,newFile,true) then
+                        -- Update Record
+                        local sNewPath = string.gsub(newFile,strProjectFolder..'\\','')
+                        fhSetValueAsText(tblOutput.file.content[i],sNewPath)
+                        tblOutput.status.content[i] = 'Fixed'
+                    end
+                end
+            end
+        end
+        fhOutputResultSetTitles("Problem Media", "Problem Media", "Date: %#x")
+        for t in tblOutput() do
+            fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+        end
+    else
+        fhMessageBox('No Problems Found')
+    end
+end
+--
+--
+---------------------------------------------------------------- Custom Functions
+
+function getRootDir()
+    local dir = ''
+    filedlg = iup.filedlg{dialogtype = "DIR", title = "Please select destination directory", DIRECTORY=dir}
+    
+    -- Shows file dialog in the center of the screen
+    filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+    
+    -- Gets file dialog status
+    status = filedlg.status
+    if status == "-1" then
+        iup.Message("Fix Process","Canceled")
+        return nil
+    end
+    return filedlg.value
+end
+
+function getSaveFile(dir,filename)
+    local filedlg = iup.filedlg{dialogtype = "SAVE", title = "Please select destination directory and filename", DIRECTORY=dir, FILE=filename}
+    filedlg:popup (iup.ANYWHERE, iup.ANYWHERE)
+    -- Gets file dialog status
+    status = filedlg.status
+    if status == "-1" then
+        iup.Message("Fix Process","Canceled")
+        return nil
+    end
+    return filedlg.value
+end
+
+function buildFileList(dir)
+    ProgressDisplay.Start('Building Search List Please Wait',100)
+    local searchlist = {}
+    local i = 0
+    local j = 0
+    for filename in dirtree(dir) do
+        i = i + 1
+        if (i / 100) == math.floor(i / 100) then
+            ProgressDisplay.Step(1)
+            j = j + 1
+            if j == 100 then
+                ProgressDisplay.Reset()
+                j = 0
+            end
+        end
+        if ProgressDisplay.Cancel() then
+            return nil
+        end
+        searchlist[i] = filename
+    end
+    ProgressDisplay.Reset()
+    ProgressDisplay.Close()
+    return searchlist
+end
+
+function findFile(list,file)
+    local i = 0
+    local filelist = {}
+    local wrkFile = '/'..file
+    for _,v in ipairs(list) do
+        if string.find(v, file, 1, true) then
+            i = i + 1
+            filelist[i] = v
+        end
+    end
+    if i == 0 then
+        return nil
+    else
+        file = promptFile(filelist)
+        return file
+    end
+end
+
+function promptFile(filelist)
+    if #filelist == 1 then
+        return filelist[1]
+    else
+        local marks = {}
+        for i = 1, #filelist do
+            marks[i] = 0
+        end
+        selection = iup.ListDialog(1,"Multiple Results Found, please select the file to import",#filelist,filelist,0,50,5,marks)
+        if selection == -1 then
+            return nil
+        else
+            return filelist[selection + 1]
+        end
+        print(results[selection])
+    end
+end
+--
+--
+---------------------------------------------------------------- Standard Functions
+
+function SplitFilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
+-- Check for File
+
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."/"..entry
+                local attr=lfs.attributes(entry)
+                coroutine.yield(entry,attr)
+                if type(attr)=='table' and attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end
+    
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+
+function CopyFile(strfromfile,strtofile,bReplace)
+    if not(bReplace) then
+        if file_exists(strtofile) then
+            return false
+        end
+    end
+    local inp = assert(io.open(strfromfile, "rb"))
+    local out = assert(io.open(strtofile, "wb"))
+    
+    local data = inp:read("*all")
+    out:write(data)
+    assert(inp:close())
+    assert(out:close())
+    -- Copy the last modification date and access date from the original.
+    local attr = lfs.attributes(strfromfile)
+    lfs.touch(strtofile,attr['modification'],attr['access'])
+    return true
+end
+--
+--[[
+@Title: Progress Display (drop in)
+@Author: Jane Taubman / Mike Tate
+@LastUpdated: May 2012
+@Description: Allows easy adding of a Progress Bar to any long running Plugin
+]]
+StrWhite = "255 255 255"
+ProgressDisplay = {
+    
+    Start = function(strTitle,intMax) -- Create and start the Progress Display window controls
+        if not dlgProgress then
+            cancelflag = false
+            local cancelbutton = iup.button{ title="Cancel", rastersize="200x30",
+                action = function()
+                    cancelflag = true -- Signal that Cancel button was pressed
+                    return iup.CLOSE
+                end
+            }
+            gaugeProgress = iup.progressbar{ rastersize="400x30", max=intMax } -- Set progress bar maximum range
+            messageline = iup.label{ title=" ", expand="YES", alignment="ACENTER" }
+            dlgProgress = iup.dialog{ title=strTitle, dialogframe="YES", background=StrWhite, -- Remove Windows minimize/maximize menu
+                iup.vbox{ alignment="ACENTER", gap="10", margin="10x10",
+                    messageline,
+                    gaugeProgress,
+                    cancelbutton
+                }
+            }
+            dlgProgress.close_cb = cancelbutton.action -- Windows Close button acts as Cancel button
+            dlgProgress:showxy(iup.CENTER, iup.CENTER) -- Show the Progress Display dialogue window
+        end
+    end,
+    
+    SetMessage = function(strMessage) -- Set the progress message
+        if dlgProgress then messageline.title = strMessage end
+    end,
+    
+    Step = function(iStep) -- Step the Progress Bar forward
+        if dlgProgress then
+            gaugeProgress.value = gaugeProgress.value + iStep
+            local val = tonumber(gaugeProgress.value)
+            local max = tonumber(gaugeProgress.max)
+            if val > max then
+                gaugeProgress.value = 0
+            end
+            iup.LoopStep()
+        end
+    end,
+    
+    Reset = function() -- Reset progress bar
+        if dlgProgress then gaugeProgress.value = 0 end
+    end,
+    
+    Cancel = function() -- Check if Cancel button pressed
+        return cancelflag
+    end,
+    
+    Close = function() -- Close the dialogue window
+        cancelflag = false
+        if dlgProgress then dlgProgress:destroy() dlgProgress = nil end
+    end,
+    
+}
+----------------------------------------------------------------- Main Program
+require( "iuplua" )
+require( "lfs" )
+mainfunction()
