@@ -1,10 +1,11 @@
 --[[
-@Title:			Ancestral Sources Data Entry V3.1
+@Title:			Ancestral Sources Data Entry
 @Author:			Mike Tate
-@LastUpdated:	3 May 2012
-@Version:			3.1
+@LastUpdated:	26 Sep 2012
+@Version:			3.2
 @Description:	Launches latest Ancestral Sources Version for the current Project 
 					with the current selected person, for any chosen type of data entry.
+@V3.2:				Removed version from Title, added strWhite background to dialogues, check Version in Store.
 @V3.1:				FlgFile/FolderExists updated, better AS Not Found wording, and other minor changes.
 @V3.0:				Added the Marriage, Add Images, and Close on Save options, also Help window size is sticky.
 @V1.7:				Minor bug fixes and code revisions.
@@ -28,14 +29,15 @@ function PresetGlobalConstants()
 	-- GUI Global Constants
 
 	StrPlugin			= "Ancestral Sources Data Entry"	-- Plugin title & version
-	StrIssue			= " V3.1"
-	StrVersion		= "Version 3.1"
-	StrRed				= "255 000 000"					-- Color attributes
-	StrAmber			= "250 160 000"
-	StrGreen			= "000 120 000"
-	StrBlue			= "000 000 255"
+	StrIssue			= " V3.2"
+	StrVersion		= "Version 3.2.3"				-- Ancestral Sources program version
+	StrRed				= "255   0   0"					-- Color attributes (must exclude leading zeros)
+	StrAmber			= "250 160   0"
+	StrGreen			= "  0 120   0"
+	StrBlue			= "  0   0 255"
 	StrGray			= "120 120 120"
-	StrBlack			= "000 000 000"
+	StrBlack			= "  0   0   0"
+	StrWhite			= "255 255 255"
 	StrBigMargin		= "10x10"							-- Layout attributes
 	StrMinMargin		= "1x1"
 	StrGap				= "10"
@@ -143,6 +145,35 @@ function OpenFile(strFileName,strMode)
 	end
 	return fileHandle
 end -- function OpenFile
+
+-- Obtain Version in Plugin Store by Id or Name --
+function StrVersionInStore(strPlugin)
+	local strType = "name="
+	if tonumber(strPlugin) then strType = "id=" end
+	if strPlugin then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..strPlugin
+ 		http:Open("GET",strRequest,false)
+		http:Send()
+		local strReturn = http.Responsebody
+		local strVersion = ""
+		if strReturn ~= nil then
+			strVersion = strReturn:match("(%d.*),%d*")
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function StrVersionInStore
+
+-- Check if New Version Available --
+function CheckVersionInStore(strOldVer)
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = StrVersionInStore(strPlugin:gsub(" %- .*",""))
+	if strNewVer > strOldVer:match("[^%d]*([%d%.]*)") then
+		iup.Alarm(strPlugin..strOldVer,"Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.","OK")
+	end
+end -- function CheckVersionInStore
 
 -- Reset Sticky Settings to Default Values --
 function ResetDefaultSettings()
@@ -317,7 +348,7 @@ function GUI_FontDialogue(intFontSet)
 	local	btnClose			= iup.button	{ title="Close"					, tip="Close this Font Style window"				, }
 
 	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
-	local	dialogFont		= iup.dialog { title=StrPlugin.." Font Style", dialogframe="YES", startfocus=btnClose,
+	local	dialogFont		= iup.dialog { title=StrPlugin.." Font Style", dialogframe="YES", background=StrWhite, startfocus=btnClose,
 										iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
 											iup.frame { font=StrFontHead, fgcolor=StrBlack, active="YES", title="Font Style",
 												iup.vbox { margin=StrMinMargin,
@@ -396,7 +427,7 @@ function GUI_HelpDialogue()
 
 	-- The following control is global to allow Main GUI to alter font
 			HboxHelp		=	iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnMain, btnPath, btnAbout, btnClose, }
-	local	dialogHelp	=	iup.dialog { title=StrPlugin.." Help & Advice", startfocus=btnClose, rastersize=StrHelpS,
+	local	dialogHelp	=	iup.dialog { title=StrPlugin.." Help & Advice", background=StrWhite, startfocus=btnClose, rastersize=StrHelpS,
 									iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin, expandchildren="YES",
 										oleControl,
 										HboxHelp,
@@ -442,7 +473,7 @@ function GUI_FileDialogue(strPathEdit)
 	local flgStatus	= true
 
 	while	( lfs.attributes(strPathEdit..StrASexe,"size") or 0 )
-		+	( lfs.attributes(strPathEdit..StrASchm,"size") or 0 ) < 5400000 and flgStatus do
+		+	( lfs.attributes(strPathEdit..StrASchm,"size") or 0 ) < 5530000 and flgStatus do
 
 		if FlgFolderExists(strPathEdit) then StrDirectory = strPathEdit end 	-- Remember last valid folder for doPathEdit() browse directory GUI 
 
@@ -461,7 +492,7 @@ function GUI_FileDialogue(strPathEdit)
 				BtnFileHelp	= iup.button	{ title="Help and Advice"														, tip="Obtain online Help and Advice from the FHUG Knowledge Base"				, }
 
 		-- Create dialogue and turn off resize, menubox, maximize and minimize
-		local	dialogFile	= iup.dialog { title="Ancestral Sources Not Found", dialogframe="YES", defaultenter=btnCancel, rastersize="400",
+		local	dialogFile	= iup.dialog { title="Ancestral Sources Not Found", dialogframe="YES", background=StrWhite, defaultenter=btnCancel, rastersize="400",
 										iup.vbox { font=StrFontBody, expandchildren="YES", alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
 											lblMessage, iup.vbox{}, lblOptions, iup.vbox{}, lblOption1, btnDownload, iup.vbox{}, lblOption2, btnPathEdit, txtPathEdit, btnRetry, iup.vbox{}, lblOption3, btnCancel, iup.vbox{}, BtnFileHelp,
 										},
@@ -472,7 +503,7 @@ function GUI_FileDialogue(strPathEdit)
 		local function doPathEdit()
 			local strDirectory = strPathEdit
 			if not FlgFolderExists(strDirectory) then strDirectory = StrDirectory end
-			local dialogPathEdit = iup.filedlg{dialogtype="DIR", title="Please select installation path", DIRECTORY=strDirectory}
+			local dialogPathEdit = iup.filedlg{dialogtype="DIR", title="Please select installation path", directory=strDirectory}
 			dialogPathEdit:popup(iup.CENTER, iup.CENTER)
 			if dialogPathEdit.status == "0" then strPathEdit = dialogPathEdit.value end
 			txtPathEdit.value = strPathEdit
@@ -533,7 +564,7 @@ function GUI_MainDialogue()
 								}
 
 	-- Create dialogue and turn off resize, menubox, maximize and minimize
-	local	dialogMain	= iup.dialog { title=StrPlugin..StrIssue, dialogframe="YES", startfocus=btnCancel, rastersize="300", vboxMain,
+	local	dialogMain	= iup.dialog { title=StrPlugin..StrIssue, dialogframe="YES", background=StrWhite, startfocus=btnCancel, rastersize="300", vboxMain,
 									move_cb =function(self,x,y) IntMainX=x IntMainY=y end,
 									close_cb=function() return iup.CLOSE end,
 								}
@@ -600,6 +631,8 @@ end -- function DoExecute
 -- Main body of Plugin script starts here --
 
 	PresetGlobalConstants()														-- Preset global data constants
+
+	CheckVersionInStore(StrIssue)												-- Notify if later Version available
 
 	ResetDefaultSettings()															-- Preset default sticky settings
 

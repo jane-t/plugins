@@ -1,277 +1,327 @@
---[[
-@Title:			Adjust AKA Names for Reports
-@Author:			Mike Tate
-@LastUpdated:	24 May 2012
-@Version:			1.1
-@Description:	Adds 'Also Known As' (AKA) Alternate Names, Nicknames & Given Names to the Primary Names or a Custom Attribute for inclusion in Reports.
-@V1.1:				Unconditionally removes old AKA Names before adding new AKA Names, uses fully Adorned Alternate Names, and offers the Custom Attribute option.
-@V1.0:				Initial version.
-]]
-
-require "iuplua"													-- To access GUI window builder
-require "lfs"														-- To access LUA filing system
-
-StrVersion = "V1.1"													-- Plugin Version
-
--- Create AKA Attribute Tag --
-function CreateAttributeTag(strName)
-   local strTag, strError = fhGetFactTag(strName, "Attribute", "INDI", false)
-   if strTag == '' then
-       strTag, strError = fhGetFactTag(strName, "Attribute", "INDI", true)
-       if strError ~= nil then
-           error('Error Creating '..strName)
-       end
-   end
-   return strTag
-end -- function CreateAttributeTag
-
-StrFactName = "Also Known As"									-- Custom Attribute Fact Name (change this to alter entire Plugin)
-StrFactTag = CreateAttributeTag(StrFactName)					-- Custom Attribute Fact Tag
-IntInsert = 1														-- Button option values
-IntAppend = 2
-IntRemove = 3
-IntUpdate = 4
-IntCancel = 5
-TblMode = {"Inserting","Appending","Removing","Updating"}	-- Modes for buttons 1, 2, 3, 4
-
--- Check if file exists --
-function FlgFileExists(strFileName)
-	if lfs.attributes(strFileName,"mode") == "file" then
-		return true
-	else
-		return false
-	end
-end -- function FlgFileExists
-
--- Open File and return Handle --
-function OpenFile(strFileName,strMode)
-	local fileHandle, strError = io.open(strFileName,strMode)
-	if fileHandle == nil then
-		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
-	end
-	return fileHandle
-end -- function OpenFile
-
--- Save string to file --
-function SaveStringToFile(strString,strFileName)
-	local fileHandle = OpenFile(strFileName,"w")
-	fileHandle:write(strString)
-	assert(fileHandle:close())
-end -- function SaveStringToFile
-
--- Return the Path, Filename, and extension as 3 values
-function SplitFilename(strFilename)
-	return string.match(strFilename, "(.-)([^\\]-([^%.]+))$")
-end -- function SplitFilename
-
--- Delete file if it exists --
-function DeleteFile(strFileName)
-	if FlgFileExists(strFileName) then
-		local fileHandle, strError = os.remove(strFileName)
-		if fileHandle == nil then
-			local intRepeat = 1
-			repeat
-				fhSleep(300,100)
-				if FlgFileExists(strFileName) then
-					fileHandle, strError = os.remove(strFileName)
-				end
-				intRepeat = intRepeat + 1
-			until fileHandle ~= nil or intRepeat > 10
-			if intRepeat > 10 then error(string.gsub(strError,strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
-		end
-	end
-end -- function DeleteFile
-
-StrFactSet = [=[
-[.index]
-Ver1=1
-Ver2=0
-Count=1
-Item1={TAG}-IA
-[FCT-{TAG}-IA]
-Name={NAME}
-Label={NAME}
-Abbr={Name}
-Template=<{Name} {value}>
-Event Tab=
-Rec Win=
-Timeframe=PRE-BIRTH
-Field Date=0
-Field Age=0
-Field Place=0
-Field Address=0
-Field Note=1
-Hidden=N
-[Text-FCT-{TAG}-IA-Auto Note]
-Count=0
-]=]
-
--- Create & Install AKA Attribute Fact Set File --
-function CreateAttributeFact()
-	local strFilePath = fhGetContextInfo("CI_APP_DATA_FOLDER")
-	local strFileName = strFilePath.."\\Fact Types\\Custom\\"..StrFactName..".fhf"
-	if not FlgFileExists(strFileName) then						-- Fact Set does not yet exist in Program Data
-		strFileName = SplitFilename(fhGetContextInfo("CI_GEDCOM_FILE"))
-		strFileName = strFileName..StrFactName..".fhf"		-- Fact Set temporary filename in GEDCOM folder
-		StrFactSet = StrFactSet:gsub("{NAME}",StrFactName)	-- Edit file for current Fact Name & Fact Tag
-		StrFactSet = StrFactSet:gsub("{Name}",string.sub(StrFactName,1,1)..string.lower(string.sub(StrFactName,2)))
-		StrFactSet = StrFactSet:gsub("{TAG}",StrFactTag)
-		SaveStringToFile(StrFactSet,strFileName)				-- Create and install Fact Set
-		local isOK, intErrorCode, strErrorText = fhShellExecute(strFileName)
-		if isOK then
-			fhMessageBox("New '"..StrFactName.."' Fact Set installed OK,\nso close & reopen Family Historian to enable Fact Set.")
-		else
-			fhMessageBox(strErrorText.." ("..intErrorCode..")")
-		end
-		DeleteFile(strFileName)									-- Delete temporary Fact Set file
-		return true
-	end
-	return false
-end -- function CreateAttributeFact
-
--- Multi-Button GUI Like iup.Alarm --
-function iupButtons()
-	local intButton	= 0												-- Returned value if X Close button is used
-	local strTitle	= "Adjust AKA '"..StrFactName.."' Names for Reports "..StrVersion
-	local strIntro	= [=[
-	Some types of Report cannot customise names to include Alternate Names, Nicknames, or Given Names.
-
-	This Plugin can temporarily add  '{NAME}'  Names to the Primary Name while you create Reports, etc.
-
-	Once the Reports have been created the temporary AKA Names can be removed from the Primary Name.
-
-	Alternatively, the  '{NAME}'  Names List can be permanently added to a new AKA Custom Attribute.
-	This only alters Updated Dates if Alternate Names, Nicknames, or Given Names change (see IMPORTANT NOTE below).
-	The AKA Custom Attribute may need to be enabled / disabled in different Reports to obtain the desired effect.
-
-	IMPORTANT NOTE:
-	  Running this Plugin will alter the Updated Dates for all modified Individual Records that have any AKA Names.
-	  To avoid this, either use Edit > Undo Plugin Updates after creating Reports, or disable Autosave && don't use Save.
-	  Using the Plugin option to remove the AKA Names will NOT reset the Updated Dates.
-	]=]
-	strIntro = strIntro:gsub("{NAME}",StrFactName)			-- Edit introduction for current Fact Name
-	-- Create the GUI label and buttons
-	local lblMessage = iup.label{title=strIntro,expand="YES"}
-	local lblLineSep = iup.label{separator="HORIZONTAL"}
-	local iupBox1 = iup.hbox{homogeneous="YES"}
-	local iupBox2 = iup.hbox{homogeneous="YES"}
-	for intArgNum, strButton in ipairs({"Insert AKA before Surname","Append AKA after Surname","Remove AKA from Names","Update AKA Custom Attribute","Cancel AKA Plugin"}) do
-		local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
-		if intArgNum < IntUpdate then
-			iup.Append(iupBox1,btnName)
-		else
-			iup.Append(iupBox2,btnName)
-		end
-	end
-	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
-	local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox1,iupBox2},dialogframe="YES",background=StrWhite,gap="8",margin="12x4"}
-	dialogue:show()
-	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
-	return intButton
-end -- function iupButtons
-
--- Add new AKA Name to Table --
-function AddName(strAKA,tblList)
-	if strAKA ~= "" and strAKA ~= "[unnamed person]" then		-- AKA Name exists
-		for intList, strList in ipairs(tblList) do
-			if strAKA == strList then return end					-- Ignore duplicate AKA Name
-		end
-		table.insert(tblList,strAKA)									-- Add new AKA Name to table
-	end
-end -- function AddName
-
--- Main function code --
-function Main()
-	local intButton = iupButtons()									-- Butttons dialogue to select options
-	if intButton <= 0 or intButton >= IntCancel then return end
-	if intButton == IntUpdate then
-		if CreateAttributeFact() then return end					-- Create & install new Custom Attribute Fact Set
-	end
-	local intCount	= 0													-- Count of Records modified
-	local strOrig	= ""												-- Original Primary Name and Custom Attribute
-	local ptrName	= fhNewItemPtr()
-	local strName	= ""												-- Primary Name is Forenames /Surname/
-	local ptrAttr	= fhNewItemPtr()
-	local strAttr	= ""												-- AKA Custom Attribute
-	local ptrAKA		= fhNewItemPtr()
-	local strAKA		= ""												-- AKA Alternate Name, Nick-Name, or Given Name
-	local tblList	= {}												-- AKA Names List table
-	local strList	= ""												-- AKA Names List string
-	local ptrMove	= ""
-	local ptrIndi	= fhNewItemPtr()
-	ptrIndi:MoveToFirstRecord("INDI")
-	while ptrIndi:IsNotNull() do										-- Loop through every Individual Record
-		ptrName = fhGetItemPtr(ptrIndi,"~.NAME")
-		strName = fhGetValueAsText(ptrName)							-- Get the Primary Name
-		ptrAttr = fhGetItemPtr(ptrIndi,"~."..StrFactTag)
-		strAttr = fhGetValueAsText(ptrAttr)							-- Get the Custom Attribute
-		strOrig = strName..strAttr
-		tblList = {}
-		local intAKA = 0
-		ptrAKA = ptrName:Clone()
-		while ptrAKA:IsNotNull() do									-- Loop through every NAME instance, but avoid Primary Name
-			intAKA = intAKA + 1
-			if intAKA > 1 then											-- Add adorned Alternate Name to table
-				AddName(fhGetItemText(ptrAKA,"~:ADORNED_FULL"),tblList)
-			end
-			AddName(fhGetItemText(ptrAKA,"~.NICK"),tblList)		-- Add the Nick-Name to table
-			AddName(fhGetItemText(ptrAKA,"~._USED"),tblList)	-- Add the Given Name to table
-			ptrMove = ptrAKA:Clone()									-- Save pointer to last NAME tag
-			ptrAKA:MoveNext("SAME_TAG")
-		end
-		strList = table.concat(tblList,", ")						-- List AKA Names separated by comma & space
-		strList = strList:gsub(", $","")							-- Delete trailing comma & space
-		if intButton == IntUpdate then								-- Create AKA Custom Attribute
-			if strList ~= strAttr then								-- AKA Names List has changed
-				if strList == "" then
-					if not fhDeleteItem(ptrAttr) then				-- AKA Names List now empty so delete Attribute
-						fhMessageBox("Error deleting '"..StrFactName..": "..strAttr.."' Attribute for "..strName)
-						return
-					end
-				else
-					if ptrAttr:IsNull() then							-- Create new AKA Custom Attribute
-						ptrAttr = fhCreateItem(StrFactTag,ptrIndi)
-						if ptrAttr:IsNull() then
-							fhMessageBox("Error creating '"..StrFactName..": "..strList.."' Attribute for "..strName)
-							return
-						end													-- Move new Attribute after SEX tag or last NAME tag
-						local ptrSex = fhGetItemPtr(ptrIndi,"~.SEX")
-						if ptrSex:IsNotNull() then ptrMove = ptrSex:Clone() end
-						if not fhMoveItemAfter(ptrAttr,ptrMove) then
-							fhMessageBox("Error moving '"..StrFactName..": "..strList.."' Attribute for "..strName)
-						end
-					end
-					fhSetValueAsText(ptrAttr,strList)				-- Save new Custom Attribute AKA Names List
-				end
-				strAttr = strList
-			end
-		else																-- Adjust AKA Names List in Primary Name
-			local strAKA = "%s?%(aka: .-%)%s?"
-			if strName:match(strAKA) then							-- Unconditionally remove any AKA Names List
-				strName = strName:gsub(strAKA," ")
-				fhSetValueAsText(ptrName,strName)					-- Save modified Primary Name
-			end
-			if strList ~= "" then										-- AKA Names List exists
-				strList = " (aka: "..strList..")"					-- Enclose AKA Names List in brackets
-				if intButton == IntInsert then
-					strList = strList:gsub("(%W)","%%%1")			-- Hide pattern magic meta-characters
-					strName = strName:gsub("^/"," /")				-- If no forenames then insert leading space
-					strName = strName:gsub(" /",strList.." /")	-- Insert AKA Names List in Primary Name before Surname
-				elseif intButton == IntAppend then
-					strName = strName..strList						-- Append AKA Names List to end of Primary Name
-				end
-				fhSetValueAsText(ptrName,strName)					-- Save modified Primary Name
-			end
-		end
-		if strOrig ~= strName..strAttr then
-			intCount = intCount + 1
-		end
-	   ptrIndi:MoveNext()
-	end
-	fhUpdateDisplay()
-	local strText = " Records modified by "						-- Report number of Records modified
-	if intCount == 1 then strText = strText:gsub("s","") end
-	fhMessageBox(intCount..strText..TblMode[intButton].." an AKA Name List.")
-end -- function Main
-
-Main()
+--[[
+@Title:			Adjust AKA Names for Reports
+@Author:			Mike Tate
+@LastUpdated:	1 August 2012
+@Version:			1.2
+@Description:	Adds 'Also Known As' (AKA) Alternate Names, Nicknames & Given Names to the Primary Names or a Custom Attribute for inclusion in Reports.
+@V1.2:				Option to include social Title Attribute, option to include adorned Primary Name, exclude any duplicated Name,
+					insert 'and' before last AKA Name, improve handling of Alternate Names, and add Version in Store check.
+@V1.1:				Unconditionally removes old AKA Names before adding new AKA Names, uses fully Adorned Alternate Names, and offers the Custom Attribute option.
+@V1.0:				Initial version.
+]]
+
+require "iuplua"													-- To access GUI window builder
+require "lfs"														-- To access LUA filing system
+require "luacom"													-- To access COM subsystem
+
+StrVersion = " Version 1.2 "										-- Plugin Version
+
+-- Create AKA Attribute Tag --
+function CreateAttributeTag(strName)
+   local strTag, strError = fhGetFactTag(strName, "Attribute", "INDI", false)
+   if strTag == '' then
+       strTag, strError = fhGetFactTag(strName, "Attribute", "INDI", true)
+       if strError ~= nil then
+           error('Error Creating '..strName)
+       end
+   end
+   return strTag
+end -- function CreateAttributeTag
+
+StrFactName = "Also Known As"									-- Custom Attribute Fact Name (change this to alter entire Plugin)
+StrFactTag = CreateAttributeTag(StrFactName)					-- Custom Attribute Fact Tag
+IntInsert = 1														-- GUI Button option values
+IntAppend = 2
+IntRemove = 3
+IntUpdate = 4
+IntCancel = 5
+TblMode = {"Inserting","Appending","Removing","Updating"}	-- Modes for buttons 1, 2, 3, 4
+IntFull = 0															-- Include full adorned Primary Name state
+IntTitl = 0															-- Include any Title Attributes state
+StrAKA = "%s?%(aka: .-%)%s?"										-- AKA recognition pattern formula
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+end -- function FlgFileExists
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if fileHandle == nil then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+-- Return the Path, Filename, and extension as 3 values
+function SplitFilename(strFilename)
+	return string.match(strFilename, "(.-)([^\\]-([^%.]+))$")
+end -- function SplitFilename
+
+-- Delete file if it exists --
+function DeleteFile(strFileName)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(string.gsub(strError,strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
+		end
+	end
+end -- function DeleteFile
+
+-- Obtain Version in Plugin Store by Id or Name --
+function StrVersionInStore(strPlugin)
+	local strType = "name="
+	if tonumber(strPlugin) then strType = "id=" end
+	if strPlugin then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..strPlugin
+ 		http:Open("GET",strRequest,false)
+		http:Send()
+		local strReturn = http.Responsebody
+		local strVersion = ""
+		if strReturn ~= nil then
+			strVersion = strReturn:match("(%d.*),%d*")
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function StrVersionInStore
+
+-- Check if New Version Available --
+function CheckVersionInStore(strOldVer)
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = StrVersionInStore(strPlugin)
+	if strNewVer > strOldVer:match("[^%d]*([%d%.]*)") then
+		iup.Alarm(strPlugin..strOldVer,"Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.","OK")
+	end
+end -- function CheckVersionInStore
+
+StrFactSet = [=[
+[.index]
+Ver1=1
+Ver2=0
+Count=1
+Item1={TAG}-IA
+[FCT-{TAG}-IA]
+Name={NAME}
+Label={NAME}
+Abbr={Name}
+Template=<{Name} {value}>
+Event Tab=
+Rec Win=
+Timeframe=PRE-BIRTH
+Field Date=0
+Field Age=0
+Field Place=0
+Field Address=0
+Field Note=1
+Hidden=N
+[Text-FCT-{TAG}-IA-Auto Note]
+Count=0
+]=]
+
+-- Create & Install AKA Attribute Fact Set File --
+function CreateAttributeFact()
+	local strFilePath = fhGetContextInfo("CI_APP_DATA_FOLDER")
+	local strFileName = strFilePath.."\\Fact Types\\Custom\\"..StrFactName..".fhf"
+	if not FlgFileExists(strFileName) then						-- Fact Set does not yet exist in Program Data
+		strFileName = SplitFilename(fhGetContextInfo("CI_GEDCOM_FILE"))
+		strFileName = strFileName..StrFactName..".fhf"		-- Fact Set temporary filename in GEDCOM folder
+		StrFactSet = StrFactSet:gsub("{NAME}",StrFactName)	-- Edit file for current Fact Name & Fact Tag
+		StrFactSet = StrFactSet:gsub("{Name}",string.sub(StrFactName,1,1)..string.lower(string.sub(StrFactName,2)))
+		StrFactSet = StrFactSet:gsub("{TAG}",StrFactTag)
+		SaveStringToFile(StrFactSet,strFileName)				-- Create and install Fact Set
+		local isOK, intErrorCode, strErrorText = fhShellExecute(strFileName)
+		if isOK then
+			fhMessageBox("New '"..StrFactName.."' Fact Set installed OK,\nso close & reopen Family Historian to enable Fact Set.")
+		else
+			fhMessageBox(strErrorText.." ("..intErrorCode..")")
+		end
+		DeleteFile(strFileName)									-- Delete temporary Fact Set file
+		return true
+	end
+	return false
+end -- function CreateAttributeFact
+
+-- Multi-Button GUI Like iup.Alarm --
+function iupButtons()
+	local intButton	= 0												-- Returned value if X Close button is used
+	local strTitle	= "Adjust AKA '"..StrFactName.."' Names for Reports "..StrVersion
+	local strIntro	= [=[
+	Some types of Report cannot customise names to include Alternate Names, Nicknames, or Given Names.
+
+	This Plugin can temporarily add  '{NAME}'  Names to the Primary Name while you create Reports, etc.
+
+	Once the Reports have been created the temporary AKA Names can be removed from the Primary Name.
+
+	Alternatively, the  '{NAME}'  Names List can be permanently added to a new AKA Custom Attribute.
+	This only alters Updated Dates if Alternate Names, Nicknames, or Given Names change (see IMPORTANT NOTE below).
+	The AKA Custom Attribute may need to be enabled / disabled in different Reports to obtain the desired effect.
+
+	IMPORTANT NOTE:
+	  Running this Plugin will alter the Updated Dates for all modified Individual Records that have any AKA Names.
+	  To avoid this, either use Edit > Undo Plugin Updates after creating Reports, or disable Autosave && don't use Save.
+	  Using the Plugin option to remove the AKA Names will NOT reset the Updated Dates.
+	]=]
+	strIntro = strIntro:gsub("{NAME}",StrFactName)			-- Edit introduction for current Fact Name
+	-- Create the GUI label and buttons
+	local lblMessage = iup.label{title=strIntro,expand="YES"}
+	local lblLineSep = iup.label{separator="HORIZONTAL"}
+	local iupBox1 = iup.hbox{homogeneous="YES"}
+	local iupBox2 = iup.hbox{homogeneous="YES"}
+	local iupBox3 = iup.hbox{homogeneous="YES", margin="50", gap="80"}
+	for intArgNum, strButton in ipairs({"Insert AKA before Surname","Append AKA after Surname","Remove AKA from Names","Update AKA Custom Attribute","Cancel AKA Plugin"}) do
+		local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
+		if intArgNum < IntUpdate then
+			iup.Append(iupBox1,btnName)
+		else
+			iup.Append(iupBox2,btnName)
+		end
+	end
+	local tglFull = iup.toggle{title="  Include fully adorned Primary Name? ",expand="YES",value="NO",action=function(self,intState) IntFull=intState end}
+	local tglTitl = iup.toggle{title="  Include any social Title Attribute? ",expand="YES",value="NO",action=function(self,intState) IntTitl=intState end}
+	iup.Insert(iupBox3,nil,tglTitl)
+	iup.Insert(iupBox3,nil,tglFull)
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox1,iupBox2,iupBox3},dialogframe="YES",background=StrWhite,gap="8",margin="12x4"}
+	dialogue:show()
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+	return intButton
+end -- function iupButtons
+
+-- Add new AKA Name to Table --
+function AddName(strAKA,tblList)
+	if strAKA ~= "" and strAKA ~= "[unnamed person]" then		-- AKA Name exists
+		for intList, strList in ipairs(tblList) do
+			if strAKA == strList then return end					-- Ignore duplicate AKA Name
+		end
+		strAKA = strAKA:gsub(StrAKA," ")							-- Remove any AKA list from adorned Name
+		table.insert(tblList,strAKA)									-- Add new AKA Name to table
+	end
+end -- function AddName
+
+-- Main function code --
+function Main()
+	local intButton = iupButtons()									-- Butttons dialogue to select options
+	if intButton <= 0 or intButton >= IntCancel then return end
+	if intButton == IntUpdate then
+		if CreateAttributeFact() then return end					-- Create & install new Custom Attribute Fact Set
+	end
+	local intCount	= 0													-- Count of Records modified
+	local strOrig	= ""												-- Original Primary Name and Custom Attribute
+	local ptrName	= fhNewItemPtr()
+	local strName	= ""												-- Primary Name is Forenames /Surname/
+	local ptrAttr	= fhNewItemPtr()
+	local strAttr	= ""												-- AKA Custom Attribute
+	local ptrList	= fhNewItemPtr()
+	local tblList	= {}												-- AKA Names List table
+	local strList	= ""												-- AKA Names List string
+	local ptrMove	= fhNewItemPtr()
+	local ptrIndi	= fhNewItemPtr()
+	ptrIndi:MoveToFirstRecord("INDI")
+	while ptrIndi:IsNotNull() do										-- Loop through every Individual Record
+		ptrName = fhGetItemPtr(ptrIndi,"~.NAME")
+		strName = fhGetValueAsText(ptrName)							-- Get the original Primary Name
+		ptrAttr = fhGetItemPtr(ptrIndi,"~."..StrFactTag)
+		strAttr = fhGetValueAsText(ptrAttr)							-- Get the original Custom Attribute
+		strOrig = strName..strAttr
+		tblList = {}														-- Clear the AKA Names List
+		if IntTitl == 1 then
+			local ptrTitl = fhNewItemPtr()							-- Include any social Title Attributes
+			ptrTitl = fhGetItemPtr(ptrIndi,"~.TITL")
+			while ptrTitl:IsNotNull() do								-- Loop through every TITL tag instance
+				AddName(fhGetValueAsText(ptrTitl),tblList)		-- Add social Title to list
+				ptrTitl:MoveNext("SAME_TAG")
+			end
+		end
+		local intList = #tblList + 1									-- List index to adorned Primary Name
+		ptrList = ptrName:Clone()
+		while ptrList:IsNotNull() do									-- Loop through every NAME tag instance
+			for intRef, strRef in ipairs({"~:ADORNED_FULL","~.NICK","~._USED"}) do
+				AddName(fhGetItemText(ptrList,strRef),tblList)	-- Add adorned Name, Nick-Name, Given Name to list
+			end
+			ptrMove = ptrList:Clone()									-- Save pointer to last NAME tag instance
+			ptrList:MoveNext("SAME_TAG")
+		end
+		if IntFull == 0													-- Remove adorned Primary Name unconditionally or if same as standard Name
+		or tblList[intList] == fhGetDisplayText(ptrName,"","min"):gsub(StrAKA," ") then
+			table.remove(tblList,intList)							-- Remove adorned Primary Name from list
+		end
+		strList = table.concat(tblList,", ")						-- List AKA Names separated by comma & space
+		strList = strList:gsub(", ([^,]+)$"," and %1")			-- Replace last comma with 'and'
+		if intButton == IntUpdate then								-- Update AKA Custom Attribute
+			if strList ~= strAttr then								-- AKA Names List has changed
+				if strList == "" then
+					if not fhDeleteItem(ptrAttr) then				-- AKA Names List now empty so delete Attribute
+						fhMessageBox("Error deleting '"..StrFactName..": "..strAttr.."' Attribute for "..strName)
+						return
+					end
+				else
+					if ptrAttr:IsNull() then							-- Create new AKA Custom Attribute
+						ptrAttr = fhCreateItem(StrFactTag,ptrIndi)
+						if ptrAttr:IsNull() then
+							fhMessageBox("Error creating '"..StrFactName..": "..strList.."' Attribute for "..strName)
+							return
+						end													-- Move new Attribute after SEX tag or last NAME tag instance
+						local ptrSex = fhGetItemPtr(ptrIndi,"~.SEX")
+						if ptrSex:IsNotNull() then ptrMove = ptrSex:Clone() end
+						if not fhMoveItemAfter(ptrAttr,ptrMove) then
+							fhMessageBox("Error moving '"..StrFactName..": "..strList.."' Attribute for "..strName)
+						end
+					end
+					fhSetValueAsText(ptrAttr,strList)				-- Save new Custom Attribute AKA Names List
+				end
+				strAttr = strList
+			end
+		else																-- Adjust AKA Names List in Primary Name
+			if strName:match(StrAKA) then							-- Unconditionally remove any AKA Names List
+				strName = strName:gsub(StrAKA," ")
+				fhSetValueAsText(ptrName,strName)					-- Save modified Primary Name
+			end
+			if strList ~= "" then										-- AKA Names List exists
+				strList = " (aka: "..strList..")"					-- Enclose AKA Names List in brackets
+				if intButton == IntInsert then
+					strList = strList:gsub("(%W)","%%%1")			-- Hide pattern magic meta-characters
+					strName = strName:gsub("^/"," /")				-- If no forenames then insert leading space
+					strName = strName:gsub(" /",strList.." /")	-- Insert AKA Names List in Primary Name before Surname
+				elseif intButton == IntAppend then
+					strName = strName..strList						-- Append AKA Names List at the end of Primary Name
+				end
+				fhSetValueAsText(ptrName,strName)					-- Save modified Primary Name
+			end
+		end
+		if strOrig ~= strName..strAttr then
+			intCount = intCount + 1									-- Count number of Records modified
+		end
+	   ptrIndi:MoveNext()
+	end
+	fhUpdateDisplay()
+	local strText = " Records modified by "						-- Report number of Records modified
+	if intCount == 1 then strText = strText:gsub("s","") end
+	fhMessageBox(intCount..strText..TblMode[intButton].." an AKA Name List.")
+end -- function Main
+
+CheckVersionInStore(StrVersion)
+
+Main()
