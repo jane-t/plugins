@@ -23,8 +23,10 @@ function mainfunction()
     -- Get Environment
     local bIsProject = fhGetContextInfo('CI_APP_MODE') == 'Project Mode'
     local strProjectFolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
+    local strProjectPattern = strPlainText(strProjectFolder)
     local strMediaFolder = strProjectFolder..'\\Media\\'
     local strMediaFolder = strMediaFolder:lower()
+    local strMediaPattern = strPlainText(strMediaFolder)
     local sNotFound = 'File Not Found'
     local sPathWrong = 'File has Full Path and Needs Remapping'
     local sPathExternal = 'File is not in Media Folder'
@@ -74,7 +76,7 @@ function mainfunction()
             for i = 1,iC do
                 if tblOutput.problem.content[i] == sPathWrong then
                     -- Truncate the File Path
-                    local sNewPath = string.gsub(fhGetItemText(tblOutput.file.content[i],'~'),strProjectFolder..'\\','')
+                    local sNewPath = string.gsub(fhGetItemText(tblOutput.file.content[i],'~'),strProjectPattern..'\\','')
                     fhSetValueAsText(tblOutput.file.content[i],sNewPath)
                     tblOutput.status.content[i] = 'Fixed'
                 elseif tblOutput.problem.content[i] == sNotFound then
@@ -95,7 +97,7 @@ function mainfunction()
                         newFile = getSaveFile(strMediaFolder,file)
                         if CopyFile(sourceFile,newFile,true) then
                             -- Update Record
-                            local sNewPath = string.gsub(newFile,strProjectFolder..'\\','')
+                            local sNewPath = string.gsub(newFile,strProjectPattern..'\\','')
                             fhSetValueAsText(tblOutput.file.content[i],sNewPath)
                             tblOutput.status.content[i] = 'Fixed'
                         end
@@ -218,6 +220,10 @@ end
 --
 --
 ---------------------------------------------------------------- Standard Functions
+function strPlainText(strText)
+    -- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
+    return strText:gsub("(%W)","%%%1")
+end
 
 function SplitFilename(strfilename)
     -- Returns the Path Filename and extension as 3 values
