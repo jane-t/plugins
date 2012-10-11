@@ -51,7 +51,7 @@ while ptrType:IsNotNull() do
 	if fhIsUDF(ptrType) then
 		strTag = fhGetTag(ptrType)
 		strValue = fhGetValueAsText(ptrType)
-		strNote = strNote.. ' '..strTag..': '..strValue
+		strNote = strNote.. '\n '..strTag..': '..strValue
 		table.insert(tblDelete,ptrType:Clone())
 	end
 	ptrType:MoveNext()

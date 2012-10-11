@@ -1,0 +1,49 @@
+--[[
+@Title: Generations - Correct Citation TEXT Lines
+@Author: 
+@Version: 
+@LastUpdated: 
+@Description: 
+]]
+
+function mainfunction()
+    local pf = fhNewItemPtr()
+    local pt = fhNewItemPtr()
+    local ps = fhNewItemPtr()
+    local tblp = {}
+    for pi in records('INDI') do
+        pf:MoveToFirstChildItem(pi)
+        while pf:IsNotNull() do
+            ps:MoveTo(pf,'~.SOUR')
+            while ps:IsNotNull() do
+                pt:MoveTo(ps,'~.TEXT')
+                if pt:IsNotNull() then
+                    table.insert(tblp,pt:Clone())
+                    print(fhGetDisplayText(pt))
+                end
+                ps:MoveNext("SAME_TAG")
+            end
+            pf:MoveNext()
+        end
+    end
+    for _,v in pairs(tblp) do
+        ps:MoveToParentItem(v)
+        local pn = fhCreateItem('DATA',ps,true)
+        local pnt = fhCreateItem('TEXT',pn,true)
+        fhSetValueAsText(pnt,fhGetValueAsText(v))
+        fhDeleteItem(v)
+        fhUpdateDisplay()
+    end
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+mainfunction()
