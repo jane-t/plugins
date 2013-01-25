@@ -90,7 +90,7 @@ function ProcessImageFile(orgfile,destfile,y1,x1,y2,x2,maxheight,maxwidth)
 		TblError[im.ERR_FORMAT]	= "Invalid or unrecognized file format."
 		TblError[im.ERR_DATA]		= "Invalid or unsupported data."
 		TblError[im.ERR_COMPRESS]	= "Invalid or unsupported compression."
-		TblError[im.ERR_MEM]		= "Insuficient memory."
+		TblError[im.ERR_MEM]		= "Insufficient memory."
 		fhMessageBox("File Image Load: "..TblError[err].."\n\nCopying image file without cropping:\n\n"..orgfile)
 		dlgProgress.bringfront = "YES"
 		CopyMediaFile(orgfile,destfile)

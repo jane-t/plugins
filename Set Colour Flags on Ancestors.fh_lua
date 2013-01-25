@@ -75,13 +75,13 @@ local iTafel = fhCallBuiltInFunction('AhnentafelNumber',ptrRoot,ptr,1)
 return iKey
 end
 ---------------------------------------------------------------- Colour Patterns
-tblcolour = {'Blue','Blue','Red','Blue','Blue','Red','Red','Blue','Blue','Green','Green','Red','Red','Yellow','Yellow'}
-tblclrcolour = {'Blue', 'Red','Yellow','Green'}
+local tblcolour = {'Blue','Blue','Red','Blue','Blue','Red','Red','Blue','Blue','Green','Green','Red','Red','Yellow','Yellow'}
+local tblclrcolour = {'Blue', 'Red','Yellow','Green'}
 ---------------------------------------------------------------- Main Code
-flgPtr = fhNewItemPtr()
-flgCPtr = fhNewItemPtr()
+local flgPtr = fhNewItemPtr()
+local flgCPtr = fhNewItemPtr()
 
-ptrRoot = fhPromptUserForRecordSel('INDI',1)
+local  ptrRoot = fhPromptUserForRecordSel('INDI',1)
 if ptrRoot[1]:IsNotNull() then
     ancestors = GetAncestorList(ptrRoot[1])
     for i,ptr in pairs(ancestors) do

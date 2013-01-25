@@ -1,0 +1,214 @@
+--[[
+@Title:  Date Search and Return Result Set
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: January 2013
+@Description: Finds all Date fields with either Double Dates, Qualifiers 
+or matching a select date or date range and returns them as a result set.
+
+Before, After To or From Dates are treated as simple dates.  
+So searching for 1901 will include facts with dates with Before 1901, but not Before 1902.
+]]
+
+function main()
+    -- Select option
+    iDateType = iupButtons("Date Search Option","Please select the search option required","V",
+    "Double Dates","Qualified Dates (Est Calc or Approx)","Dates matching/within a specific date or range")
+    if iDateType == 0 then
+        return
+    end
+    local title,simple
+    if iDateType == 1 then title = 'All Double Date Facts'
+    elseif iDateType == 2 then title = 'All Qualfied Dates (Est Calc Approx Before After To From)'
+    elseif iDateType == 3 then
+        -- Prompt for Date
+        dtSearch = fhPromptUserForDate()
+        if not(dtSearch) then return end
+        title = 'All Date Entries matching or in range: '..dtSearch:GetDisplayText()
+        simple = fhMessageBox('Treat Before,After, To and From Dates as simple dates for comparison. \ne.g Before 1901 will only match 1901 not 1900','MB_YESNO','MB_ICONQUESTION')
+        if simple ~= 'Yes' and simple ~= 'No' then
+           return
+        end
+    end
+    -- Set Up Result Set
+    tblOutput,iC = createResultTable()
+    -- Define Columns
+    tblOutput.rec = {title='Record',type='item',width=140,align='align_left',content={}}
+    tblOutput.fact = {title='Fact',type='item',width=140,align='align_left',content={}}
+    tblOutput.date = {title='Date',type='item',width=80,align='align_left',content={}}
+    
+    -- List everyitem in Objects and Family Records
+    local strDate
+    local ptrFact, ptrRecord = fhNewItemPtr(),fhNewItemPtr()
+    local dtWork
+    local function addcol(ptr)
+        ptrFact:MoveToParentItem(ptr)
+        ptrRecord:MoveToRecordItem(ptr)
+        -- Add Columns
+        iC = iC + 1
+        tblOutput.rec.content[iC] = ptrRecord:Clone()
+        tblOutput.fact.content[iC] = ptrFact:Clone()
+        tblOutput.date.content[iC] = ptr:Clone()
+    end
+    for ptr in allItems() do
+        if fhGetValueType(ptr) == 'date' then
+            -- Date item found
+            strDate = fhGetDisplayText(ptr)
+            if iDateType == 1 and strDate:find('/') then
+                addcol(ptr)
+            elseif iDateType == 2 then
+                dtWork = fhGetValueAsDate(ptr)
+                local stType = dtWork:GetSubtype()
+                    if stType:inList({'Approximate','Calculated','Estimated','Before','After','To','From'}) then
+                    addcol(ptr)
+                end
+            elseif iDateType == 3 then
+                dtWork = fhGetValueAsDate(ptr)
+                local icomp = dtWork:Compare(dtSearch)
+                if compDates(dtSearch,dtWork,(simple == 'Yes')) then
+                    addcol(ptr)
+                end
+            end
+        end
+    end
+    local title =
+    fhOutputResultSetTitles(title, title, "Date: %#x")
+    for t in tblOutput() do
+        fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+    end
+end
+------------------- functions
+
+function allItems(...)
+    local iTypeCount = nil
+    local iPos = 1
+    local p1 = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    local tblRecTypes = {}
+    
+    if arg['n'] == 0 then
+        -- No parameter do all Record Types
+        iTypeCount = fhGetRecordTypeCount() -- Get Count of Record types
+        for i = 1,iTypeCount do
+            tblRecTypes[i] = fhGetRecordTypeTag(i)
+        end
+    else
+        -- Got Parameters Process them instead
+        tblRecTypes = arg
+        iTypeCount = arg['n']
+    end
+    p1:MoveToFirstRecord(tblRecTypes[iPos])
+    return function()
+        repeat
+        while p1:IsNotNull() do
+            p2:MoveTo(p1)
+            p1:MoveNextSpecial()
+            if p2:IsNotNull() then
+                return p2
+            end
+        end
+        -- Loop through Record Types
+        iPos = iPos + 1
+        if iPos <= iTypeCount then
+            p1:MoveToFirstRecord(tblRecTypes[iPos])
+        end
+        until iPos > iTypeCount
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+
+function string.inList(str, list)
+    local found = false
+    for _,item in pairs(list) do
+        if str == item then found = true end
+    end
+    return found
+end
+
+function compDates(dt1,dt2,simple)
+    -- Compare date 1 to date 2 and return true if date 1 matches date 2
+    -- Where a date range is available for date 1 if the start or end falls with in
+    -- the start and end of date 2 true will be returned
+    -- Before or After dates will be compared as if they were the start or end on the date.
+    local function fixdate(dt)
+        local function expDate(dp,type)
+            local days = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+            local iYear = dp:GetYear()
+            local iMonth = dp:GetMonth()
+            local iDay = dp:GetDay()
+            if type == 'Max' then
+                if iMonth == 0 then iMonth = 12 end
+                if iDay == 0 then iDay = days[iMonth] end
+            elseif type == 'Min' then
+                if iMonth == 0 then iMonth = 1 end
+                if iDay == 0 then iDay = 1 end
+            end
+            dp:SetValue(iYear,iMonth,iDay)
+            return dp
+        end
+        local dpstart = dt:GetDatePt1()
+        local dpend = dt:GetDatePt2()
+        local dqual = dt:GetSubtype()
+        if not(simple) and dqual:inList({'Before','To'}) then
+            dpend = dpstart:Clone()
+            dpstart:SetNull()
+        end
+        if dpend:IsNull() then dpend = dpstart:Clone() end
+        -- Expand dates so range checking works        
+        return expDate(dpstart,'Min'),expDate(dpend,'Max')
+    end
+    local dp1start,dp1end = fixdate(dt1)
+    local dp2start,dp2end = fixdate(dt2)
+    local bMatch = true
+    if dp2end and dp2end:Compare(dp1start) < 0 then bMatch = false end
+    if dp2start and dp2start:Compare(dp1end) > 0 then bMatch = false end
+    return bMatch
+end
+
+function iupButtons(strTitle,strMessage,strBoxType,...)
+    local intButton = 0 -- Returned value if X Close button is used
+    -- Create the GUI labels and buttons
+    local lblMessage = iup.label{title=strMessage,expand="YES"}
+    local lblLineSep = iup.label{separator="HORIZONTAL"}
+    local iupBox = iup.hbox{homogeneous="YES"}
+    if strBoxType == "V" then
+        iupBox = iup.vbox{homogeneous="YES"}
+    end
+    for intArgNum, strButton in ipairs(arg) do
+            local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
+            iup.Append(iupBox,btnName)
+        end
+        -- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+        local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox},dialogframe="YES",background="250 250 250",gap="8",margin="8x8"}
+        dialogue:show()
+        if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+        dialogue:destroy()
+        return intButton
+    end -- function iupButtons
+    --
+    main()
