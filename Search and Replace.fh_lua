@@ -1,8 +1,8 @@
 --[[
 @title: Search and Replace
 @author: Jane Taubman
-@lastupdated: April 2012
-@Version: 1.5
+@lastupdated: March 2013
+@Version: 1.6
 @description:
 Searches for and replaces any given text within the current project, with an option to ask for confirmation for each change.
 At the end, lists all changed fields with links back to the record (double-click on an item to view it in the Property Box).
@@ -11,6 +11,8 @@ At the end, lists all changed fields with links back to the record (double-click
 1.2 Change to Provide a Skip Button, to cancel click the close button on the window.
 1.3 Add Case insensitive searching and cancel or close the window will abort the replaces, while still listing the changes made.
 1.4 Add options for whole word search only and prevent wild card patterns being used automatically 
+1.5 General Code Tidy
+1.6 Add more details to the replace prompt for the context of the field being changed.
 ]]
 ----------------------------------------------------- Start Search Replace Prompt
 
@@ -31,7 +33,7 @@ function linecount(string,maxlines)
     return math.min(intLines,maxlines)
 end
 
-function srPrompt(txtType,strFrom,strTo,bConfirm)
+function srPrompt(txtType,strFrom,strTo,bConfirm,sMessage)
     local btn_ok = iup.button { title="Replace",padding = '5x5',size='50'}
     local btn_skip = iup.button { title="Skip",padding = '5x5',size='50'}
     local btn_cancel = iup.button { title="Cancel",padding = '5x5',size='50'}
@@ -53,6 +55,7 @@ function srPrompt(txtType,strFrom,strTo,bConfirm)
     local bQuit = false
     
     local vbox = iup.vbox {
+        iup.label {title=sMessage},
         iup.label {title="Original"},
         inp_from_string,
         iup.label {title="Replacement"},
@@ -176,7 +179,7 @@ function Replace(ptr)
         ptrRecord:MoveToRecordItem(ptr)
         if p.Confirm == 1 and strFromString ~= strToString then
             bConfirm = true
-            strFromString,strToString,bConfirm,btn = srPrompt(strBoxType,strFromString,strToString,bConfirm)
+            strFromString,strToString,bConfirm,btn = srPrompt(strBoxType,strFromString,strToString,bConfirm,ptrDetails(ptr))
             if btn == 'cancel' or btn == nil then
                 return false
             elseif btn == 'replace' then
@@ -203,26 +206,50 @@ function Replace(ptr)
     end
     return true
 end
--------------
+
+function ptrDetails(ptr)
+local desc = {}
+local wrkPtr = ptr:Clone()
+table.insert(desc,BuildDR(ptr))
+wrkPtr:MoveToParentItem(wrkPtr)
+while wrkPtr:IsNotNull() do
+table.insert(desc,1,fhGetDisplayText(wrkPtr))
+wrkPtr:MoveToParentItem(wrkPtr)
+end
+wrkPtr:MoveToRecordItem(ptr) 
+table.insert(desc,1,'Record: '..fhGetTag(wrkPtr)..' '..fhGetRecordId(wrkPtr))
+return table.concat(desc,'\n')
+end
+
+function BuildDR(ptr)
+   local ptrTemp = fhNewItemPtr()
+   ptrTemp:MoveTo(ptr)
+   strDR = fhGetTag(ptrTemp)
+   while fhHasParentItem(ptrTemp) do
+      ptrTemp:MoveToParentItem(ptrTemp)
+      strDR = fhGetTag(ptrTemp)..'.'..strDR
+   end
+   return strDR
+end
+
+------------
 -- Main Code
 -------------
 -- Prompt for Options
 -- Prompt for confirmation using iup.GetParm %b are tick boxes
 -- set initial values
-p = {
-a ={text=1,longtext=1,name=1,place=1,wordlist=1},
-Sensitive= 0,
-Confirm = 1,
-Whole = 1,
-Plain = 1,
-}
+p ={}
+p.a ={text=1,longtext=1,name=1,place=1,wordlist=1}
+p.Sensitive= 0
+p.Confirm  = 1
+p.Whole  = 1
+p.Plain = 1
 bSkip = false
 tblRecord = {}
 tblItem = {}
 tblReplaced = {}
 -- Prompt User to Confirm Options
-local pString = [[
-Search For: %s
+pprompt = [[Search For: %s
 Replace with: %s
 Confirm Every Change: %b
 Case Sensitive: %b
@@ -233,11 +260,13 @@ Names: %b{Name fields only}
 Places: %b{Place fields only}
 Extra Search Options %t
 Plain Text Search: %b{Plain Text or Regular Expression search & replace.}
-Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}
-]]
+Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}]]
+
+-- Prompt User to Confirm Options
 bOK, strSearch,strReplace,p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.Plain,p.Whole =
-iup.GetParam("Family Historian Text Search and Replace", param_action,
-pString,"","",p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.Plain,p.Whole)
+iup.GetParam("Family Historian Text Search and Replace",nil,
+pprompt,
+"","",p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.Plain,p.Whole)
 -- Set Values for "odd text fields" from normal text field
 p.a.word = p.a.text
 p.a.wordlist = p.a.text

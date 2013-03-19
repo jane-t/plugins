@@ -1,10 +1,11 @@
 --[[
 @Title: Surname Summary Report
 @Author: Jane Taubman
-@LastUpdated: May 2012
-@Version: 1.1
+@LastUpdated: Feb 2013
+@Version: 1.2
 @Description: Counts and Lists All Surnames in the File
 1.1 Added earliest and latest dates for each surname and with report titles.
+1.2 Add Soundex column
 ]]
 function main()
     local tblSurnames = {} -- Define array for Surnames
@@ -34,18 +35,23 @@ function main()
     tblcount = {}
     tblMin2 = {}
     tblMax2 = {}
+    tblSoundex = {}
+    soundex = NewSoundex()
     for strSurname, iQty in pairs(tblSurnames) do
         table.insert(tblSurname,strSurname)
         table.insert(tblcount,iQty)
         table.insert(tblMin2,tblMin[strSurname] or 0)
         table.insert(tblMax2,tblMax[strSurname] or 0)
+        strCode = soundex(strSurname)
+        table.insert(tblSoundex,strCode)
     end
     local project = fhGetContextInfo('CI_PROJECT_NAME')
     fhOutputResultSetTitles("Surname Summary Report","Surname Summary Report for "..project, "Printed Date: %#x")
     fhOutputResultSetColumn('Surname', 'text',tblSurname,#tblSurname,80,'align_left',2,true)
+    fhOutputResultSetColumn('Soundex', 'text',tblSoundex,#tblSurname,40,'align_left',0,false)
     fhOutputResultSetColumn('Count', 'integer',tblcount,#tblSurname,40,'align_right',1,false)
-    fhOutputResultSetColumn('Earliest', 'integer',tblMin2,#tblSurname,40,'align_right',1,false)
-    fhOutputResultSetColumn('Latest', 'integer',tblMax2,#tblSurname,40,'align_right',1,false)
+    fhOutputResultSetColumn('Earliest', 'integer',tblMin2,#tblSurname,40,'align_right',0,false)
+    fhOutputResultSetColumn('Latest', 'integer',tblMax2,#tblSurname,40,'align_right',0,false)
 end
 ---------------------------------- Additional Functions
 function inc(i,s)
@@ -90,5 +96,47 @@ function compdate(year,minyear,maxyear)
     end
     return minyear,maxyear
 end
+
+function NewSoundex(tblSoundex)				-- Prototype Soundex Calculator
+ 
+	local tblSoundex = tblSoundex or { }		-- Soundex dictionary cache of previously coded Names
+	tblSoundex[""] = "Z000"				-- Seed with null string special case
+ 
+	local tblCodeNum = {				-- Soundex code number table
+		A=0,E=0,I=0,O=0,U=0,Y=0,		-- H=0,W=0,	-- H & W are ignored
+		B=1,F=1,P=1,V=1,
+		C=2,G=2,J=2,K=2,Q=2,S=2,X=2,Z=2,
+		D=3,T=3,
+		L=4,
+		M=5,N=5,
+		R=6
+	}
+    local strSoundex 
+    local tblSoundex = tblSoundex or {}
+	return function (strAnyName)
+		strAnyName = string.upper(strAnyName:gsub("[^%a]",""))			-- Make name upper case letters only
+		strSoundex = tblSoundex[strAnyName]				-- If already coded in cache then return previous Soundex code
+		if strSoundex then return strSoundex end
+		strSoundex = string.sub(strAnyName,1,1)	    			-- Soundex starts with initial letter
+		local strLastNum = tblCodeNum[strSoundex]				-- Set initial Soundex code number
+		for i = 2, string.len(strAnyName) do
+			local strCodeNum = tblCodeNum[string.sub(strAnyName,i,i)]	-- Step through Soundex code of each subsequent letter
+			if strCodeNum then
+				if strCodeNum > 0 and strCodeNum ~= strLastNum then	-- Not a vowel nor same as Soundex preceeding code
+					strSoundex = strSoundex..strCodeNum		-- So append Soundex code until 4 chars long
+					if string.len(strSoundex) == 4 then
+						tblSoundex[strAnyName] = strSoundex	-- Save code in cache for future quick lookup
+						return strSoundex
+					end
+				end
+				strLastNum = strCodeNum					-- Save as Soundex preceeding code, unless H or W
+			end
+		end
+		strSoundex = string.sub(strSoundex.."0000",1,4)				-- Pad code with zeroes to 4 chars long
+		tblSoundex[strAnyName] = strSoundex					-- Save code in cache for future quick lookup
+		return strSoundex
+	end -- anonymous function
+end -- function Soundex
+
 ---------------------------------- Call Main
 main()

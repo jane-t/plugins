@@ -1,0 +1,175 @@
+--[[
+@Title: Find Duplicate Citations
+@Author: Jane Taubman
+@Version: 1.2
+@LastUpdated: Feb 2013 
+@Description: Finds all Facts with more than 1 citation to the same source and optionally deletes second and subsequent citations.
+
+It is recommended that the list option is used first to allow checking of the items to be deleted, before using the delete option. 
+]]
+------------------------------------------------------------------ main
+
+function main()
+    tblOutput,iC = createResultTable()
+    local intButton = iupButtons("List or Delete All Duplicate Citations","Please Select from the following options","V",
+    "List All Duplicate Citations on Facts","Delete All Duplicate Citations on Facts")
+    if intButton == 0 then return end
+    if intButton == 2 and fhMessageBox("Warning\nPlease confirm deletion of the second and subsequent citations\n where the same source cited more than once for a fact", "MB_YESNO","MB_ICONEXCLAMATION") ~= 'Yes' then 
+        return 
+    end
+    -- Define Columns
+    tblOutput.indi = {title='Record',type='item',width=140,align='align_left',content={}}
+    tblOutput.fact = {title='Fact',type='item',width=140,align='align_left',content={}}
+    for i = 1,10 do
+        tblOutput['cite'..i] = {title='Cite '..i,type='item',width=140,align='align_left',content={}}
+    end
+    for _,sType in ipairs({'FAM','INDI'}) do
+        for pi in records(sType) do
+            for pfact in facts(pi) do
+                -- Add Columns
+                local i,j,k = 0,0,0
+                local tblDups = {}
+                local pfSource = fhNewItemPtr()
+                -- Build a list of sources
+                for pcite in childitem(pfact,'SOUR') do
+                    i = i + 1
+                    pfSource = fhGetValueAsLink(pcite)
+                    table.insert(tblDups,{rec=pcite:Clone(),id=fhGetRecordId(pfSource)})
+                end
+                table.sort(tblDups,function(a, b) return a.id > b.id end)
+                local bFound = false
+                local tblLast = {}
+                local tblList = {}
+
+                function outputLine(line)
+                    iC = iC + 1
+                    tblOutput.indi.content[iC] = pi:Clone()
+                    tblOutput.fact.content[iC] = pfact:Clone()
+                    if intButton == 1 then
+                        for j,tbline in ipairs(tblList) do
+                            tblOutput['cite'..j].content[iC] = tbline.rec:Clone()
+                        end
+                    else
+                        for j,tbline in ipairs(tblList) do
+                            if j == 1 then
+                                tblOutput['cite'..j].content[iC] = tbline.rec:Clone()
+                            else
+                                if not(fhDeleteItem(tbline.rec)) then error('Error Occured Deleting Citation') end
+                            end
+                        end
+                    end
+                end
+                for i,tblcite in ipairs(tblDups) do
+                    if i > 1 and tblLast.id == tblcite.id then
+                        if #tblList == 0 then tblList[1] = tblLast end
+                        tblList[#tblList + 1] = tblcite
+                    else
+                        if #tblList > 0 then
+                            -- Output Line
+                            outputLine(tblline)
+                            tblList = {}
+                            
+                        end
+                    end
+                    tblLast = tblcite
+                end
+                if #tblList > 0 then
+                    -- Output Line
+                    outputLine(tblline)
+                end
+            end
+        end
+    end
+    fhOutputResultSetTitles("All Individuals", "All Individuals", "Item List Example Date: %#x")
+    for t in tblOutput() do
+        fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+    end
+end
+------------------------------------------------------------------ custom functions
+
+function childitem(pi)
+    local pf = fhNewItemPtr()
+    local pf2 = fhNewItemPtr()
+    pf:MoveTo(pi,'~.SOUR')
+    return function ()
+        while pf:IsNotNull() do
+            pf2:MoveTo(pf)
+            pf:MoveNext('SAME_TAG')
+            if pf2:IsNotNull() then return pf2 end
+        end
+    end
+end
+------------------------------------------------------------------ standard functions
+
+function facts(pi)
+    local pf = fhNewItemPtr()
+    local pf2 = fhNewItemPtr()
+    pf:MoveToFirstChildItem(pi)
+    return function ()
+        while pf:IsNotNull() do
+            pf2:MoveTo(pf)
+            pf:MoveNext()
+            if fhIsFact(pf2) then return pf2 end
+        end
+    end
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+
+function iupButtons(strTitle,strMessage,strBoxType,...)
+    local intButton = 0 -- Returned value if X Close button is used
+    -- Create the GUI labels and buttons
+    local lblMessage = iup.label{title=strMessage,expand="YES"}
+    local lblLineSep = iup.label{separator="HORIZONTAL"}
+    local iupBox = iup.hbox{homogeneous="YES"}
+    if strBoxType == "V" then
+        iupBox = iup.vbox{homogeneous="YES"}
+    end
+    for intArgNum, strButton in ipairs(arg) do
+            local btnName = iup.button{title=strButton,expand="YES",padding="4",action=function() intButton=intArgNum return iup.CLOSE end}
+            iup.Append(iupBox,btnName)
+    end
+    -- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+    local dialogue = iup.dialog{title=strTitle,iup.vbox{lblMessage,lblLineSep,iupBox},dialogframe="YES",background="250 250 250",gap="8",margin="8x8"}
+    dialogue:show()
+    if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+    dialogue:destroy()
+    return intButton
+end -- function iupButtons
+------------------------------------------------------------------ call main
+main()
