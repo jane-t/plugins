@@ -1,8 +1,8 @@
 --[[
 @Title: Convert File Links 
 @Author: Jane Taubman
-@LastUpdated: 21 May 2012
-@Version: 1.4
+@LastUpdated: 25 March 2013
+@Version: 1.5
 @Description: Converts all object links to portable ones, creating cut out images for multimedia objects which have partial links.
 
 
@@ -16,6 +16,7 @@ V1.1  Added progress display and converted after removal of fhGetItemText functi
 V1.2  Handle Crop Rectangles which end outside the frame, tidy debug prints.
 V1.3 Add options to support copy of non image files.
 V1.4 Handle non-image & missing media, more cropping fixes, other minor updates (with thanks to Mike Tate).
+V1.5 Correct Maximum Size handing for partial images.
 ]]
 ProgressDisplay = {
 
@@ -344,7 +345,7 @@ while ptrRecord:IsNotNull() do
 		outFile = exportFolder..'O'..rcdId..'-'..fASID..'-'..name
 		if lfs.attributes(strFileName,"mode") == "file" then	-- File exists
 			if isImage then
-				ProcessImageFile(strFileName,outFile,tonumber(a),tonumber(b),tonumber(c),tonumber(d),200,200)
+				ProcessImageFile(strFileName,outFile,tonumber(a),tonumber(b),tonumber(c),tonumber(d),maxheight,maxwidth)
 			else -- Audio/Video/Word-processor file
 				CopyMediaFile(strFileName,outFile)
 			end
@@ -360,7 +361,7 @@ while ptrRecord:IsNotNull() do
 	outFile = exportFolder..'O'..rcdId..'-0-'..name
 	if lfs.attributes(strFileName,"mode") == "file"	-- Input file exists
 	and not lfs.attributes(outFile,"mode") then		-- Output file missing
-		if isImage then ProcessImageFile(strFileName,outFile,nil,nil,nil,nil,200,200) end
+		if isImage then ProcessImageFile(strFileName,outFile,nil,nil,nil,nil,maxheight,maxwidth) end
 	end
 	tblFileList[rcdId..'-0'] = {recordId=rcdID,asid='0',filename=outFile,form=strForm,title=strTitle}
 	table.insert(tblObjList,ptrRecord:Clone())
