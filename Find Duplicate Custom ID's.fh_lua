@@ -1,33 +1,59 @@
 --[[
 @Title: Find Duplicate Custom ID's
 @Author: Jane Taubman
-@Version: 1.0
-@LastUpdated: April 2012
-@Description: Searches Selected Record Type for Records with Duplicate Custom IDs
+@Version: 1.1
+@LastUpdated: March 2013
+@Description: Searches Selected Record Type(s) for Records with Duplicate Custom IDs
 ]]
-local tblId = {}
-local tblDup1 = {}
-local tblDup2 = {}
-pi = fhNewItemPtr()  -- declare pointer
-pi:MoveToFirstRecord("INDI") -- and set to the first record.
-while pi:IsNotNull() do
-    strId = fhGetItemText(pi,'~.REFN')
-    if strId  and strId ~= '' then
-        if  tblId[strId] then
-            -- Duplicate Found
-            table.insert(tblDup1,tblId[strId])
-            table.insert(tblDup2,pi:Clone())
-        else
-            tblId[strId] = pi:Clone()
+
+function main()
+    local tblId = {}
+    local tblDup1 = {}
+    local tblDup2 = {}
+    for type in recordtypes() do
+        for pi in records(type) do
+            strId = fhGetItemText(pi,'~.REFN')
+            if strId and strId ~= '' then
+                if tblId[strId] then
+                    -- Duplicate Found
+                    table.insert(tblDup1,tblId[strId])
+                    table.insert(tblDup2,pi:Clone())
+                else
+                    tblId[strId] = pi:Clone()
+                end
+            end
         end
     end
-    pi:MoveNext()
+    if #tblDup1 > 0 then
+        fhOutputResultSetTitles('Individuals with Duplicate Custom Ids')
+        fhOutputResultSetColumn('First Record', 'item', tblDup1, #tblDup1)
+        fhOutputResultSetColumn('Second Record', 'item', tblDup2, #tblDup1)
+    else
+        fhMessageBox('No Duplicates Found')
+    end
+end
+------------------ Functions
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
 end
 
-if  #tblDup1 > 0 then
-    fhOutputResultSetTitles('Individuals with Duplicate Custom Ids')
-    fhOutputResultSetColumn('First Record', 'item', tblDup1, #tblDup1)
-    fhOutputResultSetColumn('Second Record', 'item', tblDup2, #tblDup1)
-else
-    fhMessageBox('No Duplicates Found')
+function recordtypes()
+    local t = 0
+    local m = fhGetRecordTypeCount()
+    return function()
+        t = t + 1
+        if t <= m then
+            return fhGetRecordTypeTag(t)
+        end
+    end
 end
+------------------- Run Main
+main()
