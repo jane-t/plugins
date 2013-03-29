@@ -1,8 +1,8 @@
 --[[
 @Title: Check for Possible Duplicate Media
 @Author: Jane Taubman
-@Version: 1.1
-@LastUpdated: October 2012 
+@Version: 1.2
+@LastUpdated: February 2013 
 @Description: 
 This plugin checks all the media records in your project and compares the files linked to them looking for files 
 which are identical it will pick up both records which are linked to the same file and to those where the names 
@@ -12,12 +12,20 @@ By selecting each pair in turn, just drag over both cells, you can then select E
 the menu and merge the records together.
 Once the process is complete, it is recommended to use the "Check for Unlinked Media" plugin to clean up any duplicate files.
 V1.1 Add trap for Missing Files and report them on the Result Set.
-]]
+V1.2 Add Caching of File details between runs ]]
 
 function mainfunction()
     if fhGetContextInfo('CI_APP_MODE') ~= 'Project Mode' then
         fhMessageBox('This Plugin Requires a Project','MB_OK','MB_ICONEXCLAMATION')
         return
+    end
+    -- Get Previous Run Data / Set up Database
+    local dbenv,dbcon,bCreate = opendb(fhGetPluginDataFileName())
+    iCount = countrecords(dbcon)
+    if iCount and iCount > 0 then
+       local ans =  fhMessageBox('There are '..iCount..' Cached Records..\nDo you wish to use them?','MB_YESNO','MB_ICONQUESTION')
+       if ans == 'No' then clearrecords() 
+       elseif ans ~= 'Yes' then return end        
     end
     -- Define Columns
     tblOutput,iC = createResultTable()
@@ -27,6 +35,7 @@ function mainfunction()
     -- Build Duplicate List
     local rootfolder = fhGetContextInfo('CI_PROJECT_DATA_FOLDER')
     local medialist = {}
+    local filelist = {}
     local mediaCount = 0
     local pm = fhNewItemPtr()
     -- Quick Count Records
@@ -36,6 +45,7 @@ function mainfunction()
     end
     ProgressDisplay.Start('Searching All Media Please Wait',icnt)
     for pi in records('OBJE') do
+        local recordid = fhGetRecordId(pi)
         ProgressDisplay.SetMessage(fhGetDisplayText(pi))
         ProgressDisplay.Step(1)
         if ProgressDisplay.Cancel() then
@@ -48,8 +58,11 @@ function mainfunction()
         end
         local strlc = mediaFile:lower()
         if FileExists(mediaFile) then
-            local smd5 = md5.sumhexa(LoadFromFile(mediaFile))
-            local newmedia = {filename = fhGetValueAsText(pm), record = pi:Clone(), md5 = smd5}
+            local smd5 = chkrecord(dbcon,recordid)
+            if not(sdm5) then 
+               smd5 = md5.sumhexa(LoadFromFile(mediaFile))
+               updaterecord(dbcon,recordid,smd5)
+            end
             local newmedia = {filename = fhGetValueAsText(pm), record = pi:Clone(), md5 = smd5}
             -- Check for Duplicate
             bDup = false
@@ -93,9 +106,8 @@ end
 @LastUpdated: May 2012
 @Description: Allows easy adding of a Progress Bar to any long running Plugin
 ]]
-StrWhite = "255 255 255"
-ProgressDisplay = {
-    
+local StrWhite = "255 255 255" 
+ProgressDisplay = {   
     Start = function(strTitle,intMax) -- Create and start the Progress Display window controls
         if not dlgProgress then
             cancelflag = false
@@ -293,8 +305,68 @@ end -- function LoadFromFile
 function string.starts(String,Start)
     return string.sub(String,1,string.len(Start))==Start
 end
+-------------------------------------- SQL Lite Functions
+function opendb(dbname)
+    -- Check for Settings Database and create if needed
+    local db = fhGetPluginDataFileName()
+    local dbenv = assert (luasql.sqlite3())
+    -- connect to data source, if the file does not exist it will be created
+    dbcon = assert (dbenv:connect(db))
+
+    checkTable(dbcon,'medialist',
+    [[CREATE TABLE medialist(recordid BIGINT, 
+               md5 varchar(100), UNIQUE (recordid))
+    ]])
+    return dbenv,dbcon
+end
+function checkTable(dbcon,table,createString)
+    local sql = string.format([[SELECT count(name) as count FROM sqlite_master WHERE type='table' AND name='%s']],table)
+    local cur = assert(dbcon:execute(sql))
+    local rowcount = cur:fetch (row, "a")
+    cur:close()
+    if tonumber(rowcount) == 0 then
+        -- Table not found create it
+        res,err = assert(dbcon:execute(createString))
+    end
+end
+function closedb(dbenv,dbcon)
+    dbcon:close()
+    dbenv:close()
+end
+function countrecords(dbcon)
+    local sql = [[SELECT count(recordid) as count FROM medialist]]
+    local cur,err = assert(dbcon:execute(sql))
+    local row = cur:fetch({},'a')
+    cur:close()
+    if row then
+        return tonumber(row['count'])
+    else
+      return false
+    end
+end
+function chkrecord(dbcon,recordid)
+    local sql = string.format([[SELECT * FROM medialist where recordid=%s]],recordid)
+    local cur,err = assert(dbcon:execute(sql))
+    local row = cur:fetch({},'a')
+    cur:close()
+    if row then
+        return row['md5']
+    else
+      return false
+    end
+end
+function updaterecord(dbcon,recordid,md5)
+        local sql = string.format("INSERT OR IGNORE INTO medialist (recordid,md5) VALUES (%s,'%s')",recordid,md5)
+        local res = assert(dbcon:execute(sql))
+end
+function clearlist(dbcon)
+        local sql = "DELETE FROM medialist"
+        local res = assert(dbcon:execute(sql))
+end
+
 -------------------------------------- Call Main Function
 require 'lfs'
 require 'luacom'
 if not(loadrequire('md5')) then return end
+if not(loadrequire('luasql','luasql.sqlite3')) then return end
 mainfunction()

@@ -4,9 +4,9 @@
 @Version: 1.0
 @LastUpdated: January 2013
 @Description: Finds all Date fields with either Double Dates, Qualifiers 
-or matching a select date or date range and returns them as a result set.
+or matching a selected date or date range and returns them as a result set.
 
-Before, After To or From Dates are treated as simple dates.  
+Before, After To or From Dates can optionally be treated as simple dates.  
 So searching for 1901 will include facts with dates with Before 1901, but not Before 1902.
 ]]
 

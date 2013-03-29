@@ -1,13 +1,15 @@
 --[[
 @Title: Check for Unlinked Media
 @Author: Jane Taubman
-@Version: 1.5
-@LastUpdated: October 2012 
+@Version: 1.7
+@LastUpdated: January 2013
 @Description: Checks all the media files in the media folder are linked to media records the Project and optionally deletes unlinked files.
 V1.2  Added options for Moving or just listing files
 V1.3  Handles problems where users have the media incorrectly linked to the media folder (e.g using full path names)
 V1.4  Correct Issue where Project has special characters in the name,
 V1.5  Handle locally linked files with in the Media Folder with out Media Records.
+V1.6  Add more robust dirtree function (to handle Mac Directories with invalid windows characters in filenames.
+V1.7  Use newer dirtree version
 ]]
 require 'lfs'
 
@@ -192,7 +194,7 @@ end
 
 function dirtree(dir)
     assert(dir and dir ~= "", "directory parameter is missing or empty")
-    if string.sub(dir, -1) == "/" then
+    if string.sub(dir, -1) == "\\" then
         dir=string.sub(dir, 1, -2)
     end
     
@@ -202,12 +204,13 @@ function dirtree(dir)
                 entry=dir.."\\"..entry
                 local attr=lfs.attributes(entry)
                 coroutine.yield(entry,attr)
-                if attr.mode == "directory" then
+                if type(attr)=='table' and attr.mode == "directory" then
                     yieldtree(entry)
                 end
             end
         end
     end
+    
     return coroutine.wrap(function() yieldtree(dir) end)
 end
 

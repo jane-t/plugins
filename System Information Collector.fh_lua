@@ -2,30 +2,29 @@
 @Title: System Information Collector
 @Author: Jane Taubman
 @Version: 1.0
-@LastUpdated: May 2012 
+@LastUpdated: March 2013
 @Description: Creates simple text file containing information about 
 Family Historian version and Windows Service Level to send to support or post on a forum when looking for support.
 ]]
 function main()
+local message = ''
 for i,v in pairs(infoList()) do
 print(i,v)
+message = message .. '\n'..i..':\t'..v
 end
-
-
-
-
-
-
+clip = iup:clipboard()
+clip.text = message
+fhMessageBox('Information copied to Clipboard\n'..message)
 end
 ---------------------------------------
 function infoList()
 local itemList = {
- Name = fhGetContextInfo('CI_PROJECT_NAME'),
- AppData = fhGetContextInfo('CI_APP_DATA_FOLDER'),
- PrjData = fhGetContextInfo('CI_PROJECT_DATA_FOLDER'),
- Mode = fhGetContextInfo('CI_APP_MODE'),
- Version = string.format('%s.%s.%s',fhGetAppVersion()),
- Windows = getCmdData('Ver')
+ Project_Name = fhGetContextInfo('CI_PROJECT_NAME'),
+ Project_Data = fhGetContextInfo('CI_PROJECT_DATA_FOLDER'),
+ FH_Mode = fhGetContextInfo('CI_APP_MODE'),
+ FH_Version = string.format('%s.%s.%s',fhGetAppVersion()),
+ Application_Data = fhGetContextInfo('CI_APP_DATA_FOLDER'),
+ Windows_Version = getCmdData('Ver')
 }
 return itemList
 end
