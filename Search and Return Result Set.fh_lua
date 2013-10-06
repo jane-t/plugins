@@ -1,26 +1,32 @@
 --[[
 @title: Search and Return Result Set
 @author: Calico Pie
-@lastupdated: October 2012
-@version: 1.4
+@lastupdated: October 2013
+@version: 1.5
 @description:
 Search for a specified word or phrase in all text fields in the current project, with options to narrow the scope of the search.
 The matching fields are listed in a table in the Query Window result set, 
 with links back to each context of use (double-click on any Item to view it in the Property Box).
+1.5 Improve Fact Display
 1.4 Use prototype functions and fix issue with case sensitive searching.
 1.3 Added Whole Word option and improve the message prompting. 
 1.2 Added Case insensitive searching.
 ]]
--------------
--- Main Code
--------------
+------------------------------------------------------------------------------------------------- Main Function
 
-function mainfunction()
-    local tblRecord = {}
-    local tblItem = {}
-    local tblRecordType = {}
-    local tblItemDataRef = {}
-    local iCount = 0
+function main()
+    -- Check version
+    local v1,v2,v3 = fhGetAppVersion()
+	 if (v1*10000 + v2*100 + v3) < 50008 then     
+       fhMessageBox('Warning: An additional column will be shown as you are on a version less than 5.0.8 '..
+                    'please consider upgrading')
+	 end
+    local tblResults = createResultTable()
+    tblResults.itemDesc = {title='Item',type='text'}
+    tblResults.item     = {visibility='buddy'} 
+    tblResults.record   = {title='Record'}
+    tblResults.recordType  = {title='Type',type='text',width=40}
+    tblResults.itemDataRef = {title='Data Reference',type='text',width=120}
     -- Prompt for Options
     -- Prompt for confirmation using iup.GetParm %b are tick boxes
     -- set initial values
@@ -66,22 +72,22 @@ function mainfunction()
                     strFromString = strFromString:gsub('/',' ') -- Special Case remove // around surnames
                 end
                 if search(strFromString) then
-                    iCount = iCount + 1
-                    ptrRecord:MoveToRecordItem(ptr)
-                    tblItem[iCount]= ptr:Clone()
-                    tblRecord[iCount]= ptrRecord:Clone()
-                    tblRecordType[iCount]= fhGetTag(ptrRecord)
-                    tblItemDataRef[iCount]= BuildDR(ptr)
+                   -- Add Row
+       				tblResults:newRow()
+				       -- Set Columns
+                   ptrRecord:MoveToRecordItem(ptr)
+                   tblResults.item:set(ptr:Clone())
+						tblResults.itemDesc:set(fhGetDisplayText(ptr))
+						tblResults.record:set(ptrRecord:Clone())
+						tblResults.recordType:set(fhGetTag(ptrRecord))
+						tblResults.itemDataRef:set(BuildDR(ptr))
                 end
             end
         end
-        if iCount > 0 then
+        if tblResults:rowCount() > 0 then
             local title = 'Search for '..strSearch..' in '..fhGetContextInfo('CI_PROJECT_NAME')
             fhOutputResultSetTitles(title, title, "Date: %#x")
-            fhOutputResultSetColumn("Item", "item", tblItem, #tblItem, 180, "align_left")
-            fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
-            fhOutputResultSetColumn("Record Type", "text", tblRecordType, #tblRecordType, 40, "align_left")
-            fhOutputResultSetColumn("Item Data Reference", "text", tblItemDataRef, #tblItemDataRef, 140, "align_left")
+            tblResults:outputResults()            
         else
             fhMessageBox(strSearch..' Not Found')
         end
@@ -176,5 +182,58 @@ function allItems(...)
         until iPos > iTypeCount
     end
 end
--- Call Main
-mainfunction()
+function createResultTable()
+    local tblOutput_mt = {} -- create metatable
+    local iC = 0 -- Define count of lines
+    local tblOutput = {} -- Define Columns Table
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = 
+      function (t,k,v)
+        -- Set Values to Defaults if not supplied
+        if v.content == nil then v.content = {} end
+        if v.title == nil then v.title = k end
+        if v.type == nil then v.type = 'item' end
+        if v.width == nil then v.width = 140 end
+        if v.align == nil then v.align = 'align_left' end
+        if v.sort == nil then v.sort = 0 end
+        if v.sortAscending  == nil then v.sortAscending  = true end
+        if v.sortType  == nil then v.sortType  = 'default' end
+        if v.visibility == nil then v.visibility = 'show' end
+        v.set = 
+              function(self,value)
+                 self.content[iC] = value
+              end
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+      end
+    tblOutput_mt.__call = 
+       function (t)
+         local i = 0
+         local m = getmetatable(t)
+         local n = table.getn(m.seq)
+         return function ()
+            i = i + 1
+            if i <= n then 
+               return t[m.seq[i]] 
+            end
+        end
+      end
+    tblOutput.newRow = function(t)
+        iC = iC + 1
+    end
+    tblOutput.rowCount = function(t)
+        return iC
+    end
+    tblOutput.outputResults = function(self)
+        for l in self() do
+            fhOutputResultSetColumn(l.title, l.type, l.content, iC, l.width,l.align,l.sort,l.sortAscending,l.sortType,l.visibility)
+        end
+    end
+    setmetatable(tblOutput, tblOutput_mt)
+    return tblOutput
+end
+----------------------------------------------------------------------------------------------- Call Main
+main()

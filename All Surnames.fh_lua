@@ -4,26 +4,28 @@
 @lastupdated: August 2010
 @description:
 Script reads through all individuals and lists all variations of Names from the Name field
-and for married women lists them under there married names as well.
+and for married women lists them under their married names as well.
 
 Note All family as Spouse occurrences will be listed even if there is no marriage recorded.
 ]]
-
+function main()
 pi = fhNewItemPtr()    -- declare pointer
 pi:MoveToFirstRecord('INDI')    -- set the first to point to the first Note record
 pi2 = fhNewItemPtr()
 pfl = fhNewItemPtr()
 pf = fhNewItemPtr()
 count = 0
+local tbl = createResultTable
 -- Define Columns
-tblSurname = {}
-tblGivenAll = {}
-tblRecord = {}
-tblFamilyRecord = {}
-tblLifeDates = {}
-tblMarriageDate = {}
-tblNameType = {}
-tblTypes = {'Primary','Secondary','Married'}
+tbl.surname = {title="Surname",type="text",width=60,sort=1}
+tbl.given   = {title="Given Names", type="text", width=80,sort=2}
+tbl.type   = {title="Lifedates", type="text", width=40}
+tbl.lifedates   = {title="Lifedates", type="text", width=40}
+tbl.marriage = {title="Marriage", type="text",width=80)
+tbl.record   = {title="Record",width=160)
+tbl.familyrecord   = {title="Family Record",width=160)
+
+local tblTypes = {'Primary','Secondary','Married'}
 
 while not pi:IsNull() do
     -- Do Work Here
@@ -78,4 +80,56 @@ fhOutputResultSetColumn("Lifedates", "text", tblLifeDates, #tblSurname, 40, "ali
 fhOutputResultSetColumn("Marriage", "text", tblMarriageDate, #tblSurname, 80, "align_left")
 fhOutputResultSetColumn("Record", "item", tblRecord, #tblSurname, 160, "align_left")
 fhOutputResultSetColumn("Family", "item", tblFamilyRecord, #tblSurname, 160, "align_left")
+end
+function createResultTable()
+    local tblOutput_mt = {} -- create metatable
+    local iC = 0 -- Define count of lines
+    local tblOutput = {} -- Define Columns Table
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__index = self
+    tblOutput_mt.__newindex = 
+      function (t,k,v)
+        -- Set Values to Defaults if not supplied
+        if v.content == nil then v.content = {} end
+        if v.title == nil then v.title = k end
+        if v.type == nil then v.type = 'item' end
+        if v.width == nil then v.width = 140 end
+        if v.align == nil then v.align = 'align_left' end
+        v.set = 
+              function(self,value)
+                 self.content[iC] = value
+              end
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+      end
+    tblOutput_mt.__call = 
+       function (t)
+         local i = 0
+         local m = getmetatable(t)
+         local n = table.getn(m.seq)
+         return function ()
+            i = i + 1
+            if i <= n then 
+               return t[m.seq[i]] 
+            end
+        end
+      end
+    function tblOutput:newRow()
+        iC = iC + 1
+    end
+    
+    function tblOutput:outputResults()
+        for l in self() do
+            fhOutputResultSetColumn(l.title, l.type, l.content, iC, l.width,l.align)
+        end
+    end
+    setmetatable(tblOutput, tblOutput_mt)
+    return tblOutput
+end
 
+
+------------------------------------------------------------------------- Run Main 
+main()

@@ -1,8 +1,8 @@
 --[[
-@Title: Possible Problem Manager
+@Title: Possible Problem Report
 @Author: Jane Taubman
-@LastUpdated: July 2011
-@Version: 1.0
+@LastUpdated: July 2013
+@Version: 1.1
 @Description: Lists all Possible Date Problems, similar the standard Fact Date Warning Query,  
 but ignores those facts marked using Possible Problem Marker Plugin.
 ]]

@@ -2,13 +2,12 @@
 @Title: Add GRO Source
 @Author: Jane Taubman
 @LastUpdated: April 2012
-@Version: 1.1
+@Version: 1.2
 @Description: Add A GRO Index Source to an Event and optionally create the event and or set the fields.
-
 Records the Selected Source in a Parameter file for each Project. If run without a project the source record will 
 need to be selected each time.
-
-V1.1 Prevent error, when not able to use Project folder to store settings.
+1.1 Prevent error, when not able to use Project folder to store settings.
+1.2 Add options to record Quality and Entry Date
 ]]
 
 function file_exists(name)
@@ -18,6 +17,7 @@ function file_exists(name)
         return false
     end
 end
+
 function getFamS(ptr)
     local famsList = {}
     local ptrFam = fhNewItemPtr()
@@ -32,7 +32,7 @@ function getFamS(ptr)
 end
 ---------------------------------------------------------------Main Code
 require("iuplua")
---  Set up Defaults
+-- Set up Defaults
 period = {'Q1 Jan-Feb-Mar','Q2 Apr-May-Jun','Q3 Jul-Aug-Sep','Q4 Oct-Nov-Dec','January','February','March','April','May','June','July','August',
 'September','October','November','December'}
 strPeriod = table.concat(period,'|')..'|'
@@ -46,29 +46,34 @@ Year: %i
 Quarter: %l|{strPeriod}
 Registration District: %s
 Reference: %s
+Set Entry Date: %b
+Set Quality: %l|None|Unreliable|Questionable|Secondary Evidence|Primary Evidence|'
 ]]
 PromptDialogStr = PromptDialogStr:gsub('{strPeriod}',strPeriod)
 -- Get Source from Last Time
 parmfile = fhGetPluginDataFileName()
+pqual = 0
+pdate = 0
 if file_exists(parmfile) then
     dofile(parmfile)
 else
-    --  Get Source Record to use.
+    -- Get Source Record to use.
     ptrList = fhPromptUserForRecordSel('SOUR',1)
     if #ptrList == 0 then
         fhMessageBox('Source Not Selected Click Ok to End')
-		  return
+        return
     else
         psourceno = fhGetRecordId(ptrList[1])
     end
 end
 ptype = 0
-pqtr  = 0
+pqtr = 0
 pdistrict = ''
 pref = ' '
 pyear = 0
 events = {'BIRT','MARR','DEAT'}
 GROType = {'Birth','Marriage','Death'}
+tblA = {'Unreliable','Questionable','Secondary Evidence','Primary Evidence','<clear assessment>'}
 dtDate = fhNewDate()
 -- Get Current Record if Available
 ptrList = fhGetCurrentRecordSel('INDI')
@@ -78,10 +83,10 @@ else
     strName = '?'
 end
 -- Get GRO Information
-ret, psourceno, ptype,pyear, pqtr,pdistrict,pref =
+ret, psourceno, ptype,pyear, pqtr,pdistrict,pref,pdate,pqual =
 iup.GetParam("Add GRO Entry", param_action,
 strName..PromptDialogStr,
-psourceno, ptype,pyear, pqtr,pdistrict,pref)
+psourceno, ptype,pyear, pqtr,pdistrict,pref,pdate,pqual)
 -- Check for Cancel
 if not(ret) then
     return
@@ -96,9 +101,11 @@ if ptrSource:IsNull() then
 end
 -- Record Source Record ID
 if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
-  out = assert(io.open(parmfile, "wb"))
-  out:write('psourceno = '..psourceno)
-  assert(out:close())
+    out = assert(io.open(parmfile, "wb"))
+    out:write('psourceno = '..psourceno..'\n')
+    out:write('pdate = '..pdate..'\n')
+    out:write('pqual = '..pqual..'\n')
+    assert(out:close())
 end
 -- Allocate to Current Record
 if (ptype == 1) then
@@ -133,8 +140,8 @@ if ptrField:IsNull() then
     ptrField = fhCreateItem('DATE',ptrEvent)
 end
 dtDate = fhGetValueAsDate(ptrField)
-if  dtDate:IsNull() then
-	
+if dtDate:IsNull() then
+    
     dtDate:SetValueAsText(shortperiod[pqtr + 1]..' '..pyear)
     fhSetValueAsDate(ptrField,dtDate)
 end
@@ -146,14 +153,29 @@ if fhGetValueAsText(ptrField) == '' then
     fhSetValueAsText(ptrField,pdistrict)
 end
 -- Add Source
-ptrField = fhCreateItem('SOUR',ptrEvent)
-fhSetValueAsLink(ptrField,ptrSource)
-ptrField = fhCreateItem('PAGE',ptrField)
+ptrCite = fhCreateItem('SOUR',ptrEvent)
+fhSetValueAsLink(ptrCite,ptrSource)
+ptrField = fhCreateItem('PAGE',ptrCite)
 sourcepage = GROType[event]..' '..qtr..' '..pyear..' '..pdistrict..' '..pref
 fhSetValueAsText(ptrField,sourcepage)
+if pdate == 1 then
+    -- Record Entry Date
+    eDate = fhCallBuiltInFunction('today')
+    eDate2 = fhNewDate()
+    eDate2:SetSimpleDate(eDate)
+    -- .SOUR[1].DATA.DATE
+    ptrData = fhCreateItem('DATA',ptrCite)
+    ptrDate = fhCreateItem('DATE',ptrData)
+    fhSetValueAsDate(ptrDate,eDate2)
+end
+if pqual > 0 then
+    -- SOUR[1].QUAY
+    ptrQuay = fhCreateItem('QUAY',ptrCite)
+    fhSetValueAsText(ptrQuay,tblA[pqual])
+end
 -- Check Data
 ptrField:MoveTo(ptrEvent,'~.DATE')
-strResult  = fhCallBuiltInFunction('GetDataWarning',ptrField,1)
+strResult = fhCallBuiltInFunction('GetDataWarning',ptrField,1)
 if strResult ~= '' then
     strButton = fhMessageBox(strResult..'\nDo you wish to undo the entry','MB_YESNO','MB_ICONEXCLAMATION')
     if strButton == "Yes" then

@@ -2,7 +2,7 @@
 @Title: Install FHUG Icon Packs
 @Author: Jane Taubman
 @Version: 1.1
-@LastUpdated: May 2012 
+@LastUpdated: Sept 2013 
 @Description: Install Icon packs to the Icon Folder on Family Historian.
 The plugin will prompt for a zip file and create a subfolder in the FH icon folder
 with the same name as the zip file and add any bitmap (bmp) graphics files in to

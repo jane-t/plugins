@@ -1,62 +1,62 @@
---[[
-@Title: Launch Ancestral Sources for Census Entry
-@Author: Jane Taubman
-@LastUpdated: July 2011
-@Version: 1.6
-@Description: Launches Ancestral Sources for the Current Project
-and with the current selected person, for Census entry.
-@Changes
-1.5:  Added automatic search for Ancestral Sources in Both possible locations on x64 systems
-1.6:  Added check for the Autotext file which only exists in V2.
-]]
--- Check if file exists
-function file_exists(name)
-    local f=io.open(name,"r")
-    if f~=nil then io.close(f) return true
-    else
-        return false
-    end
-end
-
-strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
-strProgramFiles = os.getenv('PROGRAMFILES')
-strBaseProgram = '\\Ancestral Sources\\Ancestral Sources.exe'
-bAsFound = false
--- Find Ancestral Sources in Program Files or Program Files x86
-if file_exists(strProgramFiles..strBaseProgram) then
-    bAsFound = true
-else
-    strProgramFiles = os.getenv('PROGRAMW6432')
-    if strProgramFiles ~= nil and strProgramFiles ~= '' then
-        if  file_exists(strProgramFiles..strBaseProgram)  then
-            bAsFound = true
-        end
-    end
-end
-
-if bAsFound then
-    ---  Check for AS V2
-    strProgram = strProgramFiles..strBaseProgram
-    strCheckFile = strProgramFiles..'\\Ancestral Sources\\Autotext.xml'
-    if not(file_exists(strCheckFile)) then
-        fhMessageBox('Ancestral Sources Is Not Version 2')
-        return
-    else
-        strType = ' -SOURCE CENSUS'
-        -- Get Currently Selected Record
-        tblIndi =  fhGetCurrentRecordSel('INDI')
-        if  #tblIndi > 0 then
-            strInd = ' -IND '..fhGetRecordId(tblIndi[1])
-        else
-            strInd = ' '
-        end
-        bOK, iErrorCode, strErrorText = fhShellExecute(strProgram , ' -FILE "' .. strProjectFile .. '"'..strInd..strType)
-        if bOK then
-            return
-        else
-            fhMessageBox(strErrorText..' ('..iErrorCode..')')
-        end
-    end
-else
-    fhMessageBox('Ancestral Sources Not Found')
+--[[
+@Title: Launch Ancestral Sources for Census Entry
+@Author: Jane Taubman
+@LastUpdated: July 2011
+@Version: 1.6
+@Description: Launches Ancestral Sources for the Current Project
+and with the current selected person, for Census entry.
+@Changes
+1.5:  Added automatic search for Ancestral Sources in Both possible locations on x64 systems
+1.6:  Added check for the Autotext file which only exists in V2.
+]]
+-- Check if file exists
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+
+strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
+strProgramFiles = os.getenv('PROGRAMFILES')
+strBaseProgram = '\\Ancestral Sources\\Ancestral Sources.exe'
+bAsFound = false
+-- Find Ancestral Sources in Program Files or Program Files x86
+if file_exists(strProgramFiles..strBaseProgram) then
+    bAsFound = true
+else
+    strProgramFiles = os.getenv('PROGRAMW6432')
+    if strProgramFiles ~= nil and strProgramFiles ~= '' then
+        if  file_exists(strProgramFiles..strBaseProgram)  then
+            bAsFound = true
+        end
+    end
+end
+
+if bAsFound then
+    ---  Check for AS V2
+    strProgram = strProgramFiles..strBaseProgram
+    strCheckFile = strProgramFiles..'\\Ancestral Sources\\Autotext.xml'
+    if not(file_exists(strCheckFile)) then
+        fhMessageBox('Ancestral Sources Is Not Version 2')
+        return
+    else
+        strType = ' -SOURCE CENSUS'
+        -- Get Currently Selected Record
+        tblIndi =  fhGetCurrentRecordSel('INDI')
+        if  #tblIndi > 0 then
+            strInd = ' -IND '..fhGetRecordId(tblIndi[1])
+        else
+            strInd = ' '
+        end
+        bOK, iErrorCode, strErrorText = fhShellExecute(strProgram , ' -FILE "' .. strProjectFile .. '"'..strInd..strType)
+        if bOK then
+            return
+        else
+            fhMessageBox(strErrorText..' ('..iErrorCode..')')
+        end
+    end
+else
+    fhMessageBox('Ancestral Sources Not Found')
 end

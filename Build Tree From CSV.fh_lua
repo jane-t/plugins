@@ -1,24 +1,107 @@
 --[[
 @Title: Build Tree From CSV File
-@Author: Jane Taubman
-@LastUpdated: March 2011
-@Version: 1.0
+@Author: Calico Pie
+@LastUpdated: September 2013
+@Version: 1.1
 @Description: Takes simply formatted CSV file containing relationships and builds a tree.
 Designed to Work on a Blank File,  but will add records to an existing one.
+
+1.1 Fix issue with importfile name and improve code
 ]]
---- Include IUP Extensions
-require( "iuplua" )
+-- upvalue Tables
+local family = {}
+local individual = {}
+
+function main()
+--- Warn User (This can be removed once the script is customised to the CSV file you need to process)
+sMessage = [[
+This script is designed to process a CSV file containing the following columns
+
+ID,Forenames,Surname,Sex,BirthDate,BirthPlace,DeathDate,DeathPlace,Mother,Father,Spouse1,Spouse2
+
+It will need to be customised to match your exact file before use.
+
+Are you sure you wish to continue?
+]]
+local a = fhMessageBox(sMessage, "MB_YESNO","MB_ICONEXCLAMATION")
+if a == "No" then
+   return
+end
+-- End of New User Warning
+-- Check for Empty gedcom
+local ptrind = fhNewItemPtr()
+ptrind:MoveToFirstRecord("INDI")    -- set the first to point to the first Source record
+if ptrind:IsNotNull() then
+   sMessage = [[
+   Warning: Data exists in the GEDCOM file.
+   This script takes no account of existing data
+   and is better used on a New empty file.
+   Do you wish to continue?
+   ]]
+   a = fhMessageBox(sMessage, "MB_YESNO","MB_ICONEXCLAMATION")
+   if a == "No" then
+      return
+   end
+end
 --
-----------------------------------------------------------------------------
--- Functions
-----------------------------------------------------------------------------
+-- Prompt for file to Process
 --
---- GetExistingFile
--- @name GetExistingFile
--- @uses IUP
--- @param strTitle Prompt Title
--- @param strFilter Filter template e.g *.CSV;*.TXT
--- @param strFilterInfo  Display Text for the Selection
+local status,importfile = GetExistingFile("Select CSV File","*.csv","Comma Separated File","Documents")
+if status == '-1' then
+   return
+end
+
+-- Call loadfile function to return a table with the data in.
+local contents = loadfile(importfile)
+-- Create People
+for key,data in ipairs(contents) do
+   -- Create Name
+   name = data['Forenames']..' /'..data['Surname']..'/'
+   -- Create Individual Record
+   ptrind =  CreateInd(name, data['Sex'],data['ID'])
+   individual[data['ID']] = ptrind:Clone()  
+   AddEvent(ptrind,'BIRT',data['BirthDate'],data['BirthPlace'])  -- Add Birth Event
+   AddEvent(ptrind,'DEAT',data['DeathDate'],data['DeathPlace'])  -- Add Death Event
+end
+-- Build Families
+for key,data in ipairs(contents) do
+   -- Spouse 1
+   if data['Spouse1'] ~= nil then
+      CheckFamily(data['ID'],data['Spouse1'],individual[data['ID']],data['Sex'],'SPOU')
+   end
+   if data['Spouse2'] ~= nil then
+      CheckFamily(data['ID'],data['Spouse2'],individual[data['ID']],data['Sex'],'SPOU')
+   end
+   if data['Mother'] ~= nil and data['Father'] ~= nil then
+      CheckFamily(data['Father'],data['Mother'],individual[data['ID']],data['Sex'],'CHIL')
+   end
+   if data['Mother'] == nil and data['Father'] ~= nil then
+      -- Father Record Only Create Family For Father and Add Child
+      CheckFamily(data['Father'],'NOTKNOWN',individual[data['Father']],data['Sex'],'SPOU')
+      CheckFamily(data['Father'],'NOTKNOWN',individual[data['ID']],data['Sex'],'CHIL')
+   end
+   if data['Mother'] ~= nil and data['Father'] == nil then
+      -- Mother Record Only Create Family For Mother and add Child
+      CheckFamily(data['Mother'],'NOTKNOWN',individual[data['Father']],data['Sex'],'SPOU')
+      CheckFamily(data['Mother'],'NOTKNOWN',individual[data['ID']],data['Sex'],'CHIL')
+   end
+end
+-- Count records added 
+local ic,fc = 0,0
+for _,_ in pairs(individual) do ic=ic + 1 end
+for _,_ in pairs(family) do fc=fc + 1 end
+
+fhMessageBox(ic..' Individual Records Created '..fc..' family records created\n'..
+             'Original Record Ids are stored in the Custom ID field. '..
+             'Use the Work With Record Identifiers Tool to copy them to the FH record IDs if required.')
+end
+---------------------------------------------------------------------------- Functions
+--[[GetExistingFile
+@name GetExistingFile
+@param strTitle Prompt Title
+@param strFilter Filter template e.g *.CSV;*.TXT
+@param strFilterInfo  Display Text for the Selection
+]]
 function GetExistingFile(strTitle,strFilter,strFilterInfo,strDir)
    -- Creates a file dialog and sets its type, title, filter and filter info
    filedlg = iup.filedlg{dialogtype = "OPEN", title = strTitle,
@@ -30,11 +113,12 @@ function GetExistingFile(strTitle,strFilter,strFilterInfo,strDir)
    status = filedlg.status
    return status,filedlg.value
 end
---- fromCSV
--- @name	        fromCSV
--- @description   Converts a string to a table of fields, spliting according to normal CSV rules
--- @param         string  comma separated string
--- @return        table of fields
+--[[fromCSV
+@name	        fromCSV
+@description   Converts a string to a table of fields, spliting according to normal CSV rules
+@param         string  comma separated string
+@return        table of fields
+]]
 function fromCSV (s)
    s = s .. ','        -- ending comma
    local t = {}        -- table to collect fields
@@ -62,12 +146,13 @@ function fromCSV (s)
    until fieldstart > string.len(s)
    return t
 end
---- LoadFile
--- @name          loadfile
--- @description   Loads a CSV file into a table of tables
--- @usage         provide valid filename, use ipairs loop to use resulting table
--- @param         filename  filename to load
--- @return        table of tables
+--[[LoadFile
+@name          loadfile
+@description   Loads a CSV file into a table of tables
+@usage         provide valid filename, use ipairs loop to use resulting table
+@param         filename  filename to load
+@return        table of tables
+]]
 function loadfile(filename)
    contents = {}
    bheader = false
@@ -83,7 +168,7 @@ function loadfile(filename)
                data[header[i]] = field
             end
          end
-         contents[fields[1]] =data
+         table.insert(contents,data)
       else
          -- Grab Column Names
          header = fields
@@ -99,11 +184,14 @@ end
 -- @param         sex string either M or F or Male or Female SEX
 -- @param         customid string for records custom ID REFN
 -- @return        item pointer for new record
+
 function CreateInd(sName, sSex, sCustomID)
    local ptrInd = fhCreateItem("INDI")             -- create an Individual record and ret ptr to it
    local ptrName = fhCreateItem("NAME", ptrInd)    -- create a NAME field within this record, and ret ptr to it
    fhSetValueAsText(ptrName, sName)                -- set value of the name using passed in parameter
    local ptrSex = fhCreateItem("SEX", ptrInd)      -- create a SEX field within this record, and ret ptr to it
+   if sSex == 'M' then sSex = 'Male' 
+   elseif sSex == 'F' then sSex = 'Female' end
    fhSetValueAsText(ptrSex, sSex)                  -- set value of sex using passed in parameter
    local ptrCustomID = fhCreateItem("REFN",ptrInd) -- create a Custom ID field
    fhSetValueAsText(ptrCustomID,sCustomID)         -- set value of Custom ID using passed in parameter
@@ -138,7 +226,7 @@ function CheckFamily(spouse1,spouse2,ptrind,sex,type)
       end
    end
    if type == 'SPOU' then
-      if sex == 'M' then
+      if sex == 'Male' or sex=='M' or sex=='m' then
          AddFamilyMember('HUSB',ptrFam,ptrind)
       else
          AddFamilyMember('WIFE',ptrFam,ptrind)
@@ -183,90 +271,6 @@ function AddEvent(ptrRecord,event,eventdate,eventplace)
       fhSetValueAsText(ptrPlace, eventplace)           -- set value of the date-of-birth using passed in parameter
    end
 end
---
-----------------------------------------------------------------------------
--- Main Code
-----------------------------------------------------------------------------
---
---- Warn User (This can be removed once the script is customised to the CSV file you need to process)
---
-sMessage = [[
-This script is designed to process a CSV file containing the following columns
-
-ID,Forenames,Surname,Sex,BirthDate,BirthPlace,DeathDate,DeathPlace,Mother,Father,Spouse1,Spouse2
-
-It will need to be customised to match your exact file before use.
-
-Are you sure you wish to continue?
-]]
-a = fhMessageBox(sMessage, "MB_YESNO","MB_ICONEXCLAMATION")
-if a == "No" then
-   error('Script Aborted')
-end
---
--- End of New User Warning
---
--- Check for Empty gedcom
---
-ptrind = fhNewItemPtr()
-ptrind:MoveToFirstRecord("INDI")    -- set the first to point to the first Source record
-if ptrind:IsNotNull() then
-   sMessage = [[
-   Warning: Data exists in the GEDCOM file.
-   This script takes no account of existing data
-   and is better used on a New empty file.
-   Do you wish to continue?
-   ]]
-   a = fhMessageBox(sMessage, "MB_YESNO","MB_ICONEXCLAMATION")
-   if a == "No" then
-      error('Script Aborted')
-   end
-end
---
--- Prompt for file to Process
---
-status,strfilename = GetExistingFile("Select Missing File","*.csv","Comma Separated File","Documents")
-if status == '-1' then
-   error('Prompt Cancelled')
-end
--- Call loadfile function to return a table with the data in.
-contents = loadfile(importfile)
-family = {}
-individual = {}
--- Create People
-for key,data in pairs(contents) do
-   -- Create Name
-   name = data['Forenames']..' /'..data['Surname']..'/'
-   -- Create Individual Record
-   ptrind =  CreateInd(name, data['Sex'],data['ID'])
-   individual[data['ID']] = ptrind:Clone()
-   -- Add Birth Event
-   AddEvent(ptrind,'BIRT',data['BirthDate'],data['BirthPlace'])
-   AddEvent(ptrind,'DEAT',data['DeathDate'],data['DeathPlace'])
-end
--- Build Families
-for key,data in pairs(contents) do
-   -- Spouse 1
-   if data['Spouse1'] ~= nil then
-      CheckFamily(data['ID'],data['Spouse1'],individual[data['ID']],data['Sex'],'SPOU')
-   end
-   if data['Spouse2'] ~= nil then
-      CheckFamily(data['ID'],data['Spouse2'],individual[data['ID']],data['Sex'],'SPOU')
-   end
-   if data['Mother'] ~= nil and data['Father'] ~= nil then
-      CheckFamily(data['Father'],data['Mother'],individual[data['ID']],data['Sex'],'CHIL')
-   end
-   if data['Mother'] == nil and data['Father'] ~= nil then
-      -- Father Record Only Create Family For Father and Add Child
-      CheckFamily(data['Father'],'NOTKNOWN',individual[data['Father']],data['Sex'],'SPOU')
-      CheckFamily(data['Father'],'NOTKNOWN',individual[data['ID']],data['Sex'],'CHIL')
-   end
-   if data['Mother'] ~= nil and data['Father'] == nil then
-      -- Mother Record Only Create Family For Mother and add Child
-      CheckFamily(data['Mother'],'NOTKNOWN',individual[data['Father']],data['Sex'],'SPOU')
-      CheckFamily(data['Mother'],'NOTKNOWN',individual[data['ID']],data['Sex'],'CHIL')
-   end
-end
-
-
-
+------------------------------------------------------------------------------------------------------- Call Main
+require( "iuplua" )
+main()

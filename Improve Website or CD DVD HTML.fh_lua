@@ -1,9 +1,18 @@
 --[[
 @Title:			Improve Website or CD DVD HTML
 @Author:			Mike Tate
-@Version:			1.5
-@LastUpdated:	24 Sep 2012
-@Description:	Adds alternate & married names to Index of Names page, ensures all user URL are hyperlinks, and offers alternative image popups.
+@Version:			2.3
+@LastUpdated:	13 May 2013
+@Description:	Ensure user URL are hyperlinks, abbreviate long URL, offer alternative image popups, add Table of Contents pages, add alternate & married names and ids to Index of Names, and create GenDex file.
+@V2.3:				Add 'Table of Pictures/Reports/Downloads' pages, remove Folder selection from tab, plus minor improvements.
+@V2.2:				Replace integer with string parameters, add Custom Large Screen Popups, convert CP1252 to UTF-8, add Create GenDex tab, minor string library updates,
+					and swap first DOCTYPE line XHTML Strict with Transitional depending if target="_blank" is enabled (alternative is onclick="window.open(this.href,'_blank');return false;").
+@V2.1:				Improve analysis of anchor tag attributes without quotes, and fix indefinite strHyper loop bug.
+@V2.0:				Change GUI to tabbed interface.
+@V1.9:				Support more URL syntax options, replace {{DATE:QUAL}} with today's date & {{FILE:QUAL}} with file name/path, and other minor updates.
+@V1.8:				Ensure HTML symbols in Identities are escaped, and gsub pattern symbols in abbreviated URL are escaped.
+@V1.7:				Prototype ProgressBar, allow Identities per Name, abbreviate long URL, convert URL & popups on all HTML pages, process my locations database, plus bug fixes.
+@V1.6:				Improve fhpopup.js XHTML compatibility, exclude URL in image popup title, minor GUI changes, and update to FlgFolderExists().
 @V1.5:				Popups allow multi-line titles & single quotes (') in titles, retain original page position, and reduce initial zoom of small images.
 @V1.4:				Check HTML folder contains V5 XHTL, and fix minor bugs.
 @V1.3:				Provide alternative image popups feature.
@@ -16,7 +25,7 @@
 @V1.0:				Initial version.
 ]]
 	StrPlugin		= "Improve Website or CD DVD HTML"	-- Plugin title & version
-	StrVersion	= " Version 1.5 "
+	StrVersion	= " Version 2.3 "
 
 	require "iuplua"										-- To access GUI window builder
 	require "lfs"											-- To access LUA filing system
@@ -2211,7 +2220,7 @@ span.lbIEFix { padding: 0.5em 0.8em !important; }
 .lytetip .lbWarning { background: #FFFFAA; border: 1px solid #FFAD33; }
 ]=]
 
-Str_fhpopup_js = [=[
+Str_fhpopup_custom = [=[
   /*
    * Family Historian JavaScript Image Popup Function
    * fhpopup(id) takes an anchor tag id and creates the HTML script to render in the popup window
@@ -2231,11 +2240,12 @@ Str_fhpopup_js = [=[
 
    openwindow=window.open('','popup','channelmode=no,fullscreen=no,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=yes,resizable=yes');
    openwindow.document.writeln('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">');
-   openwindow.document.writeln('<html>');
+   openwindow.document.writeln('<html xmlns="http://www.w3.org/1999/xhtml">');
    openwindow.document.writeln(' <head>');
    openwindow.document.writeln('  <title>popup</title>');
-   openwindow.document.writeln('  <link rel="stylesheet" href="fhstyle.css">');
+   openwindow.document.writeln('  <link type="text/css" rel="stylesheet" href="fhstyle.css" />');
    openwindow.document.writeln('  <script type="text/javascript">');
+   openwindow.document.writeln('//<![CDATA[');
 
    openwindow.document.writeln('var original_height = '+height+';');
    openwindow.document.writeln('var original_width = '+width+';');
@@ -2348,18 +2358,19 @@ Str_fhpopup_js = [=[
    openwindow.document.writeln(' return n_body && (!n_result || (n_result > n_body)) ? n_body : n_result;');
    openwindow.document.writeln('}');
 
+   openwindow.document.writeln('//]]>');
    openwindow.document.writeln('  </script>');
    openwindow.document.writeln(' </head>');
-   openwindow.document.writeln(' <body>');
+   openwindow.document.writeln(' <body onload="fhresize(-9)">');
    openwindow.document.writeln(' <form style="position:fixed; top:2px; left:2px; z-index:1;" action="javascript:void(0)">');
-   openwindow.document.writeln('  <input type="button" value="Reset" onclick="fhresize(0)">');
-   openwindow.document.writeln('  <input type="button" value="Smaller" onclick="fhsmaller()">');
-   openwindow.document.writeln('  <input type="button" value="Bigger" onclick="fhbigger()">');
-   openwindow.document.writeln('  <input type="button" value="Close" onclick="javascript:self.close()">');
+   openwindow.document.writeln('  <input type="button" value="Reset" onclick="fhresize(0)" />');
+   openwindow.document.writeln('  <input type="button" value="Smaller" onclick="fhsmaller()" />');
+   openwindow.document.writeln('  <input type="button" value="Bigger" onclick="fhbigger()" />');
+   openwindow.document.writeln('  <input type="button" value="Close" onclick="javascript:self.close()" />');
    openwindow.document.writeln(' </form>');
    openwindow.document.writeln(' <div style="position:absolute; margin: 0px 2px; z-index:0; text-align:center;">');
    openwindow.document.writeln('  <p style="font-size:80%;">&nbsp;</p>');
-   openwindow.document.writeln('  <p><img onload="fhresize(-9)" src="'+filename+'" title="'+caption+'" alt="'+caption+'"></p>');
+   openwindow.document.writeln('  <p><img src="'+filename+'" title="'+caption+'" alt="'+caption+'" /></p>');
    openwindow.document.writeln('  <p><b>'+caption+'</b></p>');
    openwindow.document.writeln(' </div>');
    openwindow.document.writeln(' </body>');
@@ -2395,17 +2406,193 @@ Str_fhpopup_js = [=[
   }
 ]=]
 
+Str_fhpopup_screen = [=[
+	/*
+	 * Family Historian JavaScript Fullscreen Image Popup Function
+	 * fhpopup(id) takes an anchor tag id and creates the HTML script to render in the popup window
+	 * fhresize() adjusts the width and height of the image to nearly fill the window depending on their aspect ratios
+	 */
+	function fhpopup(id)
+	{
+	 var filename = document.getElementById(id).getAttribute("href");
+	 var caption = document.getElementById(id).getAttribute("title");
+	 openwindow=window.open('','popup','channelmode=no,fullscreen=no,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=yes,resizable=yes');
+	 openwindow.document.writeln('<html><head><title>popup</title>');
+	 openwindow.document.writeln('<link type="text/css" rel="stylesheet" href="fhstyle.css">');
+	 openwindow.document.writeln('<script type="text/javascript">');
+	 openwindow.document.writeln('function fhresize()');
+	 openwindow.document.writeln('{');
+	 openwindow.document.writeln(' var window_height = document.body.clientHeight;');
+	 openwindow.document.writeln(' var window_width = document.body.clientWidth;');
+	 openwindow.document.writeln(' var image_height = document.images[0].height;');
+	 openwindow.document.writeln(' var image_width = document.images[0].width;');
+	 openwindow.document.writeln(' var height_ratio = image_height / window_height;');
+	 openwindow.document.writeln(' var width_ratio = image_width / window_width;');
+	 openwindow.document.writeln(' if (height_ratio > width_ratio)');
+	 openwindow.document.writeln(' {');
+	 openwindow.document.writeln('  document.images[0].style.height = "90%";');
+	 openwindow.document.writeln('  document.images[0].style.width = "auto";');
+	 openwindow.document.writeln(' }');
+	 openwindow.document.writeln(' else');
+	 openwindow.document.writeln(' {');
+	 openwindow.document.writeln('  document.images[0].style.height = "auto";');
+	 openwindow.document.writeln('  document.images[0].style.width = "95%";');
+	 openwindow.document.writeln(' }');
+	 openwindow.document.writeln('}');
+	 openwindow.document.writeln('</script>');
+	 openwindow.document.writeln('</head><body><center>');
+	 openwindow.document.writeln('<form action="javascript:void(0)">');
+	 openwindow.document.writeln('<input type="button" value="Close Popup Window" onclick="javascript:self.close()">');
+	 openwindow.document.writeln('</form>');
+	 openwindow.document.writeln('<p><img src="'+filename+'" title="'+caption+'" alt="'+caption+'" onload="fhresize()" border="1"></p>');
+	 openwindow.document.writeln('<p><b>'+caption+'</b></p>');
+	 openwindow.document.writeln('</center></body></html>');
+	 openwindow.document.close();
+	 openwindow.focus();
+	}
+]=]
+
+	TblUTF = { }										-- Table of Code Page 1252 to UTF-8 multi-byte encodings as defined at http://en.wikipedia.org/wiki/UTF-8
+	TblUTF["€"] = string.char(0xE2,0x82,0xAC)
+	TblUTF[string.char(0x81)]= ""
+	TblUTF["‚"] = string.char(0xE2,0x80,0x9A)
+	TblUTF["ƒ"] = string.char(0xC6,0x92)
+	TblUTF["„"] = string.char(0xE2,0x80,0x9E)
+	TblUTF["…"] = string.char(0xE2,0x80,0xA6)
+	TblUTF["†"] = string.char(0xE2,0x80,0xA0)
+	TblUTF["‡"] = string.char(0xE2,0x80,0xA1)
+	TblUTF["ˆ"] = string.char(0xCB,0x86)
+	TblUTF["‰"] = string.char(0xE2,0x80,0xB0)
+	TblUTF["Š"] = string.char(0xC5,0xA0)
+	TblUTF["‹"] = string.char(0xE2,0x80,0xB9)
+	TblUTF["Œ"] = string.char(0xC5,0x92)
+	TblUTF[string.char(0x8D)]= ""
+	TblUTF["Ž"] = string.char(0xC5,0xBD)
+	TblUTF[string.char(0x8F)]= ""
+	TblUTF[string.char(0x90)]= ""
+	TblUTF["‘"] = string.char(0xE2,0x80,0x98)
+	TblUTF["’"] = string.char(0xE2,0x80,0x99)
+	TblUTF["“"] = string.char(0xE2,0x80,0x9C)
+	TblUTF["”"] = string.char(0xE2,0x80,0x9D)
+	TblUTF["•"] = string.char(0xE2,0x80,0xA2)
+	TblUTF["–"] = string.char(0xE2,0x80,0x93)
+	TblUTF["—"] = string.char(0xE2,0x80,0x94)
+	TblUTF["˜"] = string.char(0xCB,0x9C)
+	TblUTF["™"] = string.char(0xE2,0x84,0xA2)
+	TblUTF["š"] = string.char(0xC5,0xA1)
+	TblUTF["›"] = string.char(0xE2,0x80,0xBA)
+	TblUTF["œ"] = string.char(0xC5,0x93)
+	TblUTF[string.char(0x9D)]= ""
+	TblUTF["ž"] = string.char(0xC5,0xBE)
+	TblUTF["Ÿ"] = string.char(0xC5,0xB8)
+	TblUTF[string.char(0xA0)]= string.char(0xC2,0xA0)		-- No Break Space
+	TblUTF["¡"] = string.char(0xC2,0xA1)
+	TblUTF["¢"] = string.char(0xC2,0xA2)
+	TblUTF["£"] = string.char(0xC2,0xA3)
+	TblUTF["¤"] = string.char(0xC2,0xA4)
+	TblUTF["¥"] = string.char(0xC2,0xA5)
+	TblUTF["¦"] = string.char(0xC2,0xA6)
+	TblUTF["§"] = string.char(0xC2,0xA7)
+	TblUTF["¨"] = string.char(0xC2,0xA8)
+	TblUTF["©"] = string.char(0xC2,0xA9)
+	TblUTF["ª"] = string.char(0xC2,0xAA)
+	TblUTF["«"] = string.char(0xC2,0xAB)
+	TblUTF["¬"] = string.char(0xC2,0xAC)
+	TblUTF["­"] = string.char(0xC2,0xAD)
+	TblUTF["®"] = string.char(0xC2,0xAE)
+	TblUTF["¯"] = string.char(0xC2,0xAF)
+	TblUTF["°"] = string.char(0xC2,0xB0)
+	TblUTF["±"] = string.char(0xC2,0xB1)
+	TblUTF["²"] = string.char(0xC2,0xB2)
+	TblUTF["³"] = string.char(0xC2,0xB3)
+	TblUTF["´"] = string.char(0xC2,0xB4)
+	TblUTF["µ"] = string.char(0xC2,0xB5)
+	TblUTF["¶"] = string.char(0xC2,0xB6)
+	TblUTF["·"] = string.char(0xC2,0xB7)
+	TblUTF["¸"] = string.char(0xC2,0xB8)
+	TblUTF["¹"] = string.char(0xC2,0xB9)
+	TblUTF["º"] = string.char(0xC2,0xBA)
+	TblUTF["»"] = string.char(0xC2,0xBB)
+	TblUTF["¼"] = string.char(0xC2,0xBC)
+	TblUTF["½"] = string.char(0xC2,0xBD)
+	TblUTF["¾"] = string.char(0xC2,0xBE)
+	TblUTF["¿"] = string.char(0xC2,0xBF)
+	TblUTF["À"] = string.char(0xC3,0x80)
+	TblUTF["Á"] = string.char(0xC3,0x81)
+	TblUTF["Â"] = string.char(0xC3,0x82)
+	TblUTF["Ã"] = string.char(0xC3,0x83)
+	TblUTF["Ä"] = string.char(0xC3,0x84)
+	TblUTF["Å"] = string.char(0xC3,0x85)
+	TblUTF["Æ"] = string.char(0xC3,0x86)
+	TblUTF["Ç"] = string.char(0xC3,0x87)
+	TblUTF["È"] = string.char(0xC3,0x88)
+	TblUTF["É"] = string.char(0xC3,0x89)
+	TblUTF["Ê"] = string.char(0xC3,0x8A)
+	TblUTF["Ë"] = string.char(0xC3,0x8B)
+	TblUTF["Ì"] = string.char(0xC3,0x8C)
+	TblUTF["Í"] = string.char(0xC3,0x8D)
+	TblUTF["Î"] = string.char(0xC3,0x8E)
+	TblUTF["Ï"] = string.char(0xC3,0x8F)
+	TblUTF["Ð"] = string.char(0xC3,0x90)
+	TblUTF["Ñ"] = string.char(0xC3,0x91)
+	TblUTF["Ò"] = string.char(0xC3,0x92)
+	TblUTF["Ó"] = string.char(0xC3,0x93)
+	TblUTF["Ô"] = string.char(0xC3,0x94)
+	TblUTF["Õ"] = string.char(0xC3,0x95)
+	TblUTF["Ö"] = string.char(0xC3,0x96)
+	TblUTF["×"] = string.char(0xC3,0x97)
+	TblUTF["Ø"] = string.char(0xC3,0x98)
+	TblUTF["Ù"] = string.char(0xC3,0x99)
+	TblUTF["Ú"] = string.char(0xC3,0x9A)
+	TblUTF["Û"] = string.char(0xC3,0x9B)
+	TblUTF["Ü"] = string.char(0xC3,0x9C)
+	TblUTF["Ý"] = string.char(0xC3,0x9D)
+	TblUTF["Þ"] = string.char(0xC3,0x9E)
+	TblUTF["ß"] = string.char(0xC3,0x9F)
+	TblUTF["à"] = string.char(0xC3,0xA0)
+	TblUTF["á"] = string.char(0xC3,0xA1)
+	TblUTF["â"] = string.char(0xC3,0xA2)
+	TblUTF["ã"] = string.char(0xC3,0xA3)
+	TblUTF["ä"] = string.char(0xC3,0xA4)
+	TblUTF["å"] = string.char(0xC3,0xA5)
+	TblUTF["æ"] = string.char(0xC3,0xA6)
+	TblUTF["ç"] = string.char(0xC3,0xA7)
+	TblUTF["è"] = string.char(0xC3,0xA8)
+	TblUTF["é"] = string.char(0xC3,0xA9)
+	TblUTF["ê"] = string.char(0xC3,0xAA)
+	TblUTF["ë"] = string.char(0xC3,0xAB)
+	TblUTF["ì"] = string.char(0xC3,0xAC)
+	TblUTF["í"] = string.char(0xC3,0xAD)
+	TblUTF["î"] = string.char(0xC3,0xAE)
+	TblUTF["ï"] = string.char(0xC3,0xAF)
+	TblUTF["ð"] = string.char(0xC3,0xB0)
+	TblUTF["ñ"] = string.char(0xC3,0xB1)
+	TblUTF["ò"] = string.char(0xC3,0xB2)
+	TblUTF["ó"] = string.char(0xC3,0xB3)
+	TblUTF["ô"] = string.char(0xC3,0xB4)
+	TblUTF["õ"] = string.char(0xC3,0xB5)
+	TblUTF["ö"] = string.char(0xC3,0xB6)
+	TblUTF["÷"] = string.char(0xC3,0xB7)
+	TblUTF["ø"] = string.char(0xC3,0xB8)
+	TblUTF["ù"] = string.char(0xC3,0xB9)
+	TblUTF["ú"] = string.char(0xC3,0xBA)
+	TblUTF["û"] = string.char(0xC3,0xBB)
+	TblUTF["ü"] = string.char(0xC3,0xBC)
+	TblUTF["ý"] = string.char(0xC3,0xBD)
+	TblUTF["þ"] = string.char(0xC3,0xBE)
+	TblUTF["ÿ"] = string.char(0xC3,0xBF)
+
 -- Global Data Constants Definition --
 function PresetGlobalConstants()
 
 	-- GUI Global Constants
 
-	StrRed				= "255 000 000"						-- Color attributes
-	StrAmber			= "250 160 000"
-	StrGreen			= "000 120 000"
-	StrBlue			= "000 000 255"
+	StrRed				= "255 0 0"							-- Color attributes (must exclude leading zeros & spaces to allow value comparisons)
+	StrAmber			= "250 160 0"
+	StrGreen			= "0 120 0"
+	StrBlue			= "0 0 255"
 	StrGray			= "120 120 120"
-	StrBlack			= "000 000 000"
+	StrBlack			= "0 0 0"
 	StrWhite			= "255 255 255"
 	StrGap 			= "2"									-- Gap & Margin attributes
 	StrMinMargin		= "1x1"
@@ -2417,14 +2604,7 @@ function PresetGlobalConstants()
 	IntArialBold		= 4
 	IntTahomaPlain	= 5
 	IntTahomaBold	= 6
-	StrFontFace		= string.gsub(iup.GetGlobal("DEFAULTFONT"),",.*","")
-	IntIndexPrimary		= 1
-	IntIndexAlternate	= 2
-	IntIndexMarried		= 3
-	IntIndexEveryone	= 4
-	IntPopupLytebox4	= 1
-	IntPopupLytebox5	= 2
-	IntPopupCustom		= 3
+	StrFontFace		= iup.GetGlobal("DEFAULTFONT"):gsub(",.*","")
 
 	-- Filename Global Constants
 
@@ -2432,11 +2612,11 @@ function PresetGlobalConstants()
 
 	StrStickyFile = fhGetPluginDataFileName()
 	-- Allow plugins with variant filenames to use same plugin data files
-	StrStickyFile = string.gsub(StrStickyFile,"\\"..StrPlugin..".+%.[D,d][A,a][T,t]$","\\"..StrPlugin..".dat")
+	StrStickyFile = StrStickyFile:gsub("\\"..StrPlugin..".+%.[D,d][A,a][T,t]$","\\"..StrPlugin..".dat")
 	if StrStickyFile == "" then
 		-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
 		StrStickyFile = fhGetContextInfo("CI_GEDCOM_FILE")
-		StrStickyFile = string.gsub(StrStickyFile, "%.[G,g][E,e][D,d]", ".fh_data")
+		StrStickyFile = StrStickyFile:gsub("%.[G,g][E,e][D,d]",".fh_data")
 		lfs.mkdir(StrStickyFile)
 		StrStickyFile = StrStickyFile.."\\Plugin Data"
 		lfs.mkdir(StrStickyFile)
@@ -2444,7 +2624,7 @@ function PresetGlobalConstants()
 	end
 
 	-- Plugin data folder path name
-	StrPluginPath = string.gsub(StrStickyFile,"\\"..StrPlugin.."%.[D,d][A,a][T,t]$","")
+	StrPluginPath = StrStickyFile:gsub("\\"..StrPlugin.."%.[D,d][A,a][T,t]$","")
 
 	-- Plugin data file root name
 	local strPluginRoot = StrPluginPath.."\\"..StrPlugin
@@ -2456,23 +2636,49 @@ function PresetGlobalConstants()
 end -- function PresetGlobalConstants
 
 -- Split a string using separator --
-function string:split(sep)
-	local sep = sep or ":"
+function string.split(str,sep)
+	local sep = sep or ","
 	local fields = {}
 	local pattern = string.format("([^%s]+)", sep)
-	self:gsub(pattern, function(c) fields[#fields+1] = c end)
+	str:gsub(pattern, function(c) fields[#fields+1] = c end)
 	return fields
-end -- function string:split
+end -- function string.split
 
 -- Split a string into numbers using separators space or comma or x --
-function string:SplitNumbers()
+function string.SplitNumbers(self)
 	local tblNum = {}
 	self:gsub("([^%s,x]+)", function(c) tblNum[#tblNum+1] = c end)
 	for i=1, #tblNum do
 		tblNum[i] = tonumber(tblNum[i])
 	end
 	return tblNum
-end -- function string:SplitNumbers
+end -- function string.SplitNumbers
+
+-- Hide magic pattern symbols	^ $ ( ) % . [ ] * + - ?
+function string.plain(strText)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character,
+	-- where %% is the % escape, and %1 is the original character capture.
+	strText = (strText or ""):gsub("(%W)","%%%1")
+	return strText
+end -- function string.plain
+
+-- string.matches is plain text version of string.match()
+function string.matches(strText,strFind,intInit)
+	strFind = (strFind or ""):gsub("(%W)","%%%1")						-- Hide magic pattern symbols
+	return strText:match(strFind,intInit)
+end -- function string.matches
+
+-- string.replace is plain text version of string.gsub()
+function string.replace(strTxt,strOld,strNew,intNum)
+	strOld = (strOld or ""):gsub("(%W)","%%%1")							-- Hide magic pattern symbols
+	return strTxt:gsub(strOld,function() return strNew end,intNum)	-- Hide % capture symbols
+end -- function string.replace
+
+-- string.convert is pattern without captures version of string.gsub()
+function string.convert(strTxt,strOld,strNew,intNum)
+	strNew = strNew:gsub("%%","%%%%")										-- Hide % capture symbols
+	return strTxt:gsub(strOld,strNew,intNum)
+end -- function string.convert
 
 -- Check if file exists --
 function FlgFileExists(strFileName)
@@ -2485,7 +2691,7 @@ end -- function FlgFileExists
 
 -- Check if folder exists --
 function FlgFolderExists(strFolderName)
-	if lfs.attributes(strFolderName,"mode") == "directory" then
+	if lfs.attributes(strFolderName:gsub("\\$",""),"mode") == "directory" then
 		return true
 	else
 		return false
@@ -2508,42 +2714,6 @@ function SaveStringToFile(strString,strFileName)
 	assert(fileHandle:close())
 end -- function SaveStringToFile
 
--- Load string from file --
-function StrLoadFromFile(strFileName)
-	local fileHandle = OpenFile(strFileName,"r")
-	local strString = fileHandle:read("*all")
-	assert(fileHandle:close())
-	return strString
-end -- function StrLoadFromFile
-
--- Return the Path, Filename, and extension as 3 values --
-function SplitFilename(strFilename)
-	return string.match(strFilename, "(.-)([^\\]-([^%.]+))$")
-end -- function SplitFilename
-
--- Return a Directory Tree entry & attributes on each iteration --
-function DirTree(strDir)
-	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
-	if string.sub(strDir, -1) == "/" then
-		strDir = string.sub(strDir, 1, -2)		-- Remove trailing "/"
-	end
-    
-	local function doYieldTree(strDir)
-		for strEntry in lfs.dir(strDir) do
-			if strEntry ~= "." and strEntry ~= ".." then
-				strEntry = strDir.."\\"..strEntry
-				local tblAttr = lfs.attributes(strEntry)
-				coroutine.yield(strEntry,tblAttr)
-				if tblAttr.mode == "directory" then
-					doYieldTree(strEntry)
-				end
-			end
-		end
-	end -- local function doYieldTree
-
-	return coroutine.wrap(function() doYieldTree(strDir) end)
-end -- function DirTree
-
 -- Delete file if it exists --
 function DeleteFile(strFileName)
 	if FlgFileExists(strFileName) then
@@ -2551,30 +2721,49 @@ function DeleteFile(strFileName)
 		if fileHandle == nil then
 			local intRepeat = 1
 			repeat
-				if intRepeat > 1 and ShowStatusMessage then ShowStatusMessage(StrRed,string.gsub(strError,strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
+				if intRepeat > 1 and ShowStatusMessage then ShowStatusMessage(StrRed,strError:gsub(strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
 				fhSleep(300,100)
 				if FlgFileExists(strFileName) then
 					fileHandle, strError = os.remove(strFileName)
 				end
 				intRepeat = intRepeat + 1
 			until fileHandle ~= nil or intRepeat > 10
-			if intRepeat > 10 and not ShowStatusMessage then error(string.gsub(strError,strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
+			if intRepeat > 10 and not ShowStatusMessage then error(strError:gsub(strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
 		end
 	end
 end -- function DeleteFile
 
-function DoExecute(strExecutable, strParameter)
-	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable, strParameter)
-	if not isOK then
-		fhMessageBox(strErrorText.." ("..intErrorCode..")")
+-- Encode HTML symbols into &***; escape sequences --
+function StrHTML_Encode(strHTML)
+	-- "\n" newline is encoded as "<br>" tag [which must be unencoded from "&lt;br&gt;" to "<br>"]
+	local tblEncodings = {
+		{"%c"," "},	{"&","&amp;"},	{"<","&lt;"},	{">","&gt;"},	{"\'","&apos;"},	{"\"","&quot;"},	{"\n","<br>"},
+	}
+	if strHTML then
+		for i, tblEncode in ipairs(tblEncodings) do
+local x = tblEncode[1]
+			strHTML = strHTML:gsub(tblEncode[1],tblEncode[2])
+		end
+	else
+		strHTML = ""
 	end
-end -- function DoExecute
+	return strHTML
+end -- function StrHTML_Encode
 
--- Inhibit Regular Expression magic characters ^$()%.[]*+-?)
-function StrPlainText(strText)
-	-- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
-	return strText:gsub("(%W)","%%%1")
-end -- function StrPlainText
+-- Translate Code Page 1252 to UTF-8 multi-byte encoding --
+function StrCP1252_UTF8(strText)
+	if strText:match("[€-ÿ]") then								-- If line contains CP1252 characters that need translating then
+		local strTran = ""
+		local strChar = ""
+		for i=1, strText:len() do									-- Step through each character in line
+			strChar = strText:sub(i,i)
+			strChar = TblUTF[strChar] or strChar				-- Perform character translation to UTF-8 bytes
+			strTran = strTran..strChar
+		end
+		strText = strTran
+	end
+	return strText
+end -- function StrCP1252_UTF8
 
 -- Obtain Version in Plugin Store by Id or Name --
 function StrVersionInStore(strPlugin)
@@ -2586,7 +2775,7 @@ function StrVersionInStore(strPlugin)
  		http:Open("GET",strRequest,false)
 		http:Send()
 		local strReturn = http.Responsebody
-		local strVersion = ""
+		local strVersion = "0"
 		if strReturn ~= nil then
 			strVersion = strReturn:match("(%d.*),%d*")
 		end
@@ -2599,7 +2788,7 @@ end -- function StrVersionInStore
 -- Check if New Version Available --
 function CheckVersionInStore(strOldVer)
 	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
-	local strNewVer = StrVersionInStore(strPlugin:gsub(" Plugin Store V.*",""))
+	local strNewVer = StrVersionInStore(strPlugin:gsub(" %- .*",""))
 	if strNewVer > strOldVer:match("[^%d]*([%d%.]*)") then
 		iup.Alarm(strPlugin..strOldVer,"Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.","OK")
 	end
@@ -2728,69 +2917,123 @@ function GUI_FontDialogue(intFontSet)
 	return strAnswer
 end -- function GUI_FontDialogue
 
-ProgressBar = {
+-- Progress Bar Function Prototype --
+function NewProgressBar(tblGauge)
 
-	Start = function(strTitle,intMax)																-- Create & start Progress Bar window
-		if not DlgGauge then
-			IsBarStop = false
-			IntStart = os.time()
-			IntDelta = 0
-			StrClock = "00:00:00"
-			local	btnStop	= iup.button	{ title="Stop "..strTitle, font=StrFontBody, rastersize="200x30", fgcolor=StrRed, action=function() IsBarStop = true end, }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
-					BarGauge	= iup.progressbar { rastersize="400x30", value=0, max=intMax, }	-- Progress bar maximum range
-					LblText	= iup.label	{ title=" ", expand="YES", alignment="ACENTER", tip="Percentage and Time Elapsed", }
-					DlgGauge	= iup.dialog	{ title=strTitle.." Progress", dialogframe="YES", background=StrWhite,	-- Remove Windows minimize/maximize menu
-										iup.vbox{ alignment="ACENTER", gap="10", margin=StrBigMargin or "8x8",
-											LblText,
-											BarGauge,
-											btnStop,
-										},
-										move_cb	= function(self,x,y) IntDataX=x IntDataY=y end,
-										close_cb	= btnStop.action,									-- Windows Close button = Stop button
-									}
-			DlgGauge:showxy(IntDataX,IntDataY)														-- Show the Progress Bar window
-		end
-	end,
+	local tblGauge	= tblGauge or {}							-- Optional table of external parameters
+	local strFont	= tblGauge.Font	or nil						-- Font dialogue default is current font
+	local strButton	= tblGauge.Button	or "255 0 0"			-- Button colour default is red
+	local strBehind	= tblGauge.Behind	or "255 255 255"	-- Background colour default is white
+	local intShowX	= tblGauge.ShowX	or iup.CENTER		-- Show window default position is central
+	local intShowY	= tblGauge.ShowY	or iup.CENTER
+	local intMax, intVal, intPercent, intStart, intDelta, intScale, strClock, isBarStop
+	local lblText, barGauge, lblDelta, btnStop, dlgGauge
 
-	SetText = function(strText)																		-- Show the Progress text message
-		if DlgGauge then LblText.title = strText end
-	end,
+	local function doFocus()										-- Bring the Progress Bar window into Focus
+		dlgGauge.bringfront="YES"									-- If used too often, inhibits other windows scroll bars, etc
+	end -- local function doFocus
 
-	Step = function(intStep)																			-- Step the Progress Bar forward
-		if DlgGauge then
-			local intVal = tonumber(BarGauge.value)
-			local intMax = tonumber(BarGauge.max)
-			intVal = intVal + intStep
-			if intVal > intMax then intVal = intMax end											-- Ensure value does not exceed maximum
-			BarGauge.value = intVal
-			local intDelta = os.difftime(os.time(),IntStart)
-			if IntDelta < intDelta then																-- Update clock of elapsed time
-				IntDelta = intDelta
-				local intHour = math.floor( intDelta / 3600 )
-				local intMins = math.floor( intDelta / 60 - intHour * 60 )
-				local intSecs = intDelta - intMins * 60 - intHour * 3600
-				StrClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+	local function doUpdate()										-- Update the Progress Gauge and the Delta % with clock
+		barGauge.value = intVal
+		lblDelta.title = string.format("%4d %%      %s ",intPercent,strClock)
+	end -- local function doUpdate
+
+	local function doReset()										-- Reset all dialogue variables and Update display
+		intVal		= 0													-- Current value of Progress Bar
+		intPercent= 0.01											-- Percentage of progress
+		intStart	= os.time()										-- Start time of progress
+		intDelta	= 0													-- Delta time of progress
+		intScale	= math.ceil( intMax / 1000 )					-- Scale of percentage per second of progress (initial guess is corrected in Step function)
+		strClock	= "00 : 00 : 00"								-- Clock delta time display
+		isBarStop	= false											-- Stop button pressed signal
+		doUpdate()
+		doFocus()
+	end -- local function doReset
+
+	local tblProgressBar = {
+
+		Start = function(strTitle,intMaximum)					-- Create & start Progress Bar window
+			if not dlgGauge then
+				strTitle	= strTitle or ""						-- Dialogue and button title
+				intMax		= intMaximum or 100						-- Maximun range of Progress Bar, default is 100
+				local strSize = tostring( math.max( 100, string.len(" Stop "..strTitle) * 8 ) ).."x30"			-- Adjust Stop button size to Title
+				lblText	= iup.label	{ title=" ", expand="YES", alignment="ACENTER", tip="Progress Message" }
+				barGauge	= iup.progressbar { rastersize="400x30", value=0, max=intMax, tip="Progress Bar" }
+				lblDelta	= iup.label	{ title=" ", expand="YES", alignment="ACENTER", tip="Percentage and Elapsed Time" }
+				btnStop	= iup.button	{ title=" Stop "..strTitle, rastersize=strSize, fgcolor=strButton, tip="Stop Progress Button", action=function() isBarStop = true end }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
+				dlgGauge	= iup.dialog	{ title=strTitle.." Progress ", font=strFont, dialogframe="YES", background=strBehind,	-- Remove Windows minimize/maximize menu
+									iup.vbox{ alignment="ACENTER", gap="10", margin="10x10",
+										lblText,
+										barGauge,
+										lblDelta,
+										btnStop,
+									},
+									move_cb	= function(self,x,y) tblGauge.ShowX = x tblGauge.ShowY = y end,
+									close_cb	= btnStop.action,	-- Windows Close button = Stop button
+								}
+				dlgGauge:showxy(intShowX,intShowY)				-- Show the Progress Bar window
+				doReset()												-- Reset the Progress Bar display
 			end
-			LblText.title = string.format("%4d %%      %s ", math.floor( intVal / intMax * 100 ), StrClock) -- Display % and clock progress
-			DlgGauge.bringfront = "YES"
+		end,
+
+		Message = function(strText)								-- Show the Progress Bar message
+			if dlgGauge then lblText.title = strText end
+		end,
+
+		Step = function(intStep)									-- Step the Progress Bar forward
+			if dlgGauge then
+				intVal = intVal + ( intStep or 1 )				-- Default step is 1
+				local intNew = math.ceil( intVal / intMax * 100 * intScale ) / intScale
+				if intPercent ~= intNew then						-- Update progress once per percent or per second, whichever is smaller
+					intPercent = math.max( 0.1, intNew )		-- Ensure percentage is greater than zero
+					if intVal > intMax then intVal = intMax intPercent = 100 end		-- Ensure values do not exceed maximum
+					intNew = os.difftime(os.time(),intStart)
+					if intDelta < intNew then						-- Update clock of elapsed time
+						intDelta = intNew
+						intScale = math.ceil( intDelta / intPercent )	-- Scale of seconds per percentage step
+						local intHour = math.floor( intDelta / 3600 )
+						local intMins = math.floor( intDelta / 60 - intHour * 60 )
+						local intSecs = intDelta - intMins * 60 - intHour * 3600
+						strClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+					end
+					doUpdate()										-- Update the Progress Bar display
+				end
+				iup.LoopStep()
+			end
+		end,
+
+		Focus = function()
+			if dlgGauge then doFocus() end						-- Bring the Progress Bar window to front
+		end,
+
+		Reset = function()											-- Reset the Progress Bar display
+			if dlgGauge then doReset() end
+		end,
+
+		Stop = function()											-- Check if Stop button pressed
 			iup.LoopStep()
-		end
-	end,
+			return isBarStop
+		end,
 
-	Reset = function()																					-- Reset the Progress Bar
-		if DlgGauge then BarGauge.value = 0 end
-	end,
+		Close = function()											-- Close the Progress Bar window
+			isBarStop = false
+			if dlgGauge then dlgGauge:destroy() dlgGauge = nil end
+		end,
 
-	Stop = function()																					-- Check if Stop button pressed
-		return IsBarStop
-	end,
+	} -- end ProgressBar
+	return tblProgressBar
+end -- function NewProgressBar
 
-	Close = function()																					-- Close the Progress Bar window
-		IsBarStop = false
-		if DlgGauge then DlgGauge:destroy() DlgGauge = nil end
-	end,
-
-} -- end ProgressBar
+-- My Progress Bar with Parameters
+function MyProgressBar()
+	tblGauge = {														-- Pass parameters into Progress Bar function prototype
+		Font	= StrFontBody,
+		Button	= StrRed,
+		Behind	= StrWhite,
+		ShowX	= IntDataX,
+		ShowY	= IntDataY	}
+	return NewProgressBar(tblGauge)
+end -- function MyProgressBar
 
 -- Reset Sticky Settings to Default Values --
 function ResetDefaultSettings()
@@ -2801,11 +3044,19 @@ function ResetDefaultSettings()
 	StrHelpS		= "1030x730"
 	IntDataX		= iup.CENTER			-- ProgressBar window position X & Y co-ordinate
 	IntDataY		= iup.CENTER
-	StrFolder		= StrPublicPath		-- Folder for Website/CD-DVD HTML pages
-	IntIndex		= IntIndexPrimary	-- Index of Names for Primary Names only
-	IntStyle		= 1						-- Index of Names added names in italics
-	IntHyper		= 1						-- Hyperlinks open in same Page
-	IntPopup		= IntPopupLytebox4	-- Image Popups use default Lytebox v4.0
+--	StrFolder		= StrPublicPath		-- Folder for Website/CD-DVD HTML pages
+	IntPages		=	1					-- Hyperlinks open in same Page
+	IntChars		=	1					-- Hyperlinks never abbreviated
+	IntPopup		=	1					-- Image Popups use default Lytebox v4.0
+	StrToPs		= "OFF"				-- Table of Pictures disabled
+	StrToRs		= "OFF"				-- Table of Reports disabled
+	StrToDs		= "OFF"				-- Table of Downloads disabled
+	StrMenu		= "OFF"				-- Links in Menu Bar disabled
+	IntNames		=	1					-- Index of Names for Primary Names only
+	IntStyle		=	1					-- Index of Names added names in italics
+	IntIdent		=	1					-- Index of Names with no Identity data
+	IntGenDex		=	4					-- GenDex excludes Individuals with Private/Living flags
+	IntTabPosn	= nil					-- Initial tab position undefined
 end -- function ResetDefaultSettings
 
 -- Load Sticky Settings from File --
@@ -2855,10 +3106,19 @@ function LoadSettings(strFileName)
 		IntDataX = tonumber(strLoadLocal("DataX",IntDataX))
 		IntDataY = tonumber(strLoadLocal("DataY",IntDataY))
 		StrFolder	= strLoadLocal			("Folder",StrFolder)
-		IntIndex	= tonumber(strLoadGlobal("Index",IntIndex))
-		IntStyle	= tonumber(strLoadGlobal("Style",IntStyle))
-		IntHyper	= tonumber(strLoadGlobal("Hyper",IntHyper))
+		IntPages	= tonumber(strLoadGlobal("Pages",IntPages))
+		IntChars	= tonumber(strLoadGlobal("Chars",IntChars))
 		IntPopup	= tonumber(strLoadGlobal("Popup",IntPopup))
+		StrToPs	= strLoadGlobal			 ("ToPs",StrToPs)
+		StrToRs	= strLoadGlobal			 ("ToRs",StrToRs)
+		StrToDs	= strLoadGlobal			 ("ToDs",StrToDs)
+		StrMenu	= strLoadGlobal			 ("Menu",StrMenu)
+		IntNames	= tonumber(strLoadGlobal("Index",IntNames))	-- Legacy "Index" setting
+		IntNames	= tonumber(strLoadGlobal("Names",IntNames))
+		IntStyle	= tonumber(strLoadGlobal("Style",IntStyle))
+		IntIdent	= tonumber(strLoadGlobal("Ident",IntIdent))
+		IntGenDex	= tonumber(strLoadGlobal("GenDex",IntGenDex))
+		IntTabPosn= tonumber(strLoadGlobal("TabPosn",IntTabPosn))
 		IntFontSet= tonumber(strLoadGlobal("FontSet",IntFontSet))
 	end
 	IntMainX,IntMainY = intintCheckPosition(IntMainX,IntMainY)
@@ -2891,10 +3151,18 @@ function SaveSettings(strFileName)
 	doSaveLocal("DataX",IntDataX)
 	doSaveLocal("DataY",IntDataY)
 	doSaveLocal("Folder",StrFolder)
-	doSaveGlobal("Index",IntIndex)
-	doSaveGlobal("Style",IntStyle)
-	doSaveGlobal("Hyper",IntHyper)
+	doSaveGlobal("Pages",IntPages)
+	doSaveGlobal("Chars",IntChars)
 	doSaveGlobal("Popup",IntPopup)
+	doSaveGlobal("ToPs",StrToPs)
+	doSaveGlobal("ToRs",StrToRs)
+	doSaveGlobal("ToDs",StrToDs)
+	doSaveGlobal("Menu",StrMenu)
+	doSaveGlobal("Names",IntNames)
+	doSaveGlobal("Style",IntStyle)
+	doSaveGlobal("Ident",IntIdent)
+	doSaveGlobal("GenDex",IntGenDex)
+	doSaveGlobal("TabPosn",IntTabPosn)
 	doSaveGlobal("FontSet",IntFontSet)
 
 	local fileHandle = OpenFile(strFileName,"w")
@@ -2905,7 +3173,7 @@ function SaveSettings(strFileName)
 end -- function SaveSettings
 
 -- GUI Help & Advice Dialogue --
-function GUI_HelpDialogue()
+function GUI_HelpDialogue(strOrigin)
 
 	local function doActivateMainHelpButton()
 		if BtnHelp then BtnHelp.active = "YES" end
@@ -2916,14 +3184,16 @@ function GUI_HelpDialogue()
 			oleControl:CreateLuaCOM()
 
 	-- Create each GUI button with title and tooltip
-	local	btnIntro	= iup.button	{ title="Introduction"		, tip="Introduction for Help and Advice"	, }
-	local	btnIndex	= iup.button	{ title="Index of Names"	, tip="Index of Names Help and Advice"		, }
-	local	btnHyper	= iup.button	{ title="URL Hyperlinks"	, tip="URL Hyperlinks Help and Advice"		, }
-	local	btnPopup	= iup.button	{ title="Image Popups"		, tip="Image Popups Help and Advice"		, }
-	local	btnClose	= iup.button	{ title="Close Window"		, tip="Close this Help and Advice window"	, }
+	local	btnIntro	= iup.button	{ title="Introduction"			, tip="Improve HTML plugin Help and Advice" }
+	local	btnHyper	= iup.button	{ title="Hyperlinks / Text"	, tip="Hyperlinks / Text tab Help and Advice" }
+	local	btnPopup	= iup.button	{ title="Image Popups"			, tip="Image Popups tab Help and Advice" }
+	local	btnTable	= iup.button	{ title="Content Tables"		, tip="Content Tables tab Help and Advice" }
+	local	btnIndex	= iup.button	{ title="Index of Names"		, tip="Index of Names tab Help and Advice" }
+	local	btnGenDex	= iup.button	{ title="Create GenDex"		, tip="Create GenDex tab Help and Advice" }
+	local	btnClose	= iup.button	{ title="Close Window"			, tip="Close this Help and Advice window" }
 
 	-- The following controls are global to allow Main GUI to alter font and restore default position
-	HboxHelp		=	iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnIntro, btnIndex, btnHyper, btnPopup, btnClose, }
+	HboxHelp		=	iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnIntro, btnHyper, btnPopup, btnTable, btnIndex, btnGenDex, btnClose, }
 	DialogHelp	=	iup.dialog { title=StrPlugin.." Help & Advice", background=StrWhite, startfocus=btnClose, rastersize=StrHelpS,
 							iup.vbox { alignment="ACENTER", margin=StrBigMargin, expandchildren="YES",
 								oleControl,
@@ -2935,459 +3205,398 @@ function GUI_HelpDialogue()
 						}
 
 	local strFHUG = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:improve_html:"
+	local tblFHUG = {"improve_html","hyperlinks","imagepopup","itemtables","name_index","creategendex"}
 
 	-- Set other GUI control attributes
 	for iupName, tblAttr in pairs( {
-		-- Control	=	1~fgcolor	, 2~Navigate URL, 3~action function()
-		[btnIntro]	= { StrGreen	, "improve_html", false },
-		[btnIndex]	= { StrGreen	, "name_index"	, false },
-		[btnHyper]	= { StrGreen	, "hyperlinks"	, false },
-		[btnPopup]	= { StrGreen	, "imagepopup"	, false },
-		[btnClose]	= { StrRed	, false			, function() DialogHelp:destroy() doActivateMainHelpButton() end }
+		-- Control	=	1~fgcolor	, 2~URL	, 3~action function()
+		[btnIntro]	= { StrGreen	,	1		, false },
+		[btnHyper]	= { StrGreen	,	2		, false },
+		[btnPopup]	= { StrGreen	,	3		, false },
+		[btnTable]	= { StrGreen	,	4		, false },
+		[btnIndex]	= { StrGreen	,	5		, false },
+		[btnGenDex]	= { StrGreen	,	6		, false },
+		[btnClose]	= { StrRed	, false	, function() DialogHelp:destroy() doActivateMainHelpButton() end }
 		} ) do
 		iupName.expand	= "HORIZONTAL"
 		iupName.size		= "x10"
 		iupName.fgcolor	= tblAttr[1]
-		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(strFHUG..tblAttr[2]) end end
+		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(strFHUG..tblFHUG[tblAttr[2]]) end end
 		if tblAttr[3] then iupName.action = tblAttr[3] end
 	end
 
 	DialogHelp:showxy(IntHelpX,IntHelpY)		-- Show Help GUI window
 	DialogHelp.rastersize=nil						-- Allow window to be resized	nil = iup.NULL
 
-	oleControl.com:Navigate(strFHUG.."improve_html")
+	if not strOrigin then strOrigin = "improve_html" end
+	for intFHUG = 1, #tblFHUG do
+		local strFHUG = tblFHUG[intFHUG]
+		if strFHUG:match(strOrigin) then
+			strOrigin = strFHUG
+			break
+		end
+	end
+	oleControl.com:Navigate(strFHUG..strOrigin)
 
 	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
 
 end -- function GUI_HelpDialogue
 
--- Add alternate & married names to _nameindex.html Web/CD/DVD page --
+-- Convert all URL & Hypertext in every required HTML Web/CD/DVD page --
 
-function IntImproveIndex(strFilename,intIndex,intStyle)
+function IntImproveHTML(strFolder,intPages,intChars)
 
-	-- Obtain Individual Lastname & Forenames --
+	-- Convert any URL into Hyperlinks and translate any Text placeholders --
 
-	local function strGetNames(ptrIndiName)
-		local strLastname = fhGetItemText(ptrIndiName,"~:SURNAME")	-- Get the Surname & convert to uppercase
-		local strForename = fhGetItemText(ptrIndiName,"~:GIVEN_ALL")	-- Get the Forenames & any suffix
-		if strLastname == "" then
-			strLastname = "?"
-		else
-			strLastname = string.upper(strLastname)
+	local tblPages	= { '', ' target="_blank"' }																	-- Target page options
+	local tblChars	= { 999, 30, 50, 70, 90 }																		-- URL length options
+	local tblAnchor = {}																								-- Table of Anchor parameters
+	tblAnchor.Style = ' class="fhextlink"'																			-- Set class style anchor attribute as used by FH
+	tblAnchor.Pages	= tblPages[intPages]																			-- Set target page anchor attribute for GUI option
+	tblAnchor.Chars	= tonumber(tblChars[intChars])																-- Set abbreviated URL char length for GUI option
+	tblAnchor.Match = '[%w#&/:;=@_%%%+%-%.%?]+[^%s%p]'															-- Set pattern for unquoted URL
+						-- [%w@:/=&;#_%?%.%+%-%%] allows URL to contain alphanumeric characters %w and symbols # & / : ; = @ _ % + - . ?
+						-- [^%s%p] prevents last character from being tabs/spaces %s or punctuation %p symbols # & / : ; = @ _ % + - . ? , " ' < > ! £ $ ^ * ( ) { } [ ] ~ | \ ¬ ` 
+						-- For details see http://en.wikipedia.org/wiki/Uniform_resource_locator and http://en.wikipedia.org/wiki/URI_scheme
+
+	-- Parse any Anchor tag into its component parts and adjust class & target attributes, and link text length
+
+	local function strParse(strAnchor,tblAnchor)
+		local strStyle = tblAnchor.Style
+		local strPages = tblAnchor.Pages
+		local strMatch = tblAnchor.Match
+		local strAttr, strLink = strAnchor:match('<a(%s.-)>(.-)</a>')										-- Split anchor tag into attributes and link text parts
+		-- Parse attributes with value in "double-quotes"  or enclosed in 'single-quotes'      or without any quotes at all               or use default value
+		local strHref   = strAttr:match('(%shref=".-")')   or strAttr:match("(%shref='.-')")   or strAttr:match('(%shref='..strMatch..')') or ' href="http://www.null.com"'
+		local strClass  = strAttr:match('(%sclass=".-")')  or strAttr:match("(%sclass='.-')")  or strAttr:match('(%sclass='..strMatch..')') or strStyle
+		local strTarget = strAttr:match('(%starget=".-")') or strAttr:match("(%starget='.-')") or strAttr:match('(%starget='..strMatch..')') or strPages
+		strAttr   = strAttr:replace(strHref,''):replace(strClass,''):replace(strTarget,''):gsub('^%s+',' '):gsub('%s+$','')
+		strHref   = strHref:gsub('%shref=([^\'"].-[^\'"])$',' href="%1"')									-- Add missing quotes to href=URL
+		strClass  = strClass:gsub('%sclass=([^\'"].-[^\'"])$',' class="%1"')								-- Add missing quotes to class=style
+		strTarget = strTarget:gsub('%starget=([^\'"].-[^\'"])$',' target="%1"')							-- Add missing quotes to target=page
+		if strHref:match('href=%pmailto:') then
+			strTarget = ''																								-- Remove target attribute from mailto protocol scheme
+		elseif strTarget == tblPages[1]
+			 or strTarget == tblPages[2] then
+			strTarget = strPages																						-- Set target attribute for all other protocol schemes
 		end
-		if strForename == "" then
-			strForename = "?"
-		end
-		return strLastname, strForename
-	end -- local function strGetNames
-
-	-- Lookup Hyperlink to Family or Individual Web Page --
-
-	local function strLookupHyperlink(ptrIndi,tblExisting,intFamilyId)
-		local strLastname, strForename = strGetNames(fhGetItemPtr(ptrIndi,"~.NAME"))
-		local strFullname = strLastname..strForename
-		local strLifedate = "("..fhCallBuiltInFunction("LifeDates2",ptrIndi)..")"	
-		local strPagelink = ""
-		local intFamRecId = 0
-		if intFamilyId ~= 0 then												-- Family search needed
-			local ptrFams = fhNewItemPtr()
-			ptrFams:MoveTo(ptrIndi,"~.FAMS")
-			while ptrFams:IsNotNull() do										-- Loop through Families
-				intFamRecId = fhGetRecordId(fhGetValueAsLink(ptrFams))
-				strPagelink = tostring(intFamRecId)
-				strPagelink = "\"fam"..strPagelink..".html\""			-- Get the Family Pagelink
-				if intFamilyId < 0 then
-					if tblExisting[strPagelink..strFullname..strLifedate] then
-						return strPagelink, strLifedate						-- Existing Family entry with full Lifedates
-					end
-					if tblExisting[strPagelink..strFullname.."( - )"] then
-						return strPagelink, "( - )"							-- Existing Family entry without Lifedates due to Living Flag
-					end
-				elseif intFamilyId == intFamRecId then
-					return strPagelink, nil									-- Husband entry only needs Family Pagelink (could check web page file exists)
-				end
-				ptrFams:MoveNext("SAME_TAG")
-			end
-		end
-		strPagelink = tostring(fhGetRecordId(ptrIndi))					-- Get the Individual Pagelink
-		strPagelink = "\"ind"..strPagelink..".html\""
-		if tblExisting[strPagelink..strFullname..strLifedate] then
-			return strPagelink, strLifedate									-- Existing Individual entry with full Lifedates
-		end
-		if tblExisting[strPagelink..strFullname.."( - )"] then
-			return strPagelink, "( - )"										-- Existing Individual entry without Lifedates due to Living Flag
-		end
-		return nil, strLifedate												-- No entry found
-	end -- local function strLookupHyperlink
-
-	-- Conditionally Update Name List --
-
-	local function doUpdateNameList(tblExisting,tblNameList,strPagelink,strLastname,strForename,strFullname,strLifedate,strTitleTxt)
-		local strList = strPagelink..strLastname..strForename..strLifedate
-		if not tblExisting[strList] then									-- Name exists and is a new Name
-			table.insert(tblNameList, { Pagelink=strPagelink, Lastname=strLastname, Forename=strForename, Fullname=strFullname, Lifedate=strLifedate, TitleTxt=strTitleTxt } )
-			tblExisting[strList] = true
-		end
-	end -- local function doUpdateNameList
-
-	-- Comparison for table sort that returns true when 1st is less than 2nd --
-
-	local function isLessThan(tbl1st,tbl2nd)
-		local str1stPref = ""			-- Adjust sort so non-alpabetic initial chars come first but ordered according to any subsequent letters
-		local str2ndPref = ""
-		if not tbl1st["Lastname"]:match("^%u") then str1stPref = "!"..(tbl1st["Lastname"]:match("(%u+)") or "!") end
-		if not tbl2nd["Lastname"]:match("^%u") then str2ndPref = "!"..(tbl2nd["Lastname"]:match("(%u+)") or "!") end
-		local str1stName = str1stPref..tbl1st["Lastname"]..tbl1st["Forename"]..tbl1st["Lifedate"]..tbl1st["Pagelink"]
-		local str2ndName = str2ndPref..tbl2nd["Lastname"]..tbl2nd["Forename"]..tbl2nd["Lifedate"]..tbl2nd["Pagelink"]
-		return str1stName < str2ndName
-	end -- local function isLessThan
-
-	--	Read _nameindex.html file of text into tblNameIndex, down to <div class="FhIndexList">
-
-	local tblStyleCSS = { "{ font-style:italic; }", "{ text-decoration:underline; }", "{ font-style:italic; text-decoration:underline; }" }
-	local intAlphabet = 0														-- Alphabet Anchor Hyperlinks line number
-	local tblNameIndex = {}													-- Table of _nameindex.html text lines
-	local fileNameIndex = io.input(strFilename)
-	for strLine in io.lines() do												-- Read _nameindex.html line by line
-		-- Exclude XHTML CSS married & alternate name style
-		if not strLine:match("^<style type=\"text/css\"> .*married .*alternate .* </style>") then
-			if intIndex ~= IntIndexPrimary
-			and strLine:match("</head>") then								-- Found end of Header so insert XHTML CSS married & alternate name style
-				table.insert(tblNameIndex,"<style type=\"text/css\"> /*<![CDATA[*/ span.married "..tblStyleCSS[intStyle].." span.alternate "..tblStyleCSS[intStyle].." /*]]>*/ </style>")
-			end
-			table.insert(tblNameIndex,strLine)
-			if strLine:match("^<p>.*</p>$") then							-- Found Alphabet Anchor Hyperlinks line
-				intAlphabet = #tblNameIndex
-			end
-			if strLine:match("<div class=\"FhIndexList\">") then		-- Pause at <div class="FhIndexList"> line
-				break
-			end
-		end
-	end
-
-	-- Read _nameindex.html web page link & full name & life dates into a tblNameList and tblExisting dictionary
-
-	local strPagelink = ""
-	local strLastname = ""
-	local strForename = ""
-	local strFullname = ""
-	local strLifedate = ""
-	local strTitleTxt = ""
-	local tblNameList = {}
-	local tblExisting = {}
-	local intFamilyId = 0
-	for strLine in io.lines() do												-- Read _nameindex.html Pagelink & Fullname & Lifedate lines 
-		strPagelink, strFullname, strLifedate = strLine:match("^<li><a href=(%p%w-%.html%p)>(.+ )(%(.+%))</a></li>")
-		if strPagelink and strFullname and strLifedate then				-- List the entry details
-			if not ( strFullname:match(" title=\"%u%l+ Name\">")		-- Exclude alternate/married names with tooltip title="Alternate/Married Name"
-					or strFullname:match("</?i]>")							-- or with legacy "<i>" italics "</i>"
-					or strFullname:match("</?span.->") ) then				-- or with "<span class=...>" name "</span>"
-				strLastname = strFullname:match("([^%l]+), ") or "?"
-				strForename = strFullname:match(StrPlainText(strLastname)..", (.+) ") or "?"
-				doUpdateNameList(tblExisting,tblNameList,strPagelink,strLastname,strForename,strLastname..", "..strForename.." ",strLifedate,"")
-				if strPagelink:match("fam") then intFamilyId = -1 end
-			end
-		end
-	end
-	io.close(fileNameIndex)
-	local intPrimaryNames = #tblNameList									-- Remember number of Primary Names
-
-	if intIndex ~= IntIndexPrimary then										-- Add Alternate Names &/or Married Womens Surnames
-
-		-- Search all GEDCOM Names to add each married/alternate Name to tables with correct web page link
-
-		local ptrName = fhNewItemPtr()
-		local ptrFams = fhNewItemPtr()
-		local ptrFamr = fhNewItemPtr()
-		local ptrSpou = fhNewItemPtr()
-		local strStat = ""
-		local ptrIndi = fhNewItemPtr()
-		ptrIndi:MoveToFirstRecord("INDI")
-		while ptrIndi:IsNotNull() do											-- Loop through every Individual Record
-			strPagelink, strLifedate = strLookupHyperlink(ptrIndi,tblExisting,intFamilyId)
-			if strPagelink then
-				ptrName = fhGetItemPtr(ptrIndi,"~.NAME")
-
-				if intIndex == IntIndexMarried
-				or intIndex == IntIndexEveryone then						-- Add Married Womens Surnames
-
-					-- For Females use her Forename with the Husband's Lastname
-					if fhGetItemText(ptrIndi,"~.SEX") == "Female" then
-						strLastname, strForename = strGetNames(ptrName)	-- Get her Lastname & Forename
-						ptrFams:MoveTo(ptrIndi,"~.FAMS")
-						while ptrFams:IsNotNull() do
-		                ptrFamr = fhGetValueAsLink(ptrFams)
-							ptrSpou = fhGetItemPtr(ptrFamr,"~.HUSB>")		-- Check husband is Male
-							if fhGetItemText(ptrSpou,"~.SEX") == "Male" then
-			                strStat = fhGetItemText(ptrFamr,"~._STAT")
-			                if strStat ~= "Never Married" and strStat ~= "Unmarried Couple" then
-									if intFamilyId < 0 then					-- Use the Husband's family Pagelink
-										strPagelink = strLookupHyperlink(ptrSpou,tblExisting,fhGetRecordId(ptrFamr))
-									end
-									if strPagelink then							-- Get the Husband's Surname
-										strLastname = strGetNames(fhGetItemPtr(ptrSpou,"~.NAME"))
-										if strLastname ~= "?" then			-- Add the Married Name in <i> italics </i> (&/or <b> bold </b> &/or <u> underline </u> also possible)
-											doUpdateNameList(tblExisting,tblNameList,strPagelink,strLastname,strForename,"<span class=\"married\">"..strLastname.."</span>, "..strForename.." ",strLifedate," title=\"Married Name\"")
-										end
-									end
-								end
-							end
-							ptrFams:MoveNext("SAME_TAG")
-						end
-					end
-
-				end -- Add Married Womens Surnames
-
-				if intIndex == IntIndexAlternate
-				or intIndex == IntIndexEveryone then						-- Add Alternate Names
-
-					-- For everyone check each Alternate Name entry
-					ptrName:MoveNext("SAME_TAG")
-					while ptrName:IsNotNull() do
-						strLastname, strForename = strGetNames(ptrName)	-- Get Alternate Surname & Forename
-						if strLastname..strForename ~= "??" then			-- Add the Alternate Name in <i> italics </i> (&/or <b> bold </b> &/or <u> underline </u> also possible)
-							doUpdateNameList(tblExisting,tblNameList,strPagelink,strLastname,strForename,"<span class=\"alternate\">"..strLastname..", "..strForename.."</span> ",strLifedate," title=\"Alternate Name\"")
-						end
-						ptrName:MoveNext("SAME_TAG")
-					end
-
-				end -- Add Alternate Names
-
+		local intChars = tblAnchor.Chars																			-- Abbreviate long URL link text to chosen character length
+		local strTail  = '...'	
+		local strURL   = strHref:match('%shref=%p(.-)%p$')														-- Extract URL from href="URL"
+		local intLink  = strLink:len() - strTail:len()
+		if strURL == strLink																							-- Abbreviations apply only if URL matches link text
+		or ( strURL:sub(1,intLink) == strLink:sub(1,intLink) and strLink:match(strTail..'$') ) then	-- or URL matches abbreviated link text
+			if strURL:len() > intChars then
+				strLink = strURL:sub(1,intChars)..strTail															-- Apply abbreviated link text
 			else
---				print(fhGetItemText(ptrIndi,"~.NAME:SURNAME_FIRST")..strLifedate,"Omit")	-- Diagnostic
+				strLink = strURL																						-- Cancel abbreviated link text
 			end
-			ptrIndi:MoveNext()
 		end
+		return '<a'..strClass..strHref..strTarget..strAttr..'>'..strLink..'</a>'							-- Compose entire anchor
+	end -- local function strParse
 
-	end -- intIndex ~= IntIndexPrimary
+	-- Convert all URL protocol schemes, plus class & target attributes, and link text length
 
-	table.sort(tblNameList,isLessThan) 										-- Sort the NameList alphabetically by Name and Lifedates and Pagelink
-
-	local strHeadName = nil
-	local strAlphabet = "<p>A&nbsp;B&nbsp;C&nbsp;D&nbsp;E&nbsp;F&nbsp;G&nbsp;H&nbsp;I&nbsp;J&nbsp;K&nbsp;L&nbsp;M&nbsp;N&nbsp;O&nbsp;P&nbsp;Q&nbsp;R&nbsp;S&nbsp;T&nbsp;U&nbsp;V&nbsp;W&nbsp;X&nbsp;Y&nbsp;Z&nbsp;</p>"
-	local strNextInit = ""
-	local strPrevInit = ""
-	for i, tblItem in ipairs(tblNameList) do								-- Add each NameList item to _nameindex.html text lines
-		strPagelink = tblItem["Pagelink"]
-		strFullname = tblItem["Fullname"]
-		strLifedate = tblItem["Lifedate"]
-		strTitleTxt = tblItem["TitleTxt"]
-		strLastname = tblItem["Lastname"]
-		if strHeadName ~= strLastname then
-			if strHeadName then table.insert(tblNameIndex,"</ul>") end
-			strHeadName = strLastname											-- Each new Lastname needs a Header and an unnumbered list <ul> structure
-			strNextInit = strHeadName:sub(1,1)
-			if strPrevInit ~= strNextInit									-- Each new Initial Letter needs an Alphabet Hyperlink <a href="#I">I</a> and Anchor <a name="I"></a>
-			and strNextInit:match("%u") then
-				strAlphabet = strAlphabet:gsub(strNextInit.."&nbsp;","<a href=\"#"..strNextInit.."\">"..strNextInit.."</a>&nbsp;")
-				strPrevInit = "<a id=\""..strNextInit.."\"></a>"
+	local function strHyper(strSource,tblAnchor)
+		local strString = strSource
+		if strString:matches('://')
+		or strString:matches('mailto:')
+		or strString:matches('www.') then																			-- Recognise user <a href="url">link</a> format and convert to valid XHTML
+			strString = strString:gsub('&lt;a%s(.-href=.-)&gt;(.-)&lt;/a&gt;','<a %1>%2</a>')			-- Convert URL from FH text field where < = &lt; and > = &gt;
+			local strPrefix,strAnchor,strSuffix = strString:match('(.-)(<a%s[^<>]-href=.-</a>)(.*)')	-- Split text line into text prefix, anchor tag, and text suffix
+			if strAnchor then																							-- Existing URL hyperlink anchor tag found
+				strAnchor = strParse(strAnchor,tblAnchor)															-- Parse anchor into its component parts and reassemble
+				strString = strHyper(strPrefix,tblAnchor)..strAnchor..strHyper(strSuffix,tblAnchor)		-- Recursively call strHyper for prefix and suffix
 			else
-				strPrevInit = ""
-			end
-			table.insert(tblNameIndex,"<p>"..strPrevInit..strHeadName:gsub("^?$","(no surname)").."</p>")
-			table.insert(tblNameIndex,"<ul>")
-			strPrevInit = strNextInit
-		end
-		table.insert(tblNameIndex,"<li><a href="..strPagelink..strTitleTxt..">"..strFullname..strLifedate.."</a></li>")		-- Insert Page link, full Name & Life dates
-	end
-	tblNameIndex[intAlphabet] = strAlphabet:gsub("&nbsp;</p>$","</p>")		-- Remove trailing "&nbsp;" from Alphabet Anchor Hyperlinks
-	table.insert(tblNameIndex,"</ul>\n</div>\n</div>\n</body>\n</html>")	-- Insert terminating tag lines
-
-	local strNameIndex = table.concat(tblNameIndex,"\n")
-
-	SaveStringToFile(strNameIndex,strFilename)							-- Save _nameindex.html file
-
-	return #tblNameList - intPrimaryNames									-- Number of names added is size of list minus Primary Names
-
-end -- function IntImproveIndex
-
--- Convert all URL in each featured .html Web/CD/DVD page --
-
-function IntImproveURL(strFolder,intHyper)
-
-	-- Convert any URL into Hyperlinks --
-
-	local function strHyper(strText,strTarget)
-		if strText:match("://")
-		or strText:match("mailto:")
-		or strText:match("www%.") then
-			-- Recognise user <a href="url">link</a> format and convert to valid XHTML
-			strText = strText:gsub("&lt;a href=(.-)&gt;(.-)&lt;/a&gt;","<a class=\"fhextlink\" href=%1>%2</a>")
-			-- Split text line into text prefix, anchor tag, and text suffix
-			local strPrefix, strAnchor, strSuffix = strText:match("(.-)(<a class=.-</a>)(.*)")
-			if strAnchor then													-- Existing URL hyperlink anchor tag found
-				if not strAnchor:match("href=\"mailto") then				-- Alter target Page Tab/Window mode
-					strAnchor = strAnchor:gsub("\">","\""..strTarget..">")
-					strAnchor = strAnchor:gsub(" target=\".-\" ",strTarget)
+				local strMatch = tblAnchor.Match
+				strString = strString:gsub('(&[lg]t;)','<<%1>>')												-- Protect symbols < &lt; and > &gt;
+				for i, strScheme in ipairs( { '(.)(http://', '(.)(https://', '(.)(ftp://', '([^/])(www%.', '(.)(mailto:' } ) do
+					strString = strString:gsub(strScheme..strMatch..')','%1<a href="%2">%2</a>')			-- Repeat for each URL protocol scheme and www. without a scheme
 				end
-				strText = strHyper(strPrefix,strTarget)..strAnchor..strHyper(strSuffix,strTarget)	-- Recursively call strHyper for prefix and suffix
-			else
-				local strTarget = strTarget
-				strText = strText:gsub("(&[lg]t;)","<<%1>>")				-- Protect symbols < &lt; and > &gt;
-				-- Repeat for each URL protocol scheme and "www." without a scheme
-				for i, strPattern in ipairs( { "(.)(http://", "(.)(https://", "(.)(ftp://", "([^/])(www%.", "(.)(mailto:" } ) do
-					if strPattern:match("mailto") then strTarget = "" end
-					strText = strText:gsub(strPattern.."[%w#&/:;=@_%%%+%-%.%?]+[^%s%p])","%1<a class=\"fhextlink\" href=\"%2\""..strTarget..">%2</a>")
-					-- [%w@:/=&;#_%?%.%+%-%%] allows URL to contain alphanumeric characters %w and # & / : ; = @ _ % + - . ?
-					-- [^%s%p] prevents last character from being tabs/spaces %s or punctuation %p including " , . / : ; <
-					-- For details see http://en.wikipedia.org/wiki/Uniform_resource_locator and http://en.wikipedia.org/wiki/URI_scheme
-				end
-				strText = strText:gsub(" href=\"www%."," href=\"http://www%.")	-- Add the "http://" scheme to href="www."
-				strText = strText:gsub("<<(&[lg]t;)>>","%1")				-- Unprotect symbols < &lt; and > &gt;
+				strString = strString:gsub('<<(&[lg]t;)>>','%1')												-- Unprotect symbols < &lt; and > &gt;
+				if strString ~= strSource then strString = strHyper(strString,tblAnchor) end				-- Prevent indefinite recursion loop
 			end
+			strString = strString:gsub(' href=(%p)www%.',' href=%1http://www%.')							-- Add the http:// scheme to href="www.
 		end
-		return strText
+		return strString
 	end -- local function strHyper
 
-	local tblTarget	= { "", " target=\"_blank\" " }
-	local strTarget	= tblTarget[intHyper]
+	-- Process my Locations Database only if 'myloc.html' exists
 
-	-- Search each .html file and convert any URL --
+	local function strMyLoc(strString,tblAnchor,strFolder,strFile)
 
-	local intLine = 0
-	local intFile = 0
-	for strFile in lfs.dir(strFolder) do
-		if strFile:match("^ind%d+%.html$")
-		or strFile:match("^fam%d+%.html$") then							-- Count "ind99.html" & "fam99.html" files
-			intFile = intFile + 1
+		local strTarget = tblAnchor.Pages
+		local strClass  = tblAnchor.Style
+
+		-- Insert hyperlink <a href='myloc.html'>Locations</a> into standard menubar			e.g. before	<li><span class="fhmenuend">
+		strString = strString:gsub('<li><span class="fhmenuend">',"<li><span><a href='myloc.html'>Locations</a></span></li>\n<li><span class='fhmenuend'>")
+
+		if strFile:match('^fam%d+%.html$') or strFile:match('^ind%d+%.html$') then
+			-- Convert source location entry into locations database hyperlink					e.g. ~ Database Address ~.  Custom Id: 9999.<	allowing for illegally embedded anchor
+			strString = strString:gsub('~ (.-)<a (.-)</a>(.-) ~%.  Custom Id: ([0-9]-)%.<','Locations Database Record <a'..strClass..' href="myloc.html#locsid%4"'..strTarget..'>%1 %3</a> <a %2</a><')
+			strString = strString:gsub('~ (.-) ~%.  Custom Id: ([0-9]-)%.<','Locations Database Record <a'..strClass..' href="myloc.html#locsid%2"'..strTarget..'>%1</a><')
 		end
+
+		if strFile == 'index.html' then
+			-- Insert 'Close Window' button 															e.g. before	<div class="FhWelcome">
+			strString = strString:gsub('<div class="FhWelcome">',"<center>\n<form action='javascript:void(0)'>\n<input type='button' value='Close Window' onclick='javascript:window.close()'>\n</form>\n</center>\n<div class='FhWelcome'>")
+			-- Change home page ToC hyperlink for Locations Database								e.g. from "toc[2-5].html" to "myloc.html"
+			strString = strString:gsub('<li><a href="toc[2-5].html">Locations Database</a></li>','<li><a href="myloc.html">Locations Database</a></li>')
+		end
+
+		if strFile == 'myloc.html' then
+			-- Convert <title> to 'Locations Database'												e.g. <title>~ Database Address ~</title>
+			strString = strString:gsub('<title>~ .- ~</title>','<title>Locations Database</title>')
+			-- Insert 'Locations Database' heading after menubar section before content		e.g. before	<div class="fhcontent ...">
+			strString = strString:gsub('<div class="fhcontent (.-)">',"<p class='FhPageTitleCentred'>Locations Database</p>\n<div class='fhcontent %1'>")
+			-- Convert >RecordId~ to hyperlink anchor targets										e.g. <h1 class="FhHdg1">[9999] Database Address</h1>
+			strString = strString:gsub('<h1 class="FhHdg1">%[([0-9]-)%] (.-)</h1>',"\n<a name='locsid%1' id='locsid%1'></a>\n<h1 class='FhHdg1'>%2</h1>")
+			if strString == '<body>' then
+				local strFile = 'x-canvas.jpg'																		-- Define 'x-canvas.jpg' background image file
+				if FlgFileExists(StrPublicPath..'\\'..strFile) then
+					local fileSource = assert(io.open(StrPublicPath..'\\'..strFile,'rb'))
+					local fileTarget, strError = io.open(strFolder..'\\'..strFile,'wb')
+					fileTarget:write(fileSource:read('*all'))														-- Copy entire 'x-canvas.jpg' background image
+					assert(fileSource:close())
+					assert(fileTarget:close())
+				end
+				local str_mystyle_css = [=[
+				body                { background: url('x-canvas.jpg') #D8D0BC ; }      /* Background image file or colour */
+				.FhSiteTitle        { font-size:22pt; font-weight:bold; color:green; } /* Title font size, weight & colour */
+				.FhPageTitle        { font-size:20pt; font-weight:bold; color:green; }
+				.FhPageTitleCentred { font-size:20pt; font-weight:bold; color:green; }
+				]=]
+				SaveStringToFile(str_mystyle_css,strFolder..'\\mystyle.css')									-- Create custom 'mystyle.css' style sheet
+			end
+		end
+
+		return strString
+	end -- local function strMyLoc
+
+	-- Determine if my Locations Database needs processing
+
+	local function isMyToC(strFolder,strFile)
+		-- If file is 'index.html' with '<li><a href="toc[2-5].html">Locations Database</a></li>' then rename "toc[2-5].html" to "myloc.html" and set isMyLoc = true
+		local isMyLoc = false
+		if strFile == 'index.html' then
+			for strLine in io.lines(strFolder..'\\index.html') do
+				local strToC = strLine:match('^<li><a href="(toc[2-5].html)">Locations Database</a></li>$')
+				if strToC then
+					local isOK, strErr = os.rename(strFolder..'\\'..strToC,strFolder..'\\myloc.html')
+					isMyLoc = true
+					break
+				end
+			end
+		end
+		if strFile == 'myloc.html' then isMyLoc = true end
+		return isMyLoc
+	end -- local function isMyToC
+
+	-- Determine if file is HTML that needs converting
+ 
+	local function isHTML(strFile)
+		return
+			strFile == 'index.html'			or																		-- Home Welcome page
+			strFile == '_contact.html'		or																		-- Contact Details page
+			strFile == '_statistics.html'	or																		-- Statistics page
+			strFile == '_nameindex.html'		or																		-- Index of Names page
+			strFile:match('^fam%d+%.html$')	or																		-- 'fam99.html' Family pages
+			strFile:match('^ind%d+%.html$')	or																		-- 'ind99.html' Individual pages 
+			strFile:match('^toc%d+%.html$')	or																		-- 'toc99.html' ToC pages
+			strFile == 'myloc.html'																					-- 'myloc.html' my Locations Database page
+	end -- local function isHTML
+
+	-- Search each HTML file and convert any URL
+
+	local ProgressBar = MyProgressBar()																				-- Create the ProgressBar functions
+	local intLine = 0																									-- Count of lines with converted URL
+	local intFile = 0																									-- Count of suitable HTML files
+	local isMyLoc = false
+	local datDate = fhNewDate()
+	datDate:SetSimpleDate(fhCallBuiltInFunction('Today'))														-- Obtain date for {{DATE:***}}
+
+	for strFile in lfs.dir(strFolder) do
+		if isMyToC(strFolder,strFile) then isMyLoc = true end													-- Is my Locations Database present?
+		if isHTML(strFile) then intFile = intFile + 1 end														-- Count suitable HTML files
 	end
 	if intFile > 100 then
-		ProgressBar.Start("Converting URL",intFile)
+		ProgressBar.Start("Converting URL",intFile)																-- Start progress bar
 	end
 	for strFile in lfs.dir(strFolder) do
-		if strFile:match("^ind%d+%.html$")
-		or strFile:match("^fam%d+%.html$") then							-- "ind99.html" or "fam99.html"
-			strFile = strFolder.."\\"..strFile
-			local tblFile = {}
-			local flgLink = false
-			local flgBody = false
-			for strLine in io.lines(strFile) do								-- Read each .html file line by line
-				if strLine == "<body>" then flgBody = true end
-				if flgBody then
-					local strLink = strHyper(strLine,strTarget)
-					if strLine ~= strLink then								-- Converted hyperlink(s) in <body>
+		if isHTML(strFile) then																						-- Suitable HTML file found
+			ProgressBar.Message(strFile)
+			strPath = strFolder..'\\'..strFile
+			local tblFile = {}																							-- Table of lines in file
+			local flgSave = false																						-- Flag if file needs saving 
+			local flgLine = false																						-- Flag if line needs converting
+			for strLine in io.lines(strPath) do																		-- Read each HTML file line by line
+				if strLine:match("<!DOCTYPE html PUBLIC") then
+					local strType = strLine
+					if tblAnchor.Pages:match("target=") then														-- Workaround for target="_blank"
+						strLine = strLine:gsub("Strict","Transitional"):gsub("strict","transitional")	-- Alter DOCTYPE XHTML to Transitional
+					else
+						strLine = strLine:gsub("Transitional","Strict"):gsub("transitional","strict")	-- Restore DOCTYPE XHTML to Strict
+					end
+					if strLine ~= strType then flgSave = true end
+				end
+				if strLine == '<head>' and strFile == 'myloc.html' then flgLine = true end				-- Convert <head> <title> in myloc.html
+				if strLine == '<body>' then flgLine = true end													-- Convert <body> lines otherwise
+				if strLine == '<div class="FhIndexList">' then flgLine = false end							-- Exclude Index List in _nameindex.html
+				if strLine == '</div>' then flgLine = true end													-- Resume after </div> at end of List
+				if strLine:match('^<a href="img') then flgLine = false end									-- Exclude popup image title
+				if strLine:match('^<img src="img') then flgLine = true end									-- Resume after popup image
+				if flgLine then
+					local strLink = strHyper(strLine,tblAnchor)													-- Convert anchor hyperlinks
+					if strLink:match('{{%u-:[%w_]-}}') then														-- Convert special DATE & FILE text
+						strLink = strLink:gsub('{{DATE:(.-)}}', function(strQual) return datDate:GetDisplayText(strQual) end )
+						strLink = strLink:gsub('{{FILE:NAME}}', StrHTML_Encode(strFile) )
+						strLink = strLink:gsub('{{FILE:PATH}}', StrHTML_Encode(strPath) )
+					end
+					if isMyLoc then strLink = strMyLoc(strLink,tblAnchor,strFolder,strFile) end			-- Convert my Locations Database
+					if strLine ~= strLink then																		-- Converted line detected
 						strLine = strLink
-						intLine = intLine + 1									-- Count lines altered
-						flgLink = true
+						intLine = intLine + 1																			-- Count converted lines
+						flgSave = true
 					end
 				end
 				table.insert(tblFile,strLine)
 			end
-			if flgLink then														-- Only save changed .html files
-				SaveStringToFile(table.concat(tblFile,"\n"),strFile)
+			if flgSave then																								-- Only save changed HTML files
+				SaveStringToFile(table.concat(tblFile,'\n'),strPath)
 			end
 			ProgressBar.Step(1)
 		end
 		if ProgressBar.Stop() then break end
 	end
-	ProgressBar.Close()
+	ProgressBar.Close()																									-- Close the Progress Bar and retrieve its window position
+	IntDataX = tblGauge.ShowX
+	IntDataY = tblGauge.ShowY
 	return intLine
-end -- function IntImproveURL
+end -- function IntImproveHTML
 
--- Convert all image Popups in each featured .html Web/CD/DVD page --
+-- Convert all image Popups in every required HTML Web/CD/DVD page --
 
-function IntImprovePopup(strFolder,intPopup)
+function IntImprovePopup(strFolder,strPopup)
 
 	-- Convert any anchor tag Popups --
 
-	local function strPopup(strLine,intPopup,strName)
-		-- Convert any V1.4 fhpopup
-		strLine = strLine:gsub("<a href=[\"'][\"'] onclick=[\"']fhpopup%([\"'](.+)[\"'],[\"'](.+)[\"']%)[\"']>","<a href=\"%1\" id="..strName.." onclick='fhpopup("..strName..");return false;' title=\"%2\">")
-		if intPopup < IntPopupCustom then
-			-- Convert any fhpopup to lytebox popup
-			strLine = strLine:gsub("<a href=(.+) id=.+ onclick='fhpopup%(.+%);return false;' ","<a href=%1 rel=\"lytebox\" ")
-		else
-			-- Convert any lytebox popup to fhpopup
-			strLine = strLine:gsub("<a href=(.+) rel=\"lytebox\" ","<a href=%1 id="..strName.." onclick='fhpopup("..strName..");return false;' ")
+	local function strAnchor(strLine,strPopup,strName)
+		local flgLine = false
+		if strPopup:match("Lytebox") then																			-- Convert any fhpopup to lytebox popup anchor
+			strLine = strLine:gsub("<a href=(.+) id=.+ onclick='fhpopup%(.+%);return false;' ",'<a href=%1 rel="lytebox" ')
+			flgLine = strLine:match('<a href=(.+) rel="lytebox" ')
+		else																												-- Convert any lytebox popup to fhpopup anchor
+			strLine = strLine:gsub('<a href=(.+) rel="lytebox" ','<a href=%1 id='..strName.." onclick='fhpopup("..strName..");return false;' ")
+			flgLine = strLine:match("<a href=(.+) id=.+ onclick='fhpopup%(.+%);return false;' ")
 		end
-		return strLine
-	end -- local function strPopup
+		return strLine, flgLine
+	end -- local function strAnchor
 
-	-- Search each .html file and convert any Popups --
+	-- Determine if file is HTML that needs popup conversion
+ 
+	local function isHTML(strFile)
+		return
+			strFile == 'index.html'			or																		-- Home Welcome page
+			strFile:match('^fam%d+%.html$')	or																		-- 'fam99.html' Family pages
+			strFile:match('^ind%d+%.html$')	or																		-- 'ind99.html' Individual pages 
+			strFile:match('^toc%d+%.html$')	or																		-- 'toc99.html' ToC pages
+			strFile == 'myloc.html'																					-- 'myloc.html' my Locations Database page
+	end -- local function isHTML
 
-	local intLine = 0
-	local intFile = 0
+	-- Search each HTML file and convert any Popups --
+
+	local ProgressBar = MyProgressBar()																				-- Create the ProgressBar functions
+	local isBarStop
+	local intLine = 0																									-- Count of lines with converted URL
+	local intFile = 0																									-- Count of suitable HTML files
 	for strFile in lfs.dir(strFolder) do
-		if strFile:match("^ind%d+%.html$")
-		or strFile:match("^fam%d+%.html$") then							-- Count "ind99.html" & "fam99.html" files
-			intFile = intFile + 1
-		end
+		if isHTML(strFile) then intFile = intFile + 1 end														-- Count suitable HTML files
 	end
 	if intFile > 100 then
-		ProgressBar.Start("Converting Popups",intFile)
+		ProgressBar.Start("Converting Popups",intFile)															-- Start progress bar
 	end
 	for strFile in lfs.dir(strFolder) do
-		if strFile:match("^ind%w+%.html$")
-		or strFile:match("^fam%d+%.html$") then							-- "ind*.html" or "fam99.html"
-			strFile = strFolder.."\\"..strFile
-			local tblFile = {}
-			local intName = 0
-			local flgHead = true
-			for strLine in io.lines(strFile) do								-- Read each .html file line by line
-				intName = intName + 1
-				if strLine == "<body>" then flgHead = false end
-				if flgHead then													-- Adjust lines in <head>
-					local strLytebox = "<link rel=\"stylesheet\" href=\"lytebox.css\" type=\"text/css\" media=\"screen\" />"
-					if intPopup < IntPopupCustom then
-						strLine = strLine:gsub("src=\"fhpopup.js\"","src=\"lytebox.js\"")
-						table.insert(tblFile,strLine)
-						strLine = strLytebox
+		if isHTML(strFile) then																						-- Suitable HTML file found
+			ProgressBar.Message(strFile)
+			strFile = strFolder..'\\'..strFile
+			local tblFile = {}																							-- Table of lines in file
+			local intHref = 0																							-- Count of popup per file for href id
+			local flgHead = true																						-- Flag if line in <head> ( else <body> )
+			for strLine in io.lines(strFile) do																		-- Read each HTML file line by line
+				if strLine == '<body>' then flgHead = false end
+				if flgHead then																							-- Adjust lines in <head>
+					local strLytebox = '<link rel="stylesheet" href="lytebox.css" type="text/css" media="screen" />'
+					if strPopup:match("Lytebox") then
+						if strLine:match('src="fhpopup.js"') then													-- Convert from fhpopup to lytebox
+							strLine = strLine:gsub('src="fhpopup.js"','src="lytebox.js"')
+							table.insert(tblFile,strLine)
+							strLine = strLytebox
+							flgHead = false
+						end
 					else
-						strLine = strLine:gsub("src=\"lytebox.js\"","src=\"fhpopup.js\"")
-						if strLine:match(strLytebox) then strLine = "" end
+						strLine = strLine:gsub('src="lytebox.js"','src="fhpopup.js"')						-- Convert from lytebox to fhpopup
+						if strLine:match(strLytebox) then
+							strLine = ''
+							flgHead = false
+						end
 					end
 				else
-					local strHref = strPopup(strLine,intPopup,'"fh'..intName..'"')
-					if strLine ~= strHref then								-- Converted popup in <body>
+					local strHref, flgLine = strAnchor(strLine,strPopup,'"fh'..intHref..'"')				-- Convert popup anchor in <body>
+					if flgLine then
 						strLine = strHref
-						intLine = intLine + 1									-- Count lines altered
+						intLine = intLine + 1																			-- Count converted popup lines
+						intHref = intHref + 1																			-- Count popup per file for href id
 					end
 				end
-				if strLine ~= "" then table.insert(tblFile,strLine) end
+				if strLine ~= '' then table.insert(tblFile,strLine) end
 			end
-			SaveStringToFile(table.concat(tblFile,"\n"),strFile)		-- Save changed .html files
+			SaveStringToFile(table.concat(tblFile,'\n'),strFile)												-- Save changed HTML files
 			ProgressBar.Step(1)
 		end
-		if ProgressBar.Stop() then break end
+		isBarStop = ProgressBar.Stop()
+		if isBarStop then break end
 	end
-	ProgressBar.Close()
+	ProgressBar.Close()																									-- Close the Progress Bar and retrieve its window position
+	IntDataX = tblGauge.ShowX
+	IntDataY = tblGauge.ShowY
 
-	local strLytebox = "\\Family Historian\\Web\\Lytebox"				-- Locate the C:\Program Files\Family Historian\Web\Lytebox path
+	local strLytebox = '\\Family Historian\\Web\\Lytebox'														-- Locate the C:\Program Files\Family Historian\Web\Lytebox path
 	local strProgram = os.getenv("PROGRAMFILES")..strLytebox
-	if not FlgFolderExists(strProgram) then								-- Try alternative Program Files OS Path on 64-bit PC
+	if not FlgFolderExists(strProgram) then																		-- Try alternative Program Files OS Path on 64-bit PC
 		strProgram = ( os.getenv("PROGRAMW6432") or os.getenv("PROGRAMFILES") )..strLytebox
 	end
 	if not FlgFolderExists(strProgram) then
-		fhMessageBox("\n\nError! Cannot find Lytebox installation folder:\n"..strProgram.."\n\n")
+		fhMessageBox('\n\nError! Cannot find Lytebox installation folder:\n'..strProgram..'\n\n')
 		return -1
 	end
 
-	if intPopup < IntPopupCustom then
-		for strFile in lfs.dir(strProgram) do								-- Copy lytebox v4.0 JavaScript & CSS & image files
-			if strFile:match("^[%w_]+%.%w+$") then
-				local strSourceFile = strProgram.."\\"..strFile
-				local strTargetFile = strFolder.."\\"..strFile
-				local fileSource = assert(io.open(strProgram.."\\"..strFile,"rb"))
-				local fileTarget, strError = io.open(strFolder.."\\"..strFile,"wb")
-				fileTarget:write(fileSource:read("*all"))					-- Copy entire file contents
+	if strPopup:match("Lytebox") then
+		for strFile in lfs.dir(strProgram) do																		-- Copy lytebox v4.0 JavaScript & CSS & image files
+			if strFile:match('^[%w_]+%.%w+$') then
+				local fileSource = assert(io.open(strProgram..'\\'..strFile,'rb'))
+				local fileTarget, strError = io.open(strFolder..'\\'..strFile,'wb')
+				fileTarget:write(fileSource:read('*all'))															-- Copy entire file contents
 				assert(fileSource:close())
 				assert(fileTarget:close())
 			end
 		end
-		if intPopup == IntPopupLytebox5 then								-- Create lytebox v5.5 JavaScript & CSS files
-			SaveStringToFile(Str_lytebox_js,strFolder.."\\lytebox.js")
-			SaveStringToFile(Str_lytebox_css,strFolder.."\\lytebox.css")
+		if strPopup:match("5.5") then																				-- Create lytebox v5.5 JavaScript & CSS files
+			SaveStringToFile(Str_lytebox_js,strFolder..'\\lytebox.js')
+			SaveStringToFile(Str_lytebox_css,strFolder..'\\lytebox.css')
 		end
-		if not ProgressBar.Stop() then										-- Delete the fhpopup JavaScript file
-			DeleteFile(strFolder.."\\fhpopup.js")
+		if not isBarStop then																							-- Delete the fhpopup JavaScript file
+			DeleteFile(strFolder..'\\fhpopup.js')
 		end
 	else
-		SaveStringToFile(Str_fhpopup_js,strFolder.."\\fhpopup.js")	-- Create the fhpopup JavaScript file
-		if not ProgressBar.Stop() then										-- Delete all the Lytebox files
+		if strPopup:match("Zoom & Scroll") then
+			SaveStringToFile(Str_fhpopup_custom,strFolder..'\\fhpopup.js')									-- Create the fhpopup Custom JavaScript file
+		else
+			SaveStringToFile(Str_fhpopup_screen,strFolder..'\\fhpopup.js')									-- Create the fhpopup Screen JavaScript file
+		end
+		if not isBarStop then																							-- Delete all the Lytebox files
 			for strFile in lfs.dir(strProgram) do
-				if strFile:match("^[%w_]+%.%w+$") then
-					DeleteFile(strFolder.."\\"..strFile)
+				if strFile:match('^[%w_]+%.%w+$') then
+					DeleteFile(strFolder..'\\'..strFile)
 				end
 			end
 		end
@@ -3395,73 +3604,747 @@ function IntImprovePopup(strFolder,intPopup)
 	return intLine
 end -- function IntImprovePopup
 
+-- Create new Table of Pictures/Reports/Downloads pages for chosen Contents items --
+
+function IntImproveTable(strFolder,tglToPs,tglToRs,tglToDs,isMenu)
+
+	-- Insert HTML line into every table page file --
+
+	local function tableInsert(tblTables,strLine)
+		for intTable, tblTable in ipairs(tblTables) do
+			local strLine = strLine:replace("<tblTable.name>",tblTable.name)			-- Substitute table page name in title lines 
+			table.insert(tblTable.html,strLine)
+		end
+	end -- local function tableInsert
+
+	-- Does ToC link refer to required Picture/Report/Download file --
+
+	local function isTableLink(tblTable,strLink)
+		if tblTable.name == "Downloads" then													-- Table of Downloads link cannot be .html file
+			return tblTable.chosen and not strLink:match("^<li><a href=%p%l%l%l[%l%d]+%.html")
+		else
+			local strFile = strLink:match("^<li><a href=%p(toc%d+%.html)")
+			if tblTable.chosen and strFile then
+				for strLine in io.lines(strFolder.."\\"..strFile) do						-- Read toc99.html until fhcontent fhpage reached
+					if strLine:match("^<div class=%pfhcontent fhpage") then
+						if strLine:match("_Picture") then
+							return ( tblTable.name == "Pictures" )								-- Picture file for Table of Pictures ?
+						else
+							return ( tblTable.name == "Reports" )								-- Report file for Table of Reports ?
+						end
+					end
+				end
+			end
+			return false
+		end
+	end -- local function isTableLink
+
+	local tblIndex = {}																				-- New contents of index.html
+	local intTables = 0																				-- Number of created table pages
+	local tblTables =																				-- Details per table page type
+		{	--		Table Name		Enabled ?			Table Filename and Content	Hyperlinks
+			{ name="Pictures" , chosen=tglToPs, file="_topindex.html", html={}, links=0 },
+			{ name="Reports"  , chosen=tglToRs, file="_torindex.html", html={}, links=0 },
+			{ name="Downloads", chosen=tglToDs, file="_todindex.html", html={}, links=0 },
+		}
+	local isIncluded = "Head"																		-- Identify index.html heading lines in table page files
+
+	for strLine in io.lines(strFolder.."\\index.html") do									-- Read index.html lines & remove comment tags to restore ToC links
+		strLine = strLine:gsub("^<!%-%-See Table of %u%l+<li>(.*)</li>%-%->$","<li>%1</li>")
+		if strLine:match("^<p class=%pFhSiteTitle%p>") then
+			isIncluded = nil																		-- Exclude the index.html Welcome section from table page files
+		elseif strLine:match("^<div class=%pFhTOC%p>$") then
+			isIncluded = "ToC"																		-- Identify the index.html Table of Centents (ToC) section
+		end
+		if not strLine:match("^<li><a href='_%l+%.html'>Table of %u%l+</a></li>$") then -- Discard the Table of Pictures/Reports/Downloads links at end of ToC
+			if isIncluded then
+				if strLine:match("^<title>Welcome</title>$") then							-- Adjust page <title> of table page files
+					tableInsert(tblTables,"<title><tblTable.name></title>")
+				elseif isIncluded == "ToC" then
+					if strLine:match("^<p class=%pFhPageTitle%p>Contents</p>$") then	-- Adjust FhPageTitle of table page files
+						tableInsert(tblTables,"<p class='FhPageTitle'>Table of <tblTable.name></p>")
+					elseif strLine:match("^<li><a href=.+</a></li>$") then					-- Determine which ToC links to include in each table page file
+						for intTable, tblTable in ipairs(tblTables) do
+							if isTableLink(tblTable,strLine) then
+								table.insert(tblTable.html,strLine)								-- Include in table page, but comment out of index.html
+								strLine = "<!--See Table of "..tblTable.name..strLine.."-->"
+								tblTable.links = tblTable.links + 1
+								break																	-- Break out of loop once a link has been matched
+							end
+						end
+					elseif not strLine:match("^<li><a class=.+ href=.+</a></li>$") then-- Exclude external ToC links
+						tableInsert(tblTables,strLine)											-- Copy other ToC lines to each table page file
+						if strLine:match("^</ul>$") then
+							for intTable, tblTable in ipairs(tblTables) do					-- Insert Table of Pictures/Reports/Downloads links at end of index.html ToC
+								if tblTable.links > 0 then
+									table.insert(tblIndex,"<li><a href='"..tblTable.file.."'>Table of "..tblTable.name.."</a></li>")
+								end
+							end
+							isIncluded = "Tail"														-- Identify index.html trailing lines in table page files
+						end
+					end
+				else
+					tableInsert(tblTables,strLine)												-- Copy all "Head" and "Tail" lines to each table page file
+				end
+			end
+			table.insert(tblIndex,strLine)														-- Copy all required lines to index.html
+		end
+	end
+	SaveStringToFile(table.concat(tblIndex,"\n"),strFolder.."\\index.html")			-- Update the index.html file
+	for intTable, tblTable in ipairs(tblTables) do
+		local strTableFile = strFolder.."\\"..tblTable.file
+		if tblTable.links > 0 then
+			SaveStringToFile(table.concat(tblTable.html,"\n"),strTableFile)				-- If any links, create table page file
+			intTables = intTables + 1
+		else
+			DeleteFile(strTableFile)																-- Otherwise, delete old table page file
+		end
+	end
+
+	-- Search each HTML file and convert its menu bar --
+
+	local ProgressBar = MyProgressBar()															-- Create the ProgressBar functions
+	local isBarStop
+	local intHtml = 0
+	for strFile in lfs.dir(strFolder) do
+		if strFile:match("^.+%.html$") then intHtml = intHtml + 1 end					-- Count all HTML files
+	end
+	local intFile = 0
+	for strFile in lfs.dir(strFolder) do
+		if strFile:match("^.+%.html$") then														-- HTML file found
+			ProgressBar.Message(strFile)
+			local tblFile = {}																		-- Table of lines in file
+			local strOldMenu = ""																	-- Old menu bar links
+			local strNewMenu = ""																	-- New menu bar links for comparison
+			strFile = strFolder.."\\"..strFile
+			for strLine in io.lines(strFile) do													-- Read each HTML file line by line
+				if strLine:match("^<li><span.*><a href=%p_%l*index%.html%p>%u%l+</a></span></li>$") then
+					strOldMenu = strOldMenu..strLine											-- Accumulate all existing table page menu links
+					if strLine:match("_nameindex%.html") then									-- Ignore all table page menu links except _nameindex.html
+						if isMenu then
+							for intTable, tblTable in ipairs(tblTables) do					-- Add any table page menu links
+								if tblTable.links > 0 then
+									local strMenu = "<li><span><a href='"..tblTable.file.."'>"..tblTable.name.."</a></span></li>"
+									table.insert(tblFile,strMenu)
+									strNewMenu = strNewMenu..strMenu							-- Accumulate all new table page menu links
+								end
+							end
+						end
+						strNewMenu = strNewMenu..strLine										-- Append the _nameindex.html page menu link
+						table.insert(tblFile,strLine)
+					end
+				else
+					table.insert(tblFile,strLine)												-- Copy all other lines
+				end
+			end
+			intFile = intFile + 1
+			if intFile == 1 then
+				if strOldMenu == strNewMenu then break end									-- If menu bar unchanged in first file then skip all file updates
+				if intHtml > 100 then
+					ProgressBar.Start("Converting Menu Bars",intFile)						-- Otherwise, if more than 100 files, start progress bar
+				end
+			end
+			SaveStringToFile(table.concat(tblFile,"\n"),strFile)							-- Save changed HTML files
+			ProgressBar.Step(1)
+		end
+		isBarStop = ProgressBar.Stop()
+		if isBarStop then break end
+	end
+	ProgressBar.Close()																				-- Close the Progress Bar and retrieve its window position
+	IntDataX = tblGauge.ShowX
+	IntDataY = tblGauge.ShowY
+
+	return intTables
+
+end -- function IntImproveTable
+
+-- Add alternate & married names and idents to _nameindex.html Web/CD/DVD page --
+
+function IntImproveIndex(strFilename,strNames,strStyle,strIdent)
+
+	local tblNameList = {}																-- Name list of index page entries
+	local tblShortcut = {}																-- Shortcut to Name list entries
+	local strPagelink = ''																-- Pagelink to web page for current person
+	local strRecordId = ''																-- Record Id of current person used to make Name list entry distinct
+	local strLifedate = ''																-- Lifedates of current person in index page format or '( - )' if Living
+	local strIdentity = ''																-- Identity text of current person associated with Indentity GUI option
+	local strTitleTxt = ''																-- Tooltip title text for Name list entry
+
+	-- Obtain Individual Lastname & Forenames --
+
+	local function strGetNames(ptrIndiName)
+		local strLastname = fhGetItemText(ptrIndiName,'~:SURNAME')			-- Get the Surname
+		local strForename = fhGetItemText(ptrIndiName,'~:GIVEN_ALL')			-- Get the Forenames etc
+		if strLastname == '' then
+			strLastname = '?'
+		end
+		if strForename == '' then
+			strForename = '?'
+		end
+		strLastname = StrCP1252_UTF8(strLastname)									-- Translate Code Page 1252 characters into UTF-8 bytes
+		strForename = StrCP1252_UTF8(strForename)
+		return StrHTML_Encode(strLastname), StrHTML_Encode(strForename)		-- Convert some symbols to HTML escape sequences
+	end -- local function strGetNames
+
+	-- Obtain Individual Identity Data Conditionally --
+
+	local tblIdentity = {}
+	tblIdentity[1] = { Ident='Record', Tag=' '     , Prefix=' RiD:' }		-- Record Identity
+	tblIdentity[2] = { Ident='Perm'  , Tag='~.RFN' , Prefix=' PRN:' }		-- Permanent Record Number
+	tblIdentity[3] = { Ident='Custom', Tag='~.REFN', Prefix=' CiD:' }		-- Custom Identity
+	tblIdentity[4] = { Ident='Auto'  , Tag='~.RIN' , Prefix=' ARI:' }		-- Automatic Record Identity
+
+	local function strGetIdentity(ptrIndi)
+		local strIdentities = ''
+		if strIdent:match('None') then return '' end
+		for intIdentity, tblIdentity in ipairs(tblIdentity) do					-- Repeat for each GUI Identity option
+			local strIdentity = strRecordId											-- Default to Record Id
+			if not tblIdentity.Ident:match('Record') then						-- Get the Identity text
+				strIdentity = fhGetValueAsText(fhGetItemPtr(ptrIndi,tblIdentity.Tag))
+			end
+			if strIdentity ~= '' and ( strIdent:match(tblIdentity.Ident) or strIdent:match('All') ) then
+				strIdentity = tblIdentity.Prefix..strIdentity					-- Add prefix if required
+			else
+				strIdentity = ''
+			end
+			strIdentities = strIdentities..strIdentity							-- Accumulate each required Identity
+		end
+		if strIdentities ~= '' then strIdentities = '<p class="ident">'..StrHTML_Encode(StrCP1252_UTF8(strIdentities))..'</p>' end
+		return strIdentities
+	end -- local function strGetIdentity
+
+	-- Find Existing Name list entry and update RecordId & Identity --
+
+	local function isExisting(strEntry)
+		local tblEntry = tblShortcut[strEntry] or {}								-- Lookup shortcut to Name list entries
+		for i, intEntry in ipairs(tblEntry) do										-- Search any matching entries
+			local strRecId = tblNameList[intEntry].RecordId
+			if strRecId == strRecordId or strRecId == '' then					-- Record Id matches, or not yet assigned
+				tblNameList[intEntry].RecordId = strRecordId
+				tblNameList[intEntry].Identity = strIdentity
+				return true																-- Found entry with matching Pagelink, FullName, Lifedate & RecordId
+			end
+		end
+		return false																		-- No entry found
+	end -- local function isExisting
+
+	-- Obtain matching Pagelink for own web page or relative's web page --
+
+	local function strGetPageLink(ptrIndi,intFamilyId)
+		local strLastname, strForename = strGetNames(fhGetItemPtr(ptrIndi,'~.NAME'))
+		local strSelfname = strLastname..strForename								-- Pagelink + Selfname + Lifedate is Shortcut index to Name list
+		local strPagelink = ''															-- Pagelink for own or relative's featured web page
+		local intRecordId = 0															-- RecordId for current Family or Individual record
+		local flagLiving = fhGetItemText(ptrIndi,"~._FLGS.__LIVING")			-- 'Y' or ''
+		local ptrLink = fhNewItemPtr()												-- Pointer to self and each relative
+		local ptrFams = fhNewItemPtr()												-- Pointer to each Family of the above
+		repeat
+			for intTag, strTag in ipairs({ '~', '~.~FATH[1]>', '~.~MOTH[1]>', '~.~SPOU[1]>', '~.~CHIL[1]>' }) do
+				local intNext = 1
+				ptrLink:MoveTo(ptrIndi,strTag)										-- Search own and each relative's web page links
+				while ptrLink:IsNotNull() do
+					if intFamilyId ~= 0 then											-- Family web page search needed
+						ptrFams:MoveTo(ptrLink,'~.FAMS')
+						while ptrFams:IsNotNull() do									-- Check each Family Pagelink
+							intRecordId = fhGetRecordId(fhGetValueAsLink(ptrFams))
+							strPagelink = '"fam'..tostring(intRecordId)..'.html"'
+							if intFamilyId < 0 then
+								if isExisting(strPagelink..strSelfname..strLifedate) then return strPagelink end
+							elseif intFamilyId == intRecordId then
+								return strPagelink										-- Husband entry needs Family Pagelink (could check web page file exists)
+							end
+							ptrFams:MoveNext('SAME_TAG')
+						end
+					end
+					intRecordId = fhGetRecordId(ptrLink)							-- Check the Individual Pagelink
+					strPagelink = '"ind'..tostring(intRecordId)..'.html"'
+					if isExisting(strPagelink..strSelfname..strLifedate) then return strPagelink end
+					if strTag == '~' then
+						ptrLink:SetNull()												-- Only one instance of self, so close while ptrLink:IsNotNull() loop
+					else
+						intNext = intNext + 1											-- Next instance of relative e.g. '~.~SPOU[2]>' or '~.~CHIL[9]>'
+						ptrLink:MoveTo(ptrIndi,strTag:gsub('1',intNext))		-- ptrLink:MoveNext('SAME_TAG') does not work
+					end
+				end
+			end
+			if strLifedate == '( - )' then flagLiving = '' end					-- After trying blank Lifedate exit repeat loop
+			if flagLiving == 'Y' then strLifedate = '( - )' end					-- If Living flag then try blank Lifedate
+		until flagLiving == ''
+		return nil																		-- No matching entry found
+	end -- local function strGetPageLink
+
+	-- Conditionally Update Name List and Shortcut --
+
+	local function doUpdateNameList(strLastname,strForename,strFullname)
+		local strEntry = strPagelink..strLastname..strForename..strLifedate
+		if not tblShortcut[strEntry] then tblShortcut[strEntry] = {} end	-- New shortcut to Name entry needed
+		if #tblShortcut[strEntry] == 0 or strRecordId == '' then				-- New shortcut to new Name, or replica Name in name index page
+			table.insert(tblNameList,{ Pagelink=strPagelink, Lastname=strLastname, Forename=strForename, Fullname=strFullname, Lifedate=strLifedate, RecordId=strRecordId, Identity=strIdentity, TitleTxt=strTitleTxt })
+			table.insert(tblShortcut[strEntry],#tblNameList)					-- Save shortcut to Name entry, which may have replicas
+		end
+	end -- local function doUpdateNameList
+
+	-- Comparison for table sort that returns true when 1st is less than 2nd --
+
+	local function isLessThan(tbl1st,tbl2nd)
+		local str1stPref = ''						-- Adjust sort so non-alpabetic initial chars come first but ordered according to any subsequent letters
+		local str2ndPref = ''
+		if not tbl1st["Lastname"]:match('^%u') then str1stPref = '!'..(tbl1st["Lastname"]:match('(%u+)') or '!') end
+		if not tbl2nd["Lastname"]:match('^%u') then str2ndPref = '!'..(tbl2nd["Lastname"]:match('(%u+)') or '!') end
+		local str1stName = str1stPref..tbl1st["Lastname"]..tbl1st["Forename"]..tbl1st["Lifedate"]..tbl1st["Pagelink"]
+		local str2ndName = str2ndPref..tbl2nd["Lastname"]..tbl2nd["Forename"]..tbl2nd["Lifedate"]..tbl2nd["Pagelink"]
+		return str1stName < str2ndName
+	end -- local function isLessThan
+
+	--	Read _nameindex.html file of text into tblNameIndex, down to <div class="FhIndexList">
+
+	fhOverridePreference("SURNAMES_UPPERCASE",true,true)
+	local strStyleCSS = ' '
+	if strStyle:match("Italics")   then strStyleCSS = strStyleCSS..'font-style:italic; ' end
+	if strStyle:match("Underline") then strStyleCSS = strStyleCSS..'text-decoration:underline; ' end
+	local intAlphabet = 0																-- Alphabet Anchor Hyperlinks line number
+	local tblNameIndex = {}															-- Table of _nameindex.html leading text lines
+	local strNameIndex = ''															-- Text of _nameindex.html trailing text lines
+	local fileNameIndex = io.input(strFilename)
+	for strLine in io.lines() do														-- Read _nameindex.html leading text line by line
+		-- Exclude XHTML CSS married & alternate & ident style
+		if not strLine:match('^<style type="text/css"> .*married .*alternate .*ident .* </style>') then
+			if strLine == '</head>' then												-- Found end of Header so insert XHTML CSS married & alternate & ident styles
+				table.insert(tblNameIndex,'<style type="text/css"> /*<![CDATA[*/ span.married {'..strStyleCSS..'} span.alternate {'..strStyleCSS..'} p.ident { margin-left:30em; margin-bottom:-1.25em; } /*]]>*/ </style>')
+			end
+			table.insert(tblNameIndex,strLine)										-- Save leading text lines
+			if strLine:match('^<p><a href=.*</a></p>$') then
+				intAlphabet = #tblNameIndex											-- Save index to Alphabet Anchor Hyperlinks line
+			end
+			if strLine == '<div class="FhIndexList">' then break end			-- Pause at <div class="FhIndexList"> line
+		end
+	end
+
+	-- Read _nameindex.html web page link & full name & life dates into a tblNameList and tblShortcut dictionary
+
+	local strLastname = ''
+	local strForename = ''
+	local strFullname = ''
+	local intFamilyId = 0
+	for strLine in io.lines() do														-- Read _nameindex.html Pagelink & Fullname & Lifedate lines 
+		strPagelink, strFullname, strLifedate = strLine:match('^<li>.-<a href=(%p%w-%.html%p)>(.+ )(%(.-%)).-</a></li>$')
+		if strPagelink and strFullname and strLifedate then						-- List the entry details
+			if not ( strFullname:match(' title="%u%l+ Name">')					-- Exclude alternate/married names with tooltip title="Alternate/Married Name"
+					or strFullname:match('</?i]>')									-- or with legacy <i> italics </i>
+					or strFullname:match('</?span.->') ) then						-- or with <span class=...> name </span>
+				strLastname = strFullname:match('([^%l]+), ') or '?'
+				strForename = strFullname:match(strLastname:plain()..', (.+) ') or '?'
+				doUpdateNameList(strLastname,strForename,strLastname..', '..strForename..' ')
+				if strPagelink:match('fam') then intFamilyId = -1 end
+			end
+		end
+		if strLine == '</div>' then
+			strNameIndex = '</div>\n'													-- Save _nameindex.html trailing lines
+			break
+		end
+	end
+	for strLine in io.lines() do														-- Save _nameindex.html trailing lines
+		strNameIndex = strNameIndex..strLine..'\n'
+	end
+	io.close(fileNameIndex)
+
+	-- Search all GEDCOM Names to add Alternate Names &/or Married Womens Surnames to tables with correct web page link and Identity
+
+	local ptrName = fhNewItemPtr()
+	local ptrFams = fhNewItemPtr()
+	local ptrFamr = fhNewItemPtr()
+	local ptrSpou = fhNewItemPtr()
+	local strStat = ''
+	local ptrIndi = fhNewItemPtr()
+	ptrIndi:MoveToFirstRecord('INDI')
+	while ptrIndi:IsNotNull() do														-- Loop through every Individual to ensure RecordId & Identity added to Primary Names
+		strRecordId = tostring(fhGetRecordId(ptrIndi))							-- Get current RecordId text
+		strLifedate = '('..fhCallBuiltInFunction("LifeDates2",ptrIndi)..')'	-- Get current Lifedate text in name index format
+		strIdentity = strGetIdentity(ptrIndi)										-- Get current Identity text required by GUI option
+		strPagelink = strGetPageLink(ptrIndi,intFamilyId)						-- Get current Pagelink text from matching Name list entry
+		if strPagelink then
+			ptrName = fhGetItemPtr(ptrIndi,'~.NAME')
+
+			if strNames:match(" Married ") then 									-- Add Married Womens Surnames
+				strTitleTxt = ' title="Married Name"'
+				if fhGetItemText(ptrIndi,'~.SEX') == "Female" then				-- For Females use her Forename with the Husband's Lastname
+					strLastname, strForename = strGetNames(ptrName)				-- Get her Lastname & Forename
+					ptrFams:MoveTo(ptrIndi,'~.FAMS')
+					while ptrFams:IsNotNull() do
+	                ptrFamr = fhGetValueAsLink(ptrFams)
+						ptrSpou = fhGetItemPtr(ptrFamr,'~.HUSB>')					-- Check husband is Male
+						if fhGetItemText(ptrSpou,'~.SEX') == "Male" then
+		                strStat = fhGetItemText(ptrFamr,'~._STAT')
+		                if strStat ~= "Never Married" and strStat ~= "Unmarried Couple" then
+								if intFamilyId < 0 then								-- Use the Husband's family Pagelink
+									strPagelink = strGetPageLink(ptrSpou,fhGetRecordId(ptrFamr))
+								end
+								if strPagelink then										-- Get the Husband's Surname
+									strLastname = strGetNames(fhGetItemPtr(ptrSpou,'~.NAME'))
+									if strLastname ~= '?' then						-- Add the Married Name in italics &/or underline with tooltip title
+										doUpdateNameList(strLastname,strForename,'<span class="married">'..strLastname..'</span>, '..strForename..' ')
+									end
+								end
+							end
+						end
+						ptrFams:MoveNext('SAME_TAG')
+					end
+				end
+			end -- Add Married Womens Surnames
+
+			if strNames:match(" Alternate ") then									-- Add Alternate Names
+				strTitleTxt = ' title="Alternate Name"'
+				ptrName:MoveNext('SAME_TAG')											-- Check each Alternate Name entry
+				while ptrName:IsNotNull() do
+					strLastname, strForename = strGetNames(ptrName)				-- Get Alternate Surname & Forename
+					if strLastname..strForename ~= '??' then						-- Add the Alternate Name in italics &/or underline with tooltip title
+						doUpdateNameList(strLastname,strForename,'<span class="alternate">'..strLastname..', '..strForename..'</span> ')
+					end
+					ptrName:MoveNext('SAME_TAG')
+				end
+			end -- Add Alternate Names
+
+		end
+		ptrIndi:MoveNext()
+	end
+
+	table.sort(tblNameList,isLessThan) 												-- Sort the NameList alphabetically by Name and Lifedates and Pagelink
+
+	local strHeadName = nil
+	local strAlphabet = '<p>A&nbsp;B&nbsp;C&nbsp;D&nbsp;E&nbsp;F&nbsp;G&nbsp;H&nbsp;I&nbsp;J&nbsp;K&nbsp;L&nbsp;M&nbsp;N&nbsp;O&nbsp;P&nbsp;Q&nbsp;R&nbsp;S&nbsp;T&nbsp;U&nbsp;V&nbsp;W&nbsp;X&nbsp;Y&nbsp;Z&nbsp;</p>'
+	local strNextInit = ''
+	local strPrevInit = ''
+	for i, tblItem in ipairs(tblNameList) do										-- Add each NameList item to _nameindex.html text lines
+		strPagelink = tblItem["Pagelink"]
+		strLastname = tblItem["Lastname"]
+		strForename = tblItem["Forename"]
+		strFullname = tblItem["Fullname"]
+		strLifedate = tblItem["Lifedate"]
+		strIdentity = tblItem["Identity"]
+		strTitleTxt = tblItem["TitleTxt"]
+		if strHeadName ~= strLastname then
+			if strHeadName then table.insert(tblNameIndex,'</ul>') end
+			strHeadName = strLastname													-- Each new Lastname needs a Header and an unnumbered list <ul> structure
+			strNextInit = strHeadName:sub(1,1)
+			if strPrevInit ~= strNextInit											-- Each new Initial Letter needs an Alphabet Hyperlink <a href="#I">I</a> and Anchor <a name="I"></a>
+			and strNextInit:match('%u') then
+				strAlphabet = strAlphabet:gsub(strNextInit..'&nbsp;','<a href="#'..strNextInit..'">'..strNextInit..'</a>&nbsp;')
+				strPrevInit = '<a id="'..strNextInit..'"></a>'
+			else
+				strPrevInit = ''
+			end
+			table.insert(tblNameIndex,'<p>'..strPrevInit..strHeadName:gsub('^?$','(no surname)'):sub(1,22)..'</p>')	-- Change ? to (no surname) and truncate to 22 chars to avoid overwriting Name list
+			table.insert(tblNameIndex,'<ul>')
+			strPrevInit = strNextInit
+		end
+		table.insert(tblNameIndex,'<li>'..strIdentity..'<a href='..strPagelink..strTitleTxt..'>'..strFullname..strLifedate..'</a></li>')	-- Insert Identity, Page link, full Name & Life dates
+	end
+	tblNameIndex[intAlphabet] = strAlphabet:gsub('&nbsp;</p>$','</p>')		-- Remove trailing &nbsp; from Alphabet Anchor Hyperlinks
+	table.insert(tblNameIndex,'</ul>\n')
+	strNameIndex = table.concat(tblNameIndex,'\n')..strNameIndex
+	SaveStringToFile(strNameIndex,strFilename)									-- Save _nameindex.html file
+
+	return #tblNameList																	-- Number of names in list
+
+end -- function IntImproveIndex
+
+-- Create a 'gendex.txt' file for the http://gendexnetwork.org/ GenDex web site --
+
+function IntCreateGenDex(strFolder,strGenDex)
+
+	-- Compose webpage Filename matching Individual Record --
+
+	local function strFilename(ptrIndi)
+			local strFile = "ind"..fhGetRecordId(ptrIndi)..".html"					-- Does "ind{RecId}.html" Individual Summary webpage file exist?
+			if FlgFileExists(strFolder.."\\"..strFile) then return strFile end
+			local ptrFams = fhNewItemPtr()
+			ptrFams:MoveTo(ptrIndi,"~.FAMS>")
+			strFile = "fam"..fhGetRecordId(ptrFams)..".html"						-- Does "fam{RecId}.html" Family Group Sheet webpage file exist?
+			if FlgFileExists(strFolder.."\\"..strFile) then return strFile end
+			return nil
+	end -- local function strFilename
+
+	local strGedcomDate = NewGedcomDate()												-- Define local function from prototype below
+
+	fhOverridePreference("SURNAMES_UPPERCASE",true,true)
+	local tblGenDex = {}
+	local ptrIndi = fhNewItemPtr()
+	ptrIndi:MoveToFirstRecord("INDI")
+	while ptrIndi:IsNotNull() do
+		local strFile = strFilename(ptrIndi)
+		if strFile
+		and not ( strGenDex:match("Living")  and fhGetItemText(ptrIndi,"~._FLGS.__LIVING")  == 'Y' )
+		and not ( strGenDex:match("Private") and fhGetItemText(ptrIndi,"~._FLGS.__PRIVATE") == 'Y' ) then
+			local tblData = {}
+			table.insert(tblData,strFile)												-- Reference is featured webpage filename
+			table.insert(tblData,fhGetItemText(ptrIndi,"~.NAME:SURNAME"))		-- Surname in uppercase
+			table.insert(tblData,fhGetItemText(ptrIndi,"~.NAME:STORED"))			-- Stored full name
+			for intList, tblList in ipairs ( { { "~.BIRT", "~.BAPM", "~.CHR" }, { "~.DEAT", "~.BURI", "~.CREM" } } ) do
+				local strDate = ""
+				local strPlac = ""
+				for intFact, strFact in ipairs ( tblList ) do
+					local ptrFact = fhGetItemPtr(ptrIndi,strFact)					-- Get Birth/Baptism/Christening or Death/Burial/Cremation Date & Place
+					if ptrFact:IsNotNull() then
+						if strDate == "" then strDate = fhGetItemText(ptrFact,"~.DATE") end
+						if strPlac == "" then strPlac = fhGetItemText(ptrFact,"~.PLAC") end
+					end
+				end
+				table.insert(tblData,strGedcomDate(strDate))							-- Convert date to GEDCOM format
+				table.insert(tblData,strPlac)
+			end													-- Should characters be converted from CP1252 to UTF-8 ???
+			table.insert(tblData,"")
+			table.insert(tblGenDex,table.concat(tblData,"|"))						-- Create "|" separated Individual data entry
+		end
+		ptrIndi:MoveNext()
+	end
+
+	SaveStringToFile(table.concat(tblGenDex,"\n"),strFolder.."\\gendex.txt")	-- Create the GenDex file in website folder
+ 
+	return #tblGenDex
+
+end -- function IntCreateGenDex
+
+-- Convert any Date to Gedcom Format Function Prototype --
+
+function NewGedcomDate()
+
+	-- Convert 'approx.', 'calculated', 'estimated' dates --
+
+	local tblQual = { app="ABT ", cal="CAL ", est="EST " }
+
+	local function strQualifiedDate(strDate,strQual)
+		if strQual then
+			return tblQual[strQual:sub(1,3)]..strDate
+		else
+			return nil
+		end
+	end -- local function strQualifiedDate
+
+	-- Convert a Quarter Date to Gedcom format --
+
+	local tblBeg = { "JAN ", "APR ", "JUL ", "OCT " }
+	local tblEnd = { "MAR ", "JUN ", "SEP ", "DEC " }
+
+	local function strQuarterDate(strNum,strYear)
+		if strNum then
+			local intNum = tonumber(strNum)
+			return "BET "..tblBeg[intNum]..strYear.." AND "..tblEnd[intNum]..strYear
+		else
+			return nil
+		end
+	end -- local function strQuarterDate
+
+	-- Convert any Date to Gedcom format --
+
+	local tblGedcomDate =
+	{
+		January="JAN", February="FEB", March="MAR", April="APR", May="MAY", June="JUN", July="JUL", August="AUG", September="SEP", October="OCT", November="NOV", December="DEC",
+		from="FROM", ["to "]="TO ",
+		before="BEF", after="AFT", between="BET", ["and"]="AND"
+	}
+
+	return function(strDate)
+		local strText = ""
+		if strDate:match("\".*\"") then													-- Convert 'Date Phrase' must be first to avoid converting months, etc in Phrase text
+			local strGsub = "(.-)%(?\"(.*)\"%)?$"
+			strText = strDate:gsub(strGsub,"(%2)")										-- Separate Phrase (Text) from interpreted Date
+			strDate = strDate:gsub(strGsub,"%1")
+			if strDate ~= "" then strDate = "INT "..strDate end						-- Convert '...interpreted as'
+		end
+		strDate = strDate:gsub("(.*) %((.*)%)$",strQualifiedDate)					-- Convert (qualified) date
+		for strOld, strNew in pairs ( tblGedcomDate ) do
+			strDate = strDate:gsub(strOld,strNew)										-- Convert months, and 'Period' and 'Range' dates
+		end
+		strDate = strDate:gsub("^Q([1-4]) (%d%d%d%d)",strQuarterDate)			-- Convert 'Quarter Date'
+		return strDate..strText
+	end -- anonymous function
+
+end -- function NewGedcomDate
+
 -- Graphical User Interface --
 
 function GUI_MainDialogue()
 
 	-- Create GUI controls
-	local	btnFolder	= iup.button	{ expand="YES", padding="20", fgcolor=StrGreen,	title="Browse to the Project '\\Public\\FH Website' or '\\Public\\FH CD-DVD\\data' or equivalent HTML folder." }
-	local	txtFolder	= iup.text	{ expand="YES", padding="02", fgcolor=StrBlack,	value=" ", readonly="YES", alignment="ACENTER" }
-	local	txtStatus	= iup.text	{ expand="YES", padding="20", fgcolor=StrBlack,	value=" ", readonly="YES", alignment="ACENTER" }
-	local	vbxFolder	= iup.vbox	{ font=StrFontBody, alignment="ACENTER", btnFolder, txtFolder, txtStatus }
-	local	frmFolder	= iup.frame	{ font=StrFontHead, fgcolor=StrBlack, vbxFolder, title="  HTML Folder  " }
+	local	btnFolder	= iup.button	{ tip=" Click here to choose HTML folder ", title="Browse to the Project '\\Public\\FH Website' or '\\Public\\FH CD-DVD\\data' or equivalent HTML folder" }
+	local	txtFolder	= iup.text	{ tip=" Chosen HTML folder full path ", border="NO" }
+	local	txtStatus	= iup.text	{ tip=" Advisory HTML folder message ", border="NO" }
+	local	vbxFolder	= iup.vbox	{ btnFolder, txtFolder, txtStatus }
 
-	local	btnIndex	= iup.button	{ expand="YES", padding="20", fgcolor=StrGreen,	title="Adjust the Alternate Names and Married Women Surnames in 'Index of Names' using italic/underline font." }
-	local	lblIndex	= iup.label	{ expand="NO" , padding="20", fgcolor=StrBlack,	title="Names to include : ", alignment="ARIGHT" }
-	local	lstIndex	= iup.list	{ expand="NO" , padding="20", fgcolor=StrGreen,	value=IntIndex, dropdown="YES", "   Default Primary Names only.", "   Add Alternate Names only.", "   Add Married Surnames only.", "   Add Alternate & Married Names." }
-	local	lblStyle	= iup.label	{ expand="NO" , padding="20", fgcolor=StrBlack,	title="Style : ", alignment="ARIGHT" }
-	local	lstStyle	= iup.list	{ expand="NO" , padding="20", fgcolor=StrGreen,	value=IntStyle, dropdown="YES", "   Italics only.", "   Underline only.", "   Italics & Underline." }
-	local	hbxStyle	= iup.hbox	{ alignment="ACENTER", gap="10", margin="10x0", lblIndex, lstIndex, lblStyle, lstStyle }
-	local	txtIndex	= iup.text	{ expand="YES", padding="20", fgcolor=StrBlack,	value=" ", readonly="YES", alignment="ACENTER", tip="Number of Alternate Names &/or Married Women Surnames added to 'Index of Names' page." }
-	local	vbxIndex	= iup.vbox	{ font=StrFontBody, alignment="ACENTER", btnIndex, hbxIndex, hbxStyle, txtIndex }
-	local	frmIndex	= iup.frame	{ font=StrFontHead, fgcolor=StrBlack, vbxIndex,	title="  Index of Names  " }
+	local	lblPages	= iup.label	{ title=" Open URL target pages:" }
+	local	lstPages	= iup.list	{ tip=" Choose URL target attribute ", value=IntPages, "   In same Page frame", "   In new Tab or Window" }
+	local	lblChars	= iup.label	{ title=" Abbreviate long URL:" }
+	local	lstChars	= iup.list	{ tip=" Choose URL text abbreviation length ", value=IntChars, "   Never", "   > 30 chars", "   > 50 chars", "   > 70 chars", "   > 90 chars" }
+	local	hbxHyper	= iup.hbox	{ lblPages, lstPages, lblChars, lstChars }
+	local	btnHyper	= iup.button	{ tip=" Click here to convert URL Hyperlinks and Hypertext ", title="Convert all URL (www. http: https: ftp: mailto:) to active Hyperlinks and alter special Hypertext" }
+	local	txtHyper	= iup.text	{ tip=" Number of converted lines of Hyperlinks / Text in the HTML folder pages ", border="NO" }
+	local	vbxHyper	= iup.vbox	{ hbxHyper, btnHyper, txtHyper }
 
-	local	btnHyper	= iup.button	{ expand="YES", padding="20", fgcolor=StrGreen,	title="Ensure every Uniform Resource Locator (URL) www. http: https: ftp: && mailto: is an active Hyperlink." }
-	local	lblHyper	= iup.label	{ expand="NO" , padding="20", fgcolor=StrBlack,	title="Method to open URL Hyperlink target pages : ", alignment="ARIGHT" }
-	local	lstHyper	= iup.list	{ expand="NO" , padding="20", fgcolor=StrGreen,	value=IntHyper, dropdown="YES", "   Open in the same Page frame.", "   Open in a new Tab or Window." }
-	local	hbxHyper	= iup.hbox	{ alignment="ACENTER", gap="10", margin="10x0", lblHyper, lstHyper }
-	local	txtHyper	= iup.text	{ expand="YES", padding="20", fgcolor=StrBlack,	value=" ", readonly="YES", alignment="ACENTER", tip="Number of lines with URL altered in 'Individual' or 'Family' pages." }
-	local	vbxHyper	= iup.vbox	{ font=StrFontBody, alignment="ACENTER", btnHyper, hbxHyper, txtHyper }
-	local	frmHyper	= iup.frame	{ font=StrFontHead, fgcolor=StrBlack, vbxHyper,	title="  URL Hyperlinks  " }
+	local	lblPopup	= iup.label	{ title=" Version of image window Popup:" }
+	local	lstPopup	= iup.list	{ tip=" Choose image popup version ", value=IntPopup, "   Default Lytebox v4.0 supplied with FH", "   Updated Lytebox v5.5 from lytebox.com", "   Customised version with Zoom & Scroll", "   Customised version Large Screen popup" }
+	local	hbxPopup	= iup.hbox	{ lblPopup, lstPopup }
+	local	btnPopup	= iup.button	{ tip=" Click here to convert image Popups ", title="Convert all image window Popups to one of the alternative versions chosen above" }
+	local	txtPopup	= iup.text	{ tip=" Number of converted image Popups in the HTML folder pages ", border="NO" }
+	local	vbxPopup	= iup.vbox	{ hbxPopup, btnPopup, txtPopup }
 
-	local	btnPopup	= iup.button	{ expand="YES", padding="20", fgcolor=StrGreen,	title="Convert all image window Popups to one of the alternative versions selected below." }
-	local	lblPopup	= iup.label	{ expand="NO" , padding="20", fgcolor=StrBlack,	title="Version of image window Popup : ", alignment="ARIGHT" }
-	local	lstPopup	= iup.list	{ expand="NO" , padding="20", fgcolor=StrGreen,	value=IntPopup, dropdown="YES", "   Default Lytebox v4.0 supplied with FH.", "   Updated Lytebox v5.5 from lytebox.com.", "   Customised version with Zoom & Scroll." }
-	local	hbxPopup	= iup.hbox	{ alignment="ACENTER", gap="10", margin="10x0", lblPopup, lstPopup }
-	local	txtPopup	= iup.text	{ expand="YES", padding="20", fgcolor=StrBlack,	value=" ", readonly="YES", alignment="ACENTER", tip="Number of image Popups altered in 'Individual' or 'Family' pages." }
-	local	vbxPopup	= iup.vbox	{ font=StrFontBody, alignment="ACENTER", btnPopup, hbxPopup, txtPopup }
-	local	frmPopup	= iup.frame	{ font=StrFontHead, fgcolor=StrBlack, vbxPopup,	title="  Image Popups  " }
+	local	tglToPs	= iup.toggle	{ title=" Table of Pictures: " , value=StrToPs, rightbutton="YES", tip=" Create a Table of Picture Images ? " }
+	local	tglToRs	= iup.toggle	{ title="  Table of Reports: " , value=StrToRs, rightbutton="YES", tip=" Create a Table of all Reports ? " }
+	local	tglToDs	= iup.toggle	{ title="Table of Downloads: " , value=StrToDs, rightbutton="YES", tip=" Create a Table of File Downloads ? " }
+	local	tglMenu	= iup.toggle	{ title="     Links in Menu: " , value=StrMenu, rightbutton="YES", tip=" Include links in the Menu Bar ? " }
+	local	hbxTable	= iup.hbox	{ tglToPs, tglToRs, tglToDs, tglMenu, homogeneous="YES", }
+	local	btnTable	= iup.button	{ tip=" Click here to create custom Tables of Contents ", title="Create a custom Table for each type of Contents item chosen above" }
+	local	txtTable	= iup.text	{ tip=" Number of custom Tables of items created from Contents items ", border="NO" }
+	local	vbxTable	= iup.vbox	{ hbxTable, btnTable, txtTable }
 
-	local	btnReset	= iup.button	{ expand="YES", padding="10", fgcolor=StrGreen,	title="Restore Defaults" }
-	local	btnFont	= iup.button	{ expand="YES", padding="10", fgcolor=StrGreen,	title="Set Interface Font" }
-			BtnHelp	= iup.button	{ expand="YES", padding="10", fgcolor=StrGreen,	title="  Help && Advice" }
-	local	btnClose	= iup.button	{ expand="YES", padding="10", fgcolor=StrRed,	title="Close Plugin" }
-	local	boxOption	= iup.hbox	{ alignment="ACENTER", gap="10", margin="10x0", btnReset, btnFont, BtnHelp, btnClose }
+	local	lblNames	= iup.label	{ title=" Names:" }
+	local	lstNames	= iup.list	{ tip=" Choose Names to include in Index ", value=IntNames, "   Default Primary Names only", "   Add Alternate Names only", "   Add Married Surnames only", "   Add Alternate & Married Names" }
+	local	lblStyle	= iup.label	{ title=" Style:" }
+	local	lstStyle	= iup.list	{ tip=" Choose font style of additional Names ", value=IntStyle, "   Italics only", "   Underline only", "   Italics & Underline" }
+	local	lblIdent	= iup.label	{ title=" Identity:" }
+	local	lstIdent	= iup.list	{ tip=" Choose identities to include ", value=IntIdent, "   None", "   Record Id", "   Perm Rec No", "   Custom Id", "   Auto Rec Id", "   All Idents"  }
+	local	hbxIndex	= iup.hbox	{ lblNames, lstNames, lblStyle, lstStyle, lblIdent, lstIdent }
+	local	btnIndex	= iup.button	{ tip=" Click here to convert Index of Names ", title="Adjust the Alternate Names / Married Women Surnames in 'Index of Names' using chosen font style" }
+	local	txtIndex	= iup.text	{ tip=" Number of Names processed in the 'Index of Names' page ", border="NO" }
+	local	vbxIndex	= iup.vbox	{ hbxIndex, btnIndex, txtIndex }
+
+	local	lblGenDex	= iup.label	{ title=" Exclusion Flags:" }
+	local	lstGenDex	= iup.list	{ tip=" Choose flags to exclude Individuals ", value=IntGenDex, "   None", "   Private only", "   Living only", "   Private & Living"  }
+	local	hbxGenDex	= iup.hbox	{ lblGenDex, lstGenDex }
+	local	btnGenDex	= iup.button	{ tip=" Click here to create 'gendex.txt' file ", title="Create a 'gendex.txt' file excluding Individuals with chosen flags" }
+	local	txtGenDex	= iup.text	{ tip=" Number of Individuals included in the 'gendex.txt' file ", border="NO" }
+	local	vbxGenDex	= iup.vbox	{ hbxGenDex, btnGenDex, txtGenDex }
+
+	local	btnReset	= iup.button	{ title="Restore Defaults"	, tip=" Restore all tab option settings, and window positions and sizes " }
+	local	btnFont	= iup.button	{ title="Set Interface Font"	, tip=" Alter the window interface font " }
+			BtnHelp	= iup.button	{ title="  Help && Advice"	, tip=" Access the online Help and Advice pages " }
+	local	btnClose	= iup.button	{ title="Close Plugin"			, tip=" Close this Plugin " }
+
+	local strInitialText = " No improvement executed in this session "
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control	=	1~fgcolor	, 2~alignment, 3~expand	, 4~padding, 5~gap	, 6~margin, 7~readonly	, 8~dropdown	, 9~font		Dialogue controls
+		[btnFolder]	= { StrGreen	, false		, false		, "4x8"	,	false	,	false	,	false		,	false		,	false		},
+		[txtFolder]	= { StrBlack	, "ACENTER"	, false		, "0x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[txtStatus]	= { StrBlack	, "ACENTER"	, false		, "4x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[vbxFolder]	= { StrBlack	, "ACENTER"	, false		, false	,	"10"	,	false	,	false		,	false		,	StrFontBody},
+
+		[lblPages]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstPages]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[lblChars]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstChars]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[hbxHyper]	= { StrBlack	, "ACENTER"	, false		, false	,	"4"		,	"0x0"	,	false		,	false		,	false		},
+		[btnHyper]	= { StrGreen	, false		, false		, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[txtHyper]	= { StrBlack	, "ACENTER"	, false		, "0x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[vbxHyper]	= { StrBlack	, "ACENTER"	, false		, false	,	"10"	,	false	,	false		,	false		,	StrFontBody},
+
+		[lblPopup]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstPopup]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[hbxPopup]	= { StrBlack	, "ACENTER"	, false		, false	,	"4"		,	"0x0"	,	false		,	false		,	false		},
+		[btnPopup]	= { StrGreen	, false		, false		, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[txtPopup]	= { StrBlack	, "ACENTER"	, false		, "0x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[vbxPopup]	= { StrBlack	, "ACENTER"	, false		, false	,	"10"	,	false	,	false		,	false		,	StrFontBody},
+
+		[hbxTable]	= { StrBlack	, "ACENTER"	, false		, false	,	"4"		,	"0x8"	,	false		,	false		,	false		},
+		[btnTable]	= { StrGreen	, false		, false		, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[txtTable]	= { StrBlack	, "ACENTER"	, false		, "0x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[vbxTable]	= { StrBlack	, "ACENTER"	, false		, false	,	"10"	,	false	,	false		,	false		,	StrFontBody},
+
+		[lblNames]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstNames]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[lblStyle]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstStyle]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[lblIdent]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstIdent]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[hbxIndex]	= { StrBlack	, "ACENTER"	, false		, false	,	"4"		,	"0x0"	,	false		,	false		,	false		},
+		[btnIndex]	= { StrGreen	, false		, false		, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[txtIndex]	= { StrBlack	, "ACENTER"	, false		, "0x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[vbxIndex]	= { StrBlack	, "ACENTER"	, false		, false	,	"10"	,	false	,	false		,	false		,	StrFontBody},
+
+		[lblGenDex]	= { StrBlack	, "ARIGHT"	, "NO"			, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[lstGenDex]	= { StrGreen	, false		, "NO"			, "0x8"	,	false	,	false	,	false		,	"YES"		,	false		},
+		[hbxGenDex]	= { StrBlack	, "ACENTER"	, false		, false	,	"4"		,	"0x0"	,	false		,	false		,	false		},
+		[btnGenDex]	= { StrGreen	, false		, false		, "0x8"	,	false	,	false	,	false		,	false		,	false		},
+		[txtGenDex]	= { StrBlack	, "ACENTER"	, false		, "0x8"	,	false	,	false	,	"YES"		,	false		,	false		},
+		[vbxGenDex]	= { StrBlack	, "ACENTER"	, false		, false	,	"10"	,	false	,	false		,	false		,	StrFontBody},
+
+		[btnReset]	= { StrGreen	, false		, false		, "4x6"	,	false	,	false	,	false		,	false		,	false		},
+		[btnFont]		= { StrGreen	, false		, false		, "4x6"	,	false	,	false	,	false		,	false		,	false		},
+		[BtnHelp]		= { StrGreen	, false		, false		, "4x6"	,	false	,	false	,	false		,	false		,	false		},
+		[btnClose]	= { StrRed	, false		, false		, "4x6"	,	false	,	false	,	false		,	false		,	false		},
+		} ) do
+		iupName.fgcolor	= tblAttr[1]
+		if tblAttr[2] then iupName.alignment	= tblAttr[2] end
+		if tblAttr[3] then iupName.expand		= tblAttr[3] else iupName.expand = "YES" end
+		if tblAttr[4] then iupName.padding		= tblAttr[4] end
+		if tblAttr[5] then iupName.gap			= tblAttr[5] end
+		if tblAttr[6] then iupName.margin		= tblAttr[6] end
+		if tblAttr[7] then iupName.readonly		= tblAttr[7] iupName.value = strInitialText end
+		if tblAttr[8] then iupName.dropdown		= tblAttr[8] iupName.visible_items	= "9" end
+		if tblAttr[9] then iupName.font			= tblAttr[9] end
+	end
+
+	-- Create the URL Hyperlinks tab layout
+	local	boxHyper 	= iup.hbox { font=StrFontBody, gap=StrGap, vbxHyper, }
+
+	-- Create the Image Popups tab layout
+	local	boxPopup 	= iup.hbox { font=StrFontBody, gap=StrGap, vbxPopup, }
+
+	-- Create the Content Tables tab layout
+	local	boxTable 	= iup.hbox { font=StrFontBody, gap=StrGap, vbxTable, }
+
+	-- Create the Index of Names tab layout
+	local	boxIndex 	= iup.hbox { font=StrFontBody, gap=StrGap, vbxIndex, }
+
+	-- Create the Create GenDex tab layout
+	local	boxGenDex	= iup.hbox { font=StrFontBody, gap=StrGap, vbxGenDex, }
+
+	-- Create the Tab controls layout
+	local	tabCont	= iup.tabs { font=StrFontHead, padding="7x8", tip=" Select required improvement option tab ", 
+								boxHyper , tabtitle0="  Hyperlinks / Text  ",
+								boxPopup , tabtitle1="   Image  Popups   ",
+								boxTable , tabtitle2="  Content Tables   ",
+								boxIndex , tabtitle3="  Index of Names   ",
+								boxGenDex, tabtitle4="   Create GenDex   ",
+							}
+
+	-- Combine all the above controls
+	local	allCont	= iup.vbox { font=StrFontBody, margin="3x8", gap="6",
+								iup.hbox	{ vbxFolder,	},
+								iup.hbox	{ tabCont,	},
+								iup.hbox	{ btnReset, btnFont, BtnHelp, btnClose, homogeneous="YES", }
+ 							}
 
 	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
-	local	dialogMain =	iup.dialog { title=StrPlugin..StrVersion, dialogframe="YES", background=StrWhite, startfocus=btnClose, font=StrFontBody,
-								iup.vbox { alignment="ACENTER", gap="10", margin="10x10", frmFolder, frmIndex, frmHyper, frmPopup, boxOption },
+	local	dialogMain =	iup.dialog { title=StrPlugin..StrVersion, dialogframe="YES", background=StrWhite, startfocus=btnClose, font=StrFontBody, allCont, -- rastersize="1020",
 								move_cb	=function(self,x,y) if IsNormalWindow(self) then IntMainX=x IntMainY=y end end,
 							}
 
-	local function setStyleList(strMode)
-		if IntIndex == 1 then
+	local function setStyleList(strMode)									-- Disable Style option when only Primary Names included
+		if IntNames == IntIndexPrimary then
 			lstStyle.active = "NO"
 		else
 			lstStyle.active = strMode
 		end
 	end -- local function setStyleList
 
-	local function setActiveGUI(strMode)
+	local function setActiveGUI(strMode)									-- Disable GUI options when invalid folder and during button operations
 		dialogMain.active = strMode
-		btnIndex.active = strMode
-		lstIndex.active = strMode
-		lstStyle.active = strMode
-		btnHyper.active = strMode
-		lstHyper.active = strMode
-		btnPopup.active = strMode
+		boxHyper.active = strMode
+		boxPopup.active = strMode
+		boxTable.active = strMode
+		boxIndex.active = strMode
+		boxGenDex.active = strMode
 		setStyleList(strMode)
 	end -- local function setActiveGUI
+
+	local function setNumberOfText(itemName,intNumber)					-- Insert number into text status message for each tab
+		local strText = itemName.tip:gsub("Number of",tostring(intNumber))
+		if intNumber == 1 then
+			strText = strText:gsub("s "," ",1)								-- Remove plural "s" if number is 1
+		end
+		itemName.value = strText
+	end -- local function setNumberOfText
 
 	local function isFolderOK()												-- Check if folder contains FH V5 Website or CD-DVD HTML files
 		local isOK = FlgFileExists(StrFolder.."\\_nameindex.html") and FlgFileExists(StrFolder.."\\fhstyle.css")
@@ -3473,12 +4356,12 @@ function GUI_MainDialogue()
 		end
 		if isOK then
 			setActiveGUI("YES")
-			txtStatus.value = "The HTML folder is valid, so please use any of the options below."
+			txtStatus.value = "The HTML folder is valid, so please use any of the improvement option tabs below"
 			txtStatus.fgcolor = StrGreen
 			txtFolder.fgcolor = StrBlack
 		else
 			setActiveGUI("NO")
-			txtStatus.value = "Folder does NOT contain FH V5 Website or CD-DVD HTML files, so use Browse button."
+			txtStatus.value = "Folder does NOT contain FH V5 Website or CD-DVD HTML files, so use Browse button"
 			txtStatus.fgcolor = StrAmber
 			txtFolder.fgcolor = StrAmber
 		end
@@ -3494,66 +4377,41 @@ function GUI_MainDialogue()
 			local dialogFolder = iup.filedlg { dialogtype="DIR", title="Please select 'FH Website' or 'FH CD-DVD\\data' or equivalent HTML folder", directory=strDirectory }
 			dialogFolder:popup(iup.CENTER, iup.CENTER)
 			local strStatus = dialogFolder.status
-			if strStatus == "0" then
+			if strStatus == "0"
+			and StrFolder ~= dialogFolder.value then
 				StrFolder = dialogFolder.value
 				SaveSettings(StrStickyFile)									-- Save sticky data settings
-				txtIndex.value = " "
-				txtHyper.value = " "
+				txtHyper.value  = strInitialText
+				txtPopup.value  = strInitialText
+				txtIndex.value  = strInitialText
+				txtGenDex.value = strInitialText
 			end
 		until isFolderOK() or strStatus == "-1"
 	end -- function btnFolder:action
 
-	function btnIndex:action()												-- Action for Index button
-		if isFolderOK() then
-			setActiveGUI("NO")
-			local intNames = IntImproveIndex(StrFolder.."\\_nameindex.html",tonumber(lstIndex.value),tonumber(lstStyle.value))
-			txtIndex.value = intNames.." Alternate Names &/or Married Women Surnames added to the 'Index of Names' page."
-			setActiveGUI("YES")
-		end
-	end -- function btnIndex:action
-
-	function lstIndex:action(strText,intItem,intState)					-- Action for Index dropdown
+	function lstPages:action(strText,intItem,intState)					-- Action for Pages dropdown
 		if intState == 1 then
-			IntIndex = intItem
-			SaveSettings(StrStickyFile)										-- Save sticky data settings
-			setStyleList("YES")
-		end
-	end -- function lstIndex:action
-
-	function lstStyle:action(strText,intItem,intState)					-- Action for Style dropdown
-		if intState == 1 then
-			IntStyle = intItem
+			IntPages = intItem
 			SaveSettings(StrStickyFile)										-- Save sticky data settings
 		end
-	end -- function lstStyle:action
+	end -- function lstPages:action
+
+	function lstChars:action(strText,intItem,intState)					-- Action for Chars dropdown
+		if intState == 1 then
+			IntChars = intItem
+			SaveSettings(StrStickyFile)										-- Save sticky data settings
+		end
+	end -- function lstChars:action
 
 	function btnHyper:action()												-- Action for Hyper button
 		if isFolderOK() then
 			setActiveGUI("NO")
-			local intLines = IntImproveURL(StrFolder,tonumber(lstHyper.value))
-			txtHyper.value = intLines.." lines of www. http: https: ftp: & mailto: URL Hyperlinks altered in 'Individual' or 'Family' pages."
+			local intLines = IntImproveHTML(StrFolder,tonumber(IntPages),tonumber(IntChars))
+			setNumberOfText(txtHyper,intLines)
 			setActiveGUI("YES")
 			dialogMain.bringfront = "YES"
 		end
 	end -- function btnHyper:action
-
-	function lstHyper:action(strText,intItem,intState)					-- Action for Hyper dropdown
-		if intState == 1 then
-			IntHyper = intItem
-			SaveSettings(StrStickyFile)										-- Save sticky data settings
-		end
-	end -- function lstHyper:action
-
-	function btnPopup:action()												-- Action for Popup button
-		if isFolderOK() then
-			setActiveGUI("NO")
-			local intLines = IntImprovePopup(StrFolder,tonumber(lstPopup.value))
-			if intLines < 0 then return iup.CLOSE end
-			txtPopup.value = intLines.." image Popups altered in 'Individual' or 'Family' pages."
-			setActiveGUI("YES")
-			dialogMain.bringfront = "YES"
-		end
-	end -- function btnPopup:action
 
 	function lstPopup:action(strText,intItem,intState)					-- Action for Popup dropdown
 		if intState == 1 then
@@ -3562,35 +4420,161 @@ function GUI_MainDialogue()
 		end
 	end -- function lstPopup:action
 
+	function btnPopup:action()												-- Action for Popup button
+		if isFolderOK() then
+			setActiveGUI("NO")
+			local intLines = IntImprovePopup(StrFolder,lstPopup[IntPopup])
+			if intLines < 0 then return iup.CLOSE end
+			setNumberOfText(txtPopup,intLines)
+			setActiveGUI("YES")
+			dialogMain.bringfront = "YES"
+		end
+	end -- function btnPopup:action
+
+	function tglToPs:action(iState)											-- Action for Table of Pictures
+		if iState == 0 then
+			StrToPs = "OFF"
+		elseif iState == 1 then
+			StrToPs = "ON"
+		else
+			iup.Message(StrPlugin, "tglToPs invalid iState")
+			StrToPs = "ERROR"
+		end
+		SaveSettings(StrStickyFile)											-- Save sticky data settings
+	end -- function tglToPs:action
+
+	function tglToRs:action(iState)											-- Action for Table of Reports
+		if iState == 0 then
+			StrToRs = "OFF"
+		elseif iState == 1 then
+			StrToRs = "ON"
+		else
+			iup.Message(StrPlugin, "tglToRs invalid iState")
+			StrToRs = "ERROR"
+		end
+		SaveSettings(StrStickyFile)											-- Save sticky data settings
+	end -- function tglToRs:action
+
+	function tglToDs:action(iState)											-- Action for Table of Downloads
+		if iState == 0 then
+			StrToDs = "OFF"
+		elseif iState == 1 then
+			StrToDs = "ON"
+		else
+			iup.Message(StrPlugin, "tglToDs invalid iState")
+			StrToDs = "ERROR"
+		end
+		SaveSettings(StrStickyFile)											-- Save sticky data settings
+	end -- function tglToDs:action
+
+	function tglMenu:action(iState)											-- Action for Menu Bar setting
+		if iState == 0 then
+			StrMenu = "OFF"
+		elseif iState == 1 then
+			StrMenu = "ON"
+		else
+			iup.Message(StrPlugin, "tglMenu invalid iState")
+			StrMenu = "ERROR"
+		end
+		SaveSettings(StrStickyFile)											-- Save sticky data settings
+	end -- function tglMenu:action
+
+	function btnTable:action()												-- Action for Table button
+		if isFolderOK() then
+			setActiveGUI("NO")
+			local intTable = IntImproveTable(StrFolder,StrToPs=="ON",StrToRs=="ON",StrToDs=="ON",StrMenu=="ON")
+			setNumberOfText(txtTable,intTable)
+			setActiveGUI("YES")
+			dialogMain.bringfront = "YES"
+		end
+	end -- function btnTable:action
+
+	function lstNames:action(strText,intItem,intState)					-- Action for Names dropdown
+		if intState == 1 then
+			IntNames = intItem
+			SaveSettings(StrStickyFile)										-- Save sticky data settings
+			setStyleList("YES")
+		end
+	end -- function lstNames:action
+
+	function lstStyle:action(strText,intItem,intState)					-- Action for Style dropdown
+		if intState == 1 then
+			IntStyle = intItem
+			SaveSettings(StrStickyFile)										-- Save sticky data settings
+		end
+	end -- function lstStyle:action
+
+	function lstIdent:action(strText,intItem,intState)					-- Action for Ident dropdown
+		if intState == 1 then
+			IntIdent = intItem
+			SaveSettings(StrStickyFile)										-- Save sticky data settings
+		end
+	end -- function lstIdent:action
+
+	function btnIndex:action()												-- Action for Index button
+		if isFolderOK() then
+			setActiveGUI("NO")
+			local intNames = IntImproveIndex(StrFolder.."\\_nameindex.html",lstNames[IntNames],lstStyle[IntStyle],lstIdent[IntIdent])
+			setNumberOfText(txtIndex,intNames)
+			setActiveGUI("YES")
+			dialogMain.bringfront = "YES"
+		end
+	end -- function btnIndex:action
+
+	function lstGenDex:action(strText,intItem,intState)					-- Action for GenDex dropdown
+		if intState == 1 then
+			IntGenDex = intItem
+			SaveSettings(StrStickyFile)										-- Save sticky data settings
+		end
+	end -- function lstGenDex:action
+
+	function btnGenDex:action()												-- Action for GenDex button
+		if isFolderOK() then
+			setActiveGUI("NO")
+			local intNames = IntCreateGenDex(StrFolder,lstGenDex[IntGenDex])
+			setNumberOfText(txtGenDex,intNames)
+			setActiveGUI("YES")
+			dialogMain.bringfront = "YES"
+		end
+	end -- function btnGenDex:action
+
 	function btnReset:action()												-- Action for Restore Defaults button
 		ResetDefaultSettings()
 		if	BtnHelp.active == "NO" then										-- If Help button inactive, then Help is active, so redisplay its dialogue
 			DialogHelp.rastersize = StrHelpS
 			DialogHelp:showxy(IntHelpX,IntHelpY)
 		end
-		txtFolder.value	= StrFolder											-- Reset controls & redisplay Main dialogue
-		lstIndex.value	= IntIndex
-		lstStyle.value	= IntStyle
-		txtIndex.value	= " "
-		lstHyper.value	= IntHyper
-		txtHyper.value	= " "
+		lstPages.value	= IntPages											-- Reset controls & redisplay Main dialogue
+		lstChars.value	= IntChars
+		txtHyper.value	= strInitialText
 		lstPopup.value	= IntPopup
-		txtPopup.value	= " "
-		isFolderOK()																-- Adjust buttons according to current folder
+		txtPopup.value	= strInitialText
+		tglToPs.value	= StrToPs
+		tglToRs.value	= StrToRs
+		tglToDs.value	= StrToDs
+		tglMenu.value	= StrMenu
+		txtTable.value	= strInitialText
+		lstNames.value	= IntNames
+		lstStyle.value	= IntStyle
+		lstIdent.value	= IntIdent
+		txtIndex.value	= strInitialText
+		lstGenDex.value	= IntGenDex
+		txtGenDex.value	= strInitialText
+		isFolderOK()																-- Adjust buttons according to current folder, etc
 		dialogMain:showxy(IntMainX,IntMainY)
+		tabCont.valuepos = IntTabPosn or 0									-- Adjust tab selection
 		SaveSettings(StrStickyFile)											-- Save sticky data settings
 	end -- function btnReset:action
 
 	function btnFont:action()													-- Action for Set Interface Font button
 		local strAnswer = GUI_FontDialogue()
 		if strAnswer == "Change" then
-			frmFolder.font	= StrFontHead
-			frmIndex.font	= StrFontHead
-			frmHyper.font	= StrFontHead
-			dialogMain.font	= StrFontBody
-			vbxFolder.font	= StrFontBody
-			vbxIndex.font	= StrFontBody
-			vbxHyper.font	= StrFontBody
+			for i, control in ipairs({tabCont}) do
+				control.font = StrFontHead									-- Controls head font
+			end
+			for i, control in ipairs({allCont,vbxFolder,vbxHyper,vbxPopup,vbxTable,vbxIndex,vbxGenDex}) do
+				control.font = StrFontBody									-- Controls body font
+			end
 			if	BtnHelp.active == "NO" then									-- If Help button inactive, then Help is active, so update its font
 				HboxHelp.font = StrFontBody
 			end
@@ -3599,17 +4583,25 @@ function GUI_MainDialogue()
 	end -- function btnFont:action
 
 	function BtnHelp:action()													-- Action for Help & Advice button
+		local tblHelp = {"improve","hyper","popup","table","index","gendex"}
 		BtnHelp.active = "NO"
-		GUI_HelpDialogue()
+		GUI_HelpDialogue(tblHelp[(IntTabPosn or -1) + 2])
 	end -- function BtnHelp:action
 
 	function btnClose:action()												-- Action for Close Plugin button
 		return iup.CLOSE
 	end -- function btnClose:action
 
-	isFolderOK()																	-- Adjust buttons according to current folder 
+	function tabCont:tabchangepos_cb(intNew,intOld)						-- Call back when Main tab position is changed  
+		IntTabPosn = intNew
+		SaveSettings(StrStickyFile)											-- Save sticky data settings
+	end -- function tabCont:tabchangepos_cb
+
+	isFolderOK()																	-- Adjust buttons according to current folder, etc
 
 	dialogMain:showxy(IntMainX,IntMainY)
+
+	tabCont.valuepos = IntTabPosn or 0										-- Adjust tab selection
 
 	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
 
@@ -3619,16 +4611,20 @@ end -- function GUI_MainDialogue
 
 --	RequireLibraryModule("tatewise-library-module","1.0")
 
-	CheckVersionInStore(StrVersion)
+	fhInitialise(5,0,9,"save_recommended")
 
-	PresetGlobalConstants()			-- Preset global data constants
+	PresetGlobalConstants()													-- Preset global data constants
 
-	ResetDefaultSettings()				-- Preset default sticky settings
+	CheckVersionInStore(StrVersion)											-- Notify if later Version
 
-	IntFontSet = IntFontPlain			-- Font Face & Style default
+	ResetDefaultSettings()														-- Preset default sticky settings
 
-	LoadSettings(StrStickyFile)		-- Load sticky data settings
+	StrFolder  = StrPublicPath												-- Folder for Website/CD-DVD HTML pages
+
+	IntFontSet = IntFontPlain													-- Font Face & Style default
+
+	LoadSettings(StrStickyFile)												-- Load sticky data settings
 
 	GUI_MainDialogue()
 
-	SaveSettings(StrStickyFile)		-- Save sticky data settings
+	SaveSettings(StrStickyFile)												-- Save sticky data settings

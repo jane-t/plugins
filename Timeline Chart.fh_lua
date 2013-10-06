@@ -1,13 +1,14 @@
 --[[
 @Title: Timeline Chart
 @Author: Jane Taubman
-@LastUpdated: March 2013
-@Version: 1.6
+@LastUpdated: August 2013
+@Version: 1.7
 @Description: 
 Creates a web page containing a timeline to display the events of persons life. 
 Can either create a temporary page to see the currently selected person, or can select a group of people and create a whole set of pages for use on a web site.
 Uses SIMILE Widgets to display the time line.
-V1.6 Adjust Timeline to Window Size
+V1.7 Add Spouse Death to Timeline
+V1.6 Adjust Timeline to Window Size and update page link to new code on Smilie (thanks Mike)
 V1.5 Add Sibling Births and Deaths in the Lifetime
 V1.4 Use HTA files for the quick view to avoid IE and Chrome issues
 V1.3 Fix issue with year only births, better support for extended character sets.
@@ -81,6 +82,14 @@ function main()
                 end
                 ptrEvent:MoveNext('ANY')
             end
+            --- Process Spouses Death
+            local ptrSpouse = fhGetItemPtr(ptrIndi,'~.~SPOU['..i..']>')
+            if ptrSpouse:IsNotNull() then
+                        ptrEvent:MoveTo(ptrSpouse,'~.DEAT')
+              if fhIsFact(ptrEvent) then
+                addFact(ptrEvent,'Spouse:'..fhGetItemText(ptrSpouse,'~.NAME') ..': '..fhGetDisplayText(ptrEvent))
+              end
+			 end
             --- Process Child Births
             c = 1
             ptrChild:MoveTo(ptrFam,'~.CHIL['..c..']>')
@@ -359,7 +368,8 @@ endlabel : Death unless person living
 <head>
     <title>{title}</title>
     <link rel='stylesheet' href='../styles.css' type='text/css' />
-<script src="http://static.simile.mit.edu/timeline/api-2.3.1/timeline-api.js?bundle=true" type="text/javascript"></script>
+<script src="http://api.simile-widgets.org/timeline/2.3.1/timeline-api.js?bundle=true" type="text/javascript"></script>
+<!-- <script src="http://static.simile.mit.edu/timeline/api-2.3.1/timeline-api.js?bundle=true" type="text/javascript"></script> -->
     <script>
         var tl;
         function onLoad() {

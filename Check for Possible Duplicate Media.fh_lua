@@ -1,8 +1,8 @@
 --[[
 @Title: Check for Possible Duplicate Media
 @Author: Jane Taubman
-@Version: 1.2
-@LastUpdated: February 2013 
+@Version: 1.3
+@LastUpdated: June 2013 
 @Description: 
 This plugin checks all the media records in your project and compares the files linked to them looking for files 
 which are identical it will pick up both records which are linked to the same file and to those where the names 
@@ -11,9 +11,11 @@ When complete it returns a result set containing the matching records.
 By selecting each pair in turn, just drag over both cells, you can then select Edit>Merge Compare Records from 
 the menu and merge the records together.
 Once the process is complete, it is recommended to use the "Check for Unlinked Media" plugin to clean up any duplicate files.
-V1.1 Add trap for Missing Files and report them on the Result Set.
-V1.2 Add Caching of File details between runs ]]
 
+1.1 Add trap for Missing Files and report them on the Result Set.
+1.2 Add Caching of File details between runs
+1.3 Correct Clear Records Call
+ ]]
 function mainfunction()
     if fhGetContextInfo('CI_APP_MODE') ~= 'Project Mode' then
         fhMessageBox('This Plugin Requires a Project','MB_OK','MB_ICONEXCLAMATION')
@@ -24,7 +26,7 @@ function mainfunction()
     iCount = countrecords(dbcon)
     if iCount and iCount > 0 then
        local ans =  fhMessageBox('There are '..iCount..' Cached Records..\nDo you wish to use them?','MB_YESNO','MB_ICONQUESTION')
-       if ans == 'No' then clearrecords() 
+       if ans == 'No' then clearlist(dbcon)	-- was clearrecords() in V1.2
        elseif ans ~= 'Yes' then return end        
     end
     -- Define Columns

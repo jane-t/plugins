@@ -1,15 +1,17 @@
 --[[
 @Title: Find Duplicate Custom ID's
 @Author: Jane Taubman
-@Version: 1.1
-@LastUpdated: March 2013
+@Version: 1.2
+@LastUpdated: April 2013
 @Description: Searches Selected Record Type(s) for Records with Duplicate Custom IDs
+V1.1 Added Custom ID Column
 ]]
 
 function main()
     local tblId = {}
     local tblDup1 = {}
     local tblDup2 = {}
+    local tblDupID = {}
     for type in recordtypes() do
         for pi in records(type) do
             strId = fhGetItemText(pi,'~.REFN')
@@ -18,6 +20,7 @@ function main()
                     -- Duplicate Found
                     table.insert(tblDup1,tblId[strId])
                     table.insert(tblDup2,pi:Clone())
+                    table.insert(tblDupID,strId)
                 else
                     tblId[strId] = pi:Clone()
                 end
@@ -25,9 +28,11 @@ function main()
         end
     end
     if #tblDup1 > 0 then
-        fhOutputResultSetTitles('Individuals with Duplicate Custom Ids')
-        fhOutputResultSetColumn('First Record', 'item', tblDup1, #tblDup1)
-        fhOutputResultSetColumn('Second Record', 'item', tblDup2, #tblDup1)
+        fhOutputResultSetTitles('Records with Duplicate Custom Ids')
+        fhOutputResultSetColumn('Custom ID', 'text', tblDupID, #tblDup1,40)
+        fhOutputResultSetColumn('First Record', 'item', tblDup1, #tblDup1,140)
+        fhOutputResultSetColumn('Second Record', 'item', tblDup2, #tblDup1,140)
+
     else
         fhMessageBox('No Duplicates Found')
     end

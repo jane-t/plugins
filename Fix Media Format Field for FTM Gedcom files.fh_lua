@@ -16,7 +16,8 @@ ptrForm  = fhNewItemPtr()
 ptrObje:MoveToFirstRecord('OBJE')
 while ptrObje:IsNotNull() do
   filename = fhGetItemText(ptrObje,'~._FILE')
-  path,name,ext = splitfilename(filename:lower())
+  path,name,ext = splitfilename(filename)
+  ext = ext:lower()
   if ext == 'jpg' then
 	  ext = 'jpeg'
   end
@@ -25,6 +26,12 @@ while ptrObje:IsNotNull() do
 	-- Create Format Item
     ptrForm = fhCreateItem('FORM',ptrObje)
     fhSetValueAsText(ptrForm,ext)
+  end
+  ptrForm:MoveTo(ptrObje,'~.TITL')  -- OBJE.TITL
+  if ptrForm:IsNull() then
+	-- Create Format Item
+    ptrForm = fhCreateItem('TITL',ptrObje)
+    fhSetValueAsText(ptrForm,name)
   end
   ptrObje:MoveNext()
 end
