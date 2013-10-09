@@ -1,0 +1,580 @@
+--[[
+@Title: Create a To-Do Note in Evernote
+@Author: Jane Taubman
+@Version: 0.8
+@LastUpdated: September 2013
+@Description: Create a new To-Do Note in Evernote for the currently selected person.
+Note: New tag can not be created outside of Evernote, so only use existing ones.
+]]
+
+function main()
+    -- Find Evernote Install
+    evernoteloc,err = getRegKey('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Evernote.exe\\')
+    if err then
+       fhMessageBox('Evernote Installation Not Found.  Please install Evernote prior to running this plugin')
+       return
+    end
+    -- Check for template and set up template
+    loadbody()
+    loadkeywords()
+    local plist = fhGetCurrentRecordSel('INDI')
+    if plist[1] == nil then
+        plist = fhPromptUserForRecordSel('INDI',1)
+    end
+    if plist[1] == nil then
+        return
+    end
+    sComment = ''
+    sTags = ' '
+    sTitle = 'FH: '..fhGetDisplayText(plist[1])..' ('..fhGetRecordId(plist[1])..')'
+    sTitle,sComment,sTags,btn = dlgPrompt(sTitle)
+    if (btn == 'cancel') then
+        return
+    end
+    local text = createNote(plist[1],sComment,sTags,sTitle)
+    local htmlFile = fhGetPluginDataFileName('CURRENT_PROJECT',true)..'\\temp.enex'
+    savetofile(htmlFile,text)
+    local parms = '"'..htmlFile..'"'
+    print(evernoteloc..parms)
+    bOk,err1,err2 = fhShellExecute(evernoteloc,parms)
+    print(bOk,err1,err2)
+end
+---------------------------------------------------------------------------------------- Create Note
+function createNote(ptr,sComment,sTags,sTitle)
+    dataPtr = fhNewItemPtr()
+	------------------------------------------------------------------------------------ Replace Fields
+    local function replacefields(field)
+        local dataref,prefix,suffix = unpack(string.split(field:gsub('[{}]',''),'|',false))
+        prefix = prefix or ''
+        suffix = suffix or '' 
+        dataref = dataref:gsub('INDI','~')
+        dataPtr:MoveTo(ptr,dataref)
+        local newData = ''
+        if dataPtr:IsNotNull() then
+            if fhGetDataClass(dataPtr) == 'longtext' then
+            newData = prefix..StrCP1252_XML(fhGetValueAsText(dataPtr))..suffix
+            else   
+            newData = prefix..StrCP1252_XML(fhGetDisplayText(dataPtr))..suffix
+            end
+        end
+        return newData
+    end
+    -- Do all replacements which start with ~
+    local newvalue = htmltemplate:gsub('({~.-})',replacefields)
+    local newvalue = newvalue:gsub('({INDI.-})',replacefields)
+    -- Record ID
+    newvalue = newvalue:gsub('({ref})',fhGetRecordId(ptr))    
+    -- Add in Comment and Tag fields
+    newvalue = newvalue:gsub('({title})',sTitle)
+    sComment = sComment..'\n'
+    -- local sComm2 = sComment:gsub('\n','<br />')
+    local sComm2 = sComment
+
+    newvalue = newvalue:gsub('({comment})',StrCP1252_XML(sComm2))
+    local taglist = ''
+    for _,sTag in ipairs(string.split(sTags,',',true)) do
+        taglist = taglist..'<tag>'..StrCP1252_XML(sTag)..'</tag>'
+    end
+    newvalue = newvalue:gsub('({tags})',taglist)
+    newvalue = newvalue:gsub('({project})',StrCP1252_XML((string.gsub(fhGetContextInfo('CI_PROJECT_FILE'),'\\','/'))))
+    newvalue = newvalue:gsub('({projectname})',StrCP1252_XML(fhGetContextInfo('CI_PROJECT_NAME')))
+-- Remove lines which only contain <br />
+do
+local tmp = {}
+for s in string.gmatch(newvalue, ".-\n") do
+  if s ~= '<br />\n' then
+  table.insert(tmp,s)
+  end
+end
+newvalue = table.concat(tmp,'')
+end
+-- 
+    return newvalue
+end
+
+---------------------------------------------------------------------------------------- HTML Template
+htmlmaster = [[<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export2.dtd">
+<en-export export-date="20130813T121007Z" application="Evernote/Windows" version="4.x">
+<note><title>{title}</title><content>
+<![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">
+<en-note style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;">
+{body}</en-note>
+{closeb}></content>
+{tags}
+</note>
+</en-export>
+]]
+htmlbody = [[<b>{INDI.NAME} (ID:{ref})</b> Project: <a href="file:///{project}">{projectname}</a>
+<h5>Events</h5><ul>
+{INDI.BIRT|<li>|</li>}
+{INDI.BAPM|<li>|</li>}
+{INDI.CENS|<li>|</li>}
+{INDI.CENS[2]|<li>|</li>}
+{INDI.CENS[3]|<li>|</li>}
+{INDI.CENS[4]|<li>|</li>}
+{INDI.DEAT|<li>|</li>}
+{INDI.BURI|<li>|</li>}
+</ul>
+<h5>Family</h5>
+{INDI.FAMC[1]>HUSB[1]>|Father |, }{INDI.FAMC[1]>WIFE[1]>|Mother }
+{INDI.~SPOU[1]>|<h6>Spouse(s)</h6>|, } {INDI.FAMS[1]>MARR[1]} 
+{INDI.~SPOU[2]>|<br />|, } {INDI.FAMS[2]>MARR[1]} 
+{INDI.~SPOU[3]>|<br />|, } {INDI.FAMS[3]>MARR[1]} 
+
+<h3>Comment</h3>
+<p>{comment}</p>
+<h3>Results</h3>
+<p>..</p>
+]]
+--------------------------------------------------------------------------- Load and Save Defaults
+function loadbody()
+local body = strLoadFromFile(fhGetPluginDataFileName()..'\\template.txt')
+if body == nil then
+body = htmlbody
+end 
+htmlbody = body 
+htmltemplate = htmlmaster:gsub('({closeb})',']]')
+htmltemplate = htmltemplate:gsub('({body})',body)
+end
+function savebody(body)
+savetofile(fhGetPluginDataFileName()..'\\template.txt',body)
+end
+function loadkeywords()
+local keywords = strLoadFromFile(fhGetPluginDataFileName()..'\\keywords.txt')
+if keywords == nil then
+keywords = ''
+end 
+htmlkeywords = keywords
+end
+function savekeywords(keywords)
+savetofile(fhGetPluginDataFileName()..'\\keywords.txt',keywords)
+end
+
+---------------------------------------------------------------------------- Prompt Window
+function dlgPrompt(sTitle)
+    local btn_select = iup.button { title="Select",size='30'}
+    local lbl_indi   = iup.label {title=''}
+    local ilist = fhGetCurrentRecordSel('INDI')
+    if ilist[1] ~= nil then
+        lbl_indi.title = fhGetDisplayText(ilist[1])
+    end
+ 
+    function btn_select:action()
+        ilist = fhPromptUserForRecordSel('INDI',1)
+    end
+    
+    local btn_ok = iup.button { title="OK",padding = '5x5',size='50'}
+    local btn_cancel = iup.button { title="Cancel",padding = '5x5',size='50'}
+    local btn_edit = iup.button { title="Edit Template",padding = '5x5',size='80'}
+    local btn_keywords = iup.button { title="Edit Default Keywords",padding = '5x5',size='120'}
+    local btn_help = iup.button { title="Help",padding = '5x5',size='50'}
+    local btn  = 'cancel'
+    local inpTitle = iup.text{expand="HORIZONTAL",minsize='150'}
+    inpTitle.value = sTitle
+    local inpKeywords = iup.text{expand="HORIZONTAL",minsize='150'}
+    local inpComment = iup.text{expand="HORIZONTAL",minsize='150'}
+        inpComment.multiline = 'YES'
+        inpComment.size = '0x80'
+        inpComment.wordwrap = 'YES'
+        inpComment.visiblelines = 10
+    local bSkip = false
+    local bQuit = false
+    inpKeywords.value = htmlkeywords
+    local vbox = iup.vbox {
+        iup.hbox {btn_select,lbl_indi},
+        iup.label {title='Title'},
+        iup.hbox{inpTitle},
+        iup.label {title="Keywords"},
+        inpKeywords,
+        iup.label {title="Comment"},
+        inpComment,
+        iup.hbox{
+        btn_ok,btn_cancel,btn_edit,btn_keywords,btn_help,expandchildren = 'YES', expand="YES"},
+        expandchildren = 'YES', alignment = 'ACENTER', gap = '10', margin = '10x10',expand="YES"
+    }
+    local dlg = iup.dialog{vbox;expandchildren = 'YES', title="Create Evernote Entry",size="HALF", startfocus=btn_ok}
+
+    function btn_ok:action(dlg)
+        btn = 'ok'
+        return iup.CLOSE
+    end
+    
+
+    function btn_cancel:action(dlg)
+        btn = 'cancel'
+        return iup.CLOSE
+    end
+    function btn_edit:action(dlg)
+        btn = 'edit'
+        local newbody = iup.GetText('Template Edit',htmlbody)
+        if newbody then
+           savebody(newbody)
+           loadbody()
+        end   
+        return
+    end
+    function btn_keywords:action(dlg)
+        btn = 'edit'
+        local keywords = iup.GetText('Keywords Edit',htmlkeywords)
+        if keywords then
+           inpKeywords.value = keywords
+           savekeywords(keywords)
+           loadkeywords()
+        end   
+        return
+    end
+    function btn_help:action(dlg)
+        btn = 'help'
+        dlgHelp('evernote_to_do','Evernote To Do Help')
+        return
+    end
+
+    dlg:show()
+    
+    dlg.minsize = dlg.size
+    iup.MainLoop()
+
+    local sTitle = inpTitle.value
+    local sComment = inpComment.value
+    local sKeywords = inpKeywords.value
+    dlg:destroy()
+    return sTitle,sComment,sKeywords,btn
+end
+
+------------------------------------------------------------------------------------ Load and Save Files
+function strLoadFromFile(strFileName)
+    -- Load string from file --
+    -- Returns String from file, or a nil and an error value
+    local fileHandle, err = io.open(strFileName,'r')
+    if fileHandle then
+        local strString = fileHandle:read("*all")
+        fileHandle:close()
+        return strString
+    else
+        return nil, err
+    end
+end 
+function savetofile(filename,string)
+    local file,err = io.open(filename, "w")
+    file:write(string)
+    file:close()
+end
+
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+
+-- Load string from file --
+
+function StrLoadFromFile(strFileName)
+    local fileHandle = OpenFile(strFileName,"r")
+    local strString = fileHandle:read("*all")
+    assert(fileHandle:close())
+    return strString
+end -- function StrLoadFromFile
+
+----------------------------------------------------------------------------------- Get Reg Key
+function getRegKey(key)
+    local sh = luacom.CreateObject "WScript.Shell"
+    local ans 
+    if pcall(function () ans = sh:RegRead(key) end) then
+      return ans,false
+    else
+      return nil,true
+    end
+end
+---------------------------------------------------------------------------------- Split a String
+function string.split(str,sep,dotrim)
+    local sep, fields = sep or ",", {}
+    local pattern = string.format("([^%s]+)", sep)
+    if dotrim then
+    str:gsub(pattern, function(c) fields[#fields+1] = trim(c) end)
+    else
+    str:gsub(pattern, function(c) fields[#fields+1] = c end)
+    end
+    return fields
+end -- function string.split
+
+function trim(s)
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+--[[
+@Title:		Encode XML/HTML/URI/UTF Characters
+@Author:	Mike Tate
+@LastUpdated:	June 2013
+@Version:	2.0
+@Description:	Encode characters into XML/HTML/URI/UTF codes.
+]]
+
+-- Code Page 1252 to XML/HTML/URI/UTF8 encodings defined below
+local TblCP1252 = { }
+
+-- Encode characters according to gsub pattern & lookup table --
+
+function StrEncode(strText,strPattern)
+    strText = (strText or ""):gsub(strPattern,TblCP1252)
+    return strText
+end -- function StrEncode
+
+-- Encode CP1252 characters into UTF8 codes --
+
+function StrCP1252_UTF(strText)
+    strText = StrEncode(strText,"[€-ÿ]")
+    return strText
+end -- function StrCP1252_UTF
+
+-- Encode CP1252 characters into XML/HTML/UTF8 codes --
+
+function StrCP1252_XML(strText)
+    strText = StrEncode(strText,"[%c\"&'<>€-ÿ]"):gsub("&lt;br&gt;","<br />")
+    return strText
+end -- function StrCP1252_XML
+
+-- Encode CP1252 characters into URI codes --
+
+function StrCP1252_URI(strText)
+    TblCP1252["\t"] = "+" -- Temporarily use URI coding in place of XML/HTML coding
+    TblCP1252['"'] = "%22"
+    TblCP1252["&"] = "%26"
+    TblCP1252["'"] = "%27"
+    TblCP1252["<"] = "%3C"
+    TblCP1252[">"] = "%3E"
+    strText = StrEncode(strText,"[%c%s%p€-ÿ]"):gsub("<br />","%%0A")
+    TblCP1252["\t"] = nil
+    TblCP1252['"'] = "&quot;"
+    TblCP1252["&"] = "&amp;"
+    TblCP1252["'"] = "&apos;"
+    TblCP1252["<"] = "&lt;"
+    TblCP1252[">"] = "&gt;"
+    return strText
+end -- function StrCP1252_URI
+
+-- Code Page 1252 to XML/HTML/URI/UTF8 encodings: http://en.wikipedia.org/wiki/Windows-1252
+
+-- Control characters "\000" to "\031" or "[%c]" are mostly disallowed, or replaced with "<br>"
+TblCP1252["\000"] = "" -- NUL
+TblCP1252["\001"] = "" -- SOH
+TblCP1252["\002"] = "" -- STX
+TblCP1252["\003"] = "" -- ETX
+TblCP1252["\004"] = "" -- EOT
+TblCP1252["\005"] = "" -- ENQ
+TblCP1252["\006"] = "" -- ACK
+TblCP1252["\a"] = "" -- BEL
+TblCP1252["\b"] = "" -- BS
+TblCP1252["\t"] = nil -- HT "\t" treated as space in XML/HTML
+TblCP1252["\n"] = "<br />" -- LF "\n" treated as space in XML/HTML "%0A" allowed in URI
+TblCP1252["\v"] = "<br />" -- VT <br> is newline break in XML/HTML
+TblCP1252["\f"] = "<br />" -- FF <br> is newline break in XML/HTML
+TblCP1252["\r"] = "<br />" -- CR "\r" treated as space in XML/HTML "%0D" allowed in URI
+TblCP1252["\014"] = "" -- SO
+TblCP1252["\015"] = "" -- SI
+TblCP1252["\016"] = "" -- DLE
+TblCP1252["\017"] = "" -- DC1
+TblCP1252["\018"] = "" -- DC2
+TblCP1252["\019"] = "" -- DC3
+TblCP1252["\020"] = "" -- DC4
+TblCP1252["\021"] = "" -- NAK
+TblCP1252["\022"] = "" -- SYN
+TblCP1252["\023"] = "" -- ETB
+TblCP1252["\024"] = "" -- CAN
+TblCP1252["\025"] = "" -- EM
+TblCP1252["\026"] = "" -- SUB
+TblCP1252["\027"] = "" -- ESC
+TblCP1252["\028"] = "" -- FS
+TblCP1252["\029"] = "" -- GS
+TblCP1252["\030"] = "" -- RS
+TblCP1252["\031"] = "" -- US
+-- URI "[%s%p]" encodings: http://en.wikipedia.org/wiki/URL and http://en.wikipedia.org/wiki/Percent-encoding
+TblCP1252[" "] = "+" -- "%20" Space
+TblCP1252["!"] = "%21"
+TblCP1252["#"] = "%23"
+TblCP1252["$"] = "%24"
+TblCP1252["%"] = "%25"
+TblCP1252["&"] = "%26" -- "&" and "'" are overridden by XML/HTML encodings below
+TblCP1252["'"] = "%27"
+TblCP1252["("] = "%28"
+TblCP1252[")"] = "%29"
+TblCP1252["*"] = "%2A"
+TblCP1252["+"] = "%2B"
+TblCP1252[","] = "%2C"
+TblCP1252["/"] = "%2F"
+TblCP1252[":"] = "%3A"
+TblCP1252[";"] = "%3B"
+TblCP1252["="] = "%3D"
+TblCP1252["?"] = "%3F"
+TblCP1252["@"] = "%40"
+TblCP1252["["] = "%5B"
+TblCP1252["]"] = "%5D"
+-- XML/HTML "[\"&'<>]" encodings: http://en.wikipedia.org/wiki/XML and http://en.wikipedia.org/wiki/HTML
+TblCP1252['"'] = "&quot;"
+TblCP1252["&"] = "&amp;"
+TblCP1252["'"] = "&apos;"
+TblCP1252["<"] = "&lt;"
+TblCP1252[">"] = "&gt;"
+TblCP1252["\127"] = "" -- DEL
+-- UTF-8 "[€-ÿ]" encodings: http://en.wikipedia.org/wiki/UTF-8
+-- Take CP1252 Unicode and encode using UTF-8 scheme
+TblCP1252["€"] = string.char(0xE2,0x82,0xAC) -- "&euro;"
+TblCP1252["\129"] = "" -- Undefined
+TblCP1252["‚"] = string.char(0xE2,0x80,0x9A)
+TblCP1252["ƒ"] = string.char(0xC6,0x92)
+TblCP1252["„"] = string.char(0xE2,0x80,0x9E)
+TblCP1252["…"] = string.char(0xE2,0x80,0xA6)
+TblCP1252["†"] = string.char(0xE2,0x80,0xA0)
+TblCP1252["‡"] = string.char(0xE2,0x80,0xA1)
+TblCP1252["ˆ"] = string.char(0xCB,0x86)
+TblCP1252["‰"] = string.char(0xE2,0x80,0xB0)
+TblCP1252["Š"] = string.char(0xC5,0xA0)
+TblCP1252["‹"] = string.char(0xE2,0x80,0xB9)
+TblCP1252["Œ"] = string.char(0xC5,0x92)
+TblCP1252["\141"] = "" -- Undefined
+TblCP1252["Ž"] = string.char(0xC5,0xBD)
+TblCP1252["\143"] = "" -- Undefined
+TblCP1252["\144"] = "" -- Undefined
+TblCP1252["‘"] = string.char(0xE2,0x80,0x98)
+TblCP1252["’"] = string.char(0xE2,0x80,0x99)
+TblCP1252["“"] = string.char(0xE2,0x80,0x9C)
+TblCP1252["”"] = string.char(0xE2,0x80,0x9D)
+TblCP1252["•"] = string.char(0xE2,0x80,0xA2)
+TblCP1252["–"] = string.char(0xE2,0x80,0x93)
+TblCP1252["—"] = string.char(0xE2,0x80,0x94)
+TblCP1252["\152"] = string.char(0xCB,0x9C) -- Small Tilde
+TblCP1252["™"] = string.char(0xE2,0x84,0xA2)
+TblCP1252["š"] = string.char(0xC5,0xA1)
+TblCP1252["›"] = string.char(0xE2,0x80,0xBA)
+TblCP1252["œ"] = string.char(0xC5,0x93)
+TblCP1252["\157"] = "" -- Undefined
+TblCP1252["ž"] = string.char(0xC5,0xBE)
+TblCP1252["Ÿ"] = string.char(0xC5,0xB8)
+TblCP1252["\160"] = string.char(0xC2,0xA0) -- "&nbsp;" No Break Space
+TblCP1252["¡"] = string.char(0xC2,0xA1) -- "&iexcl;"
+TblCP1252["¢"] = string.char(0xC2,0xA2) -- "&cent;"
+TblCP1252["£"] = string.char(0xC2,0xA3) -- "&pound;"
+TblCP1252["¤"] = string.char(0xC2,0xA4) -- "&curren;"
+TblCP1252["¥"] = string.char(0xC2,0xA5) -- "&yen;"
+TblCP1252["¦"] = string.char(0xC2,0xA6)
+TblCP1252["§"] = string.char(0xC2,0xA7)
+TblCP1252["¨"] = string.char(0xC2,0xA8)
+TblCP1252["©"] = string.char(0xC2,0xA9)
+TblCP1252["ª"] = string.char(0xC2,0xAA)
+TblCP1252["«"] = string.char(0xC2,0xAB)
+TblCP1252["¬"] = string.char(0xC2,0xAC)
+TblCP1252["­"] = string.char(0xC2,0xAD) -- "&shy;" Soft Hyphen
+TblCP1252["®"] = string.char(0xC2,0xAE)
+TblCP1252["¯"] = string.char(0xC2,0xAF)
+TblCP1252["°"] = string.char(0xC2,0xB0)
+TblCP1252["±"] = string.char(0xC2,0xB1)
+TblCP1252["²"] = string.char(0xC2,0xB2)
+TblCP1252["³"] = string.char(0xC2,0xB3)
+TblCP1252["´"] = string.char(0xC2,0xB4)
+TblCP1252["µ"] = string.char(0xC2,0xB5)
+TblCP1252["¶"] = string.char(0xC2,0xB6)
+TblCP1252["•"] = string.char(0xC2,0xB7)
+TblCP1252["¸"] = string.char(0xC2,0xB8)
+TblCP1252["¹"] = string.char(0xC2,0xB9)
+TblCP1252["º"] = string.char(0xC2,0xBA)
+TblCP1252["»"] = string.char(0xC2,0xBB)
+TblCP1252["¼"] = string.char(0xC2,0xBC)
+TblCP1252["½"] = string.char(0xC2,0xBD)
+TblCP1252["¾"] = string.char(0xC2,0xBE)
+TblCP1252["¿"] = string.char(0xC2,0xBF)
+TblCP1252["À"] = string.char(0xC3,0x80)
+TblCP1252["Á"] = string.char(0xC3,0x81)
+TblCP1252["Â"] = string.char(0xC3,0x82)
+TblCP1252["Ã"] = string.char(0xC3,0x83)
+TblCP1252["Ä"] = string.char(0xC3,0x84)
+TblCP1252["Å"] = string.char(0xC3,0x85)
+TblCP1252["Æ"] = string.char(0xC3,0x86)
+TblCP1252["Ç"] = string.char(0xC3,0x87)
+TblCP1252["È"] = string.char(0xC3,0x88)
+TblCP1252["É"] = string.char(0xC3,0x89)
+TblCP1252["Ê"] = string.char(0xC3,0x8A)
+TblCP1252["Ë"] = string.char(0xC3,0x8B)
+TblCP1252["Ì"] = string.char(0xC3,0x8C)
+TblCP1252["Í"] = string.char(0xC3,0x8D)
+TblCP1252["Î"] = string.char(0xC3,0x8E)
+TblCP1252["Ï"] = string.char(0xC3,0x8F)
+TblCP1252["Ð"] = string.char(0xC3,0x90)
+TblCP1252["Ñ"] = string.char(0xC3,0x91)
+TblCP1252["Ò"] = string.char(0xC3,0x92)
+TblCP1252["Ó"] = string.char(0xC3,0x93)
+TblCP1252["Ô"] = string.char(0xC3,0x94)
+TblCP1252["Õ"] = string.char(0xC3,0x95)
+TblCP1252["Ö"] = string.char(0xC3,0x96)
+TblCP1252["×"] = string.char(0xC3,0x97)
+TblCP1252["Ø"] = string.char(0xC3,0x98)
+TblCP1252["Ù"] = string.char(0xC3,0x99)
+TblCP1252["Ú"] = string.char(0xC3,0x9A)
+TblCP1252["Û"] = string.char(0xC3,0x9B)
+TblCP1252["Ü"] = string.char(0xC3,0x9C)
+TblCP1252["Ý"] = string.char(0xC3,0x9D)
+TblCP1252["Þ"] = string.char(0xC3,0x9E)
+TblCP1252["ß"] = string.char(0xC3,0x9F)
+TblCP1252["à"] = string.char(0xC3,0xA0)
+TblCP1252["á"] = string.char(0xC3,0xA1)
+TblCP1252["â"] = string.char(0xC3,0xA2)
+TblCP1252["ã"] = string.char(0xC3,0xA3)
+TblCP1252["ä"] = string.char(0xC3,0xA4)
+TblCP1252["å"] = string.char(0xC3,0xA5)
+TblCP1252["æ"] = string.char(0xC3,0xA6)
+TblCP1252["ç"] = string.char(0xC3,0xA7)
+TblCP1252["è"] = string.char(0xC3,0xA8)
+TblCP1252["é"] = string.char(0xC3,0xA9)
+TblCP1252["ê"] = string.char(0xC3,0xAA)
+TblCP1252["ë"] = string.char(0xC3,0xAB)
+TblCP1252["ì"] = string.char(0xC3,0xAC)
+TblCP1252["í"] = string.char(0xC3,0xAD)
+TblCP1252["î"] = string.char(0xC3,0xAE)
+TblCP1252["ï"] = string.char(0xC3,0xAF)
+TblCP1252["ð"] = string.char(0xC3,0xB0)
+TblCP1252["ñ"] = string.char(0xC3,0xB1)
+TblCP1252["ò"] = string.char(0xC3,0xB2)
+TblCP1252["ó"] = string.char(0xC3,0xB3)
+TblCP1252["ô"] = string.char(0xC3,0xB4)
+TblCP1252["õ"] = string.char(0xC3,0xB5)
+TblCP1252["ö"] = string.char(0xC3,0xB6)
+TblCP1252["÷"] = string.char(0xC3,0xB7)
+TblCP1252["ø"] = string.char(0xC3,0xB8)
+TblCP1252["ù"] = string.char(0xC3,0xB9)
+TblCP1252["ú"] = string.char(0xC3,0xBA)
+TblCP1252["û"] = string.char(0xC3,0xBB)
+TblCP1252["ü"] = string.char(0xC3,0xBC)
+TblCP1252["ý"] = string.char(0xC3,0xBD)
+TblCP1252["þ"] = string.char(0xC3,0xBE)
+TblCP1252["ÿ"] = string.char(0xC3,0xBF)
+
+function dlgHelp(sUrl,sTitle)
+    local sPath = 'http://www.fhug.org.uk/wiki/?id=plugins:help:'..sUrl
+    local btn_help_ok = iup.button { title="OK",padding = '5x5',size='50'}
+    function btn_help_ok:action()
+        return iup.CLOSE
+    end
+    local	oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+	 oleControl:CreateLuaCOM()
+    
+    local vbox = iup.vbox {
+        oleControl,
+        iup.hbox{
+        btn_help_ok,expandchildren = 'YES', expand="YES"},
+        expandchildren = 'YES', alignment = 'ACENTER', gap = '5', margin = '5x5',expand="YES"
+    }
+    local dlgHelp = iup.dialog{vbox;expandchildren = 'YES', title=sTitle,size="HALFxHALF", startfocus=btn_help_ok,close_cb=function()  return iup.CLOSE end}
+	 
+    oleControl.com:Navigate(sPath)
+    dlgHelp:show()    
+    dlgHelp.minsize = dlgHelp.size
+    iup.MainLoop()
+    dlgHelp:destroy()
+    return
+end
+--------------------------------------------------------------------------------- Launch
+require "iuplua"			-- To access GUI window builder
+require "iupluaole"			-- To access OLE subsystem
+require "luacom"			-- To access COM subsystem
+main()
