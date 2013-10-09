@@ -38,20 +38,24 @@ function main()
     local bOK,strSearch
     local ptrRecord = fhNewItemPtr()
     -- Prompt User to Confirm Options
+
+    local strPrompt =
+[[
+Search For: %s
+Case Sensitive: %b
+Search in the following Classes %t
+Text fields: %b{Name Prefix/Suffix/Given/Nickname, Attribute values, Cause, Where Within Source, Title, Type, Custom Id, City, State, Postcode, Country, Phone, E-mail, Website, File, Format, Keywords, Sentence, etc.}
+Long Text: %b{Note, Address, Author, Text From Source, Publication Info, Link/Note}
+Names: %b{Name fields only}
+Places: %b{Place fields only}
+Extra Search Options %t
+Plain Text Search: %b{Plain Text or Regular Expression search & replace.}
+Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}
+]]
+
     bOK, strSearch,pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole =
-    iup.GetParam("Search and Return Result Set", param_action,
-    "Search For: %s\n"..
-    "Case Sensitive: %b\n"..
-    "Search in the following Classes %t\n"..
-    "Text fields: %b{Name Prefix/Suffix/Given/Nickname, Attribute values, Cause, Where Within Source, Title, Type, Custom Id, City, State, Postcode, Country, Phone, E-mail, Website, File, Format, Keywords, Sentence, etc.}\n"..
-    "Long Text: %b{Note, Address, Author, Text From Source, Publication Info, Link/Note}\n"..
-    "Names: %b{Name fields only}\n"..
-    "Places: %b{Place fields only}\n"..
-    "Extra Search Options %t\n"..
-    "Plain Text Search: %b{Plain Text or Regular Expression search & replace.}\n"..
-    "Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}\n"
-    ,
-    "",pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole)
+    iup.GetParam("Search and Return Result Set", param_action,strPrompt,"",
+                  pSensitive,pa.text,pa.longtext,pa.name,pa.place,pPlain,pWhole)
     -- bOK means OK was pressed so do search
     if bOK then
         -- Set "odd" field classes as per text
@@ -152,7 +156,7 @@ function allItems(...)
     local p1 = fhNewItemPtr()
     local p2 = fhNewItemPtr()
     local tblRecTypes = {}
-    
+    local arg = {...}
     if arg['n'] == 0 then
         -- No parameter do all Record Types
         iTypeCount = fhGetRecordTypeCount() -- Get Count of Record types
