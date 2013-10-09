@@ -1,23 +1,61 @@
 --[[
-@Title: Behind The Name Launcher
+@Title: Behind The Name (forenames)
 @Author: Jane Taubman
 @Version: 1.0
-@LastUpdated: February 2012 
+@LastUpdated: October 2013 
 @Description: 
-Launch the Behind the Name Web site for the currently selected Given Name.
+Launch the Behind the Name Web site for the currently selected Given Names, showing the results in a tabbed dialog.
+
+Useful for checking unusual names for likely sex and origin.
 
 Behind the Name is a website for learning about all aspects of given names. 
-Its scope is broad: all given names from all cultures and periods are eligible to be included in the main name database. 
-Names from mythology and fiction are also eligible. 
-There are currently 18086 names in the database, a fraction of what the scope entails.
 ]]
-linktemplate = 'http://www.behindthename.com/php/extra.php?extra=n&terms={n}'
-
-plist = fhPromptUserForRecordSel('INDI',1) 
+require( "iupluaweb" )
+local linktemplate = 'http://www.behindthename.com/php/extra.php?extra=n&terms={n}'
+local plist = fhGetCurrentRecordSel('INDI')
+if #plist == 0 then
+    plist = fhPromptUserForRecordSel('INDI',1)
+end
 if plist[1] == nil then
-	return
+    return
 end
-strGivenNames = fhGetItemText(plist[1],'~.NAME:GIVEN_ALL')
-  for name in string.gmatch(strGivenNames, "%a+") do
-		fhShellExecute(linktemplate:gsub('{n}',name)) 
+local strGivenNames = fhGetItemText(plist[1],'~.NAME:GIVEN_ALL')
+-- Build a Tab for each Given Name
+local tablist = {}
+local tc = 0
+for name in string.gmatch(strGivenNames, "%a+") do
+    tc = tc + 1
+        tablist[tc] = iup.vbox{iup.webbrowser{value=linktemplate:gsub('{n}',name)} ,
+    tabtitle=name}
 end
+-- Creates tabs
+local tabs = iup.tabs{unpack(tablist)}
+
+-- Add Quick Search
+local inp_search = iup.text{expand="HORIZONTAL" }
+function inp_search:killfocus_cb()
+   local name = inp_search.value
+   if name ~= '' then
+   local newtab = iup.vbox{iup.webbrowser{value=linktemplate:gsub('{n}',name)};tabtitle=name}
+   iup.Append(tabs,newtab)   
+   iup.Map(newtab)
+   iup.Refresh(tabs)
+   tabs.value = newtab
+   inp_search.value = ''
+   end
+end
+local btn_go=iup.button{title="go",padding='5x1'}
+function btn_go:action()
+   
+end
+-- Creates dialog
+    local dlg = iup.dialog{iup.vbox{iup.hbox{iup.label{title="Search for",padding='5x1'},inp_search,btn_go},
+                                    tabs; margin="10x10"}
+                           ; title="Behind The Name", size="HALFxHALF",
+    close_cb=function() return iup.CLOSE end}
+-- Shows dialog in the center of the screen
+dlg:showxy(iup.CENTER, iup.CENTER)
+if (iup.MainLoopLevel()==0) then
+    iup.MainLoop()
+end
+dlg:destroy()
