@@ -1,48 +1,54 @@
 --[[
 @Title: Clean Living People
 @Author: Jane Taubman
-@LastUpdated: September 2012
-@Version: 1.1
+@LastUpdated: December 2013
+@Version: 1.2.3
 @Description: Privatise Living People and Remove Private Ones.
 When sharing files on line, it's a good idea to remove any detailed information.
 This plugin offers several options to reduce the amount of information in a gedcom file for living people.
-
 It is designed to be used in conjunction with the Split Tree Helper or
 standard Export option and will prompt for confirmation if you try to use it on
 a gedcom which is open in Project mode.
-
 It will take note of the Living Flag on a person,  but can be additionally set to assume anyone
 with an estimated birth date after a selected date and with no death date could be living.
-
 Options for living people include:
-
 1. Changing Names to either just intials or intials and Surname, or change the name to Living.
 2. Removing All Facts for Living People
 3. Removing Sources and Dates from Facts
 4. Removing Media
 5. Cleaning "orphaned" media, sources and notes from the file.
-
 Version Notes
 1.1 Fixed Problem where Notes were removed when media was removed.
+1.2.1 Add a check to use the Spouses birth date for people whose estimated birth could not be computed
+      Add option to select living for people whose birth date can not be computed  
+1.2.2 Add selection of estimated date function option i.e EARLIEST,MID or LATEST, default is MID
+1.2.3 Fix problem with 1.2.2 not removing facts correctly.
 ]]
 ----------------------------------- Function Extract Initials
+local s = {}
+
 function GetInitials(str)
     local function tchelper(first, rest)
-    return first:upper()
-end
-str = str:gsub("(%a)([%w_']*)", tchelper)
-return str
+        return first:upper()
+    end
+    str = str:gsub("(%a)([%w_']*)", tchelper)
+    return str
 end
 ------------------------------------ Function ProcessFact
+
 function processFact(ptrField)
     if s['ClnFacts'] == 1 then
         --- Remove All Dates
         ptrClear = fhGetItemPtr(ptrField,'~.DATE')
-        table.insert(tblDeleteList,ptrClear:Clone())
+        if ptrClear:IsNotNull() then
+            table.insert(tblDeleteList,ptrClear:Clone())
+        end
     elseif s['ClnFacts'] == 2 then
         --- Remove Dates and Source Links
         ptrClear = fhGetItemPtr(ptrField,'~.DATE')
-        table.insert(tblDeleteList,ptrClear:Clone())
+        if ptrClear:IsNotNull() then
+            table.insert(tblDeleteList,ptrClear:Clone())
+        end
         ptrClear = fhGetItemPtr(ptrField,'~.SOUR')
         while ptrClear:IsNotNull() do
             table.insert(tblDeleteList,ptrClear:Clone())
@@ -54,6 +60,7 @@ function processFact(ptrField)
     end
 end
 ----------------------------------------------------- Function Delete Unused Records
+
 function dltUnused(type)
     local ptr = fhNewItemPtr()
     local dltptr = fhNewItemPtr()
@@ -70,25 +77,93 @@ function dltUnused(type)
         end
     end
 end
----------------------------------- Default Settings
-s = {}
-s['LivingFlag'] = '~._FLGS.__LIVING'
-s['PrivateFlag'] = '~._FLGS.__PRIVATE'
-s['LivingName'] = 'Living'
-s['RemovePrivate'] = 1
-s['ClnFacts'] = 0
-s['ClnName'] = 0
-s['ClnMedia'] = 0
-s['ClnNotes'] = 0
-s['AssumeLiving'] = 1
-s['LivingBirthDate'] = 1910
-s['ClnNoteRecords'] = 1
-s['ClnSourceRecords'] = 1
-s['ClnMediaRecords'] = 1
--------------------------------------------------------------------------------- Check for Project and Warn if in Project Mode
+---------------------------------- Save Settings
 
+-- Check for File
+
+function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then io.close(f) return true
+    else
+        return false
+    end
+end
+-- Split a String
+
+function string:split(sep)
+    local sep, fields = sep or ":", {}
+    local pattern = string.format("([^%s]+)", sep)
+    self:gsub(pattern, function(c) fields[#fields+1] = c end)
+    return fields
+end
+
+-- Save Settings
+
+function savesettings(settings,strFileName)
+    file,err = io.open( strFileName, "w" )
+    if err then
+        error('unable to write settings file:'..strFileName)
+    end
+    
+    for k,v in pairs(settings) do
+        file:write(k..'='..v..'\n')
+    end
+    file:close()
+end
+
+function loadsettings(strFileName)
+    local settings = {}
+    if not(file_exists(strFileName)) then
+        settings['LivingFlag'] = '~._FLGS.__LIVING'
+        settings['PrivateFlag'] = '~._FLGS.__PRIVATE'
+        settings['LivingName'] = 'Living'
+        settings['RemovePrivate'] = 1
+        settings['ClnFacts'] = 0
+        settings['ClnName'] = 0
+        settings['ClnMedia'] = 0
+        settings['ClnNotes'] = 0
+        settings['AssumeLiving'] = 1
+        settings['LivingBirthDate'] = 1910
+        settings['NoBirthDate'] = 1
+        settings['ClnNoteRecords'] = 1
+        settings['ClnSourceRecords'] = 1
+        settings['ClnMediaRecords'] = 1
+        settings['EstimateBirth'] = 2        
+    else
+        -- read the file in table 'lines'
+        for line in io.lines(strFileName) do
+            fields = line:split('=')
+            settings[fields[1]] = fields[2]
+        end
+    end
+    return settings
+end
+function cvtVer(s)
+if s:lower() == 'fh' then
+   s = table.concat({fhGetAppVersion()},'.')
+end
+local ver,factor,max = 0,10000,3
+local t = {}
+for word in s:gmatch("%w+") do
+ table.insert(t,tonumber(word)) 
+end
+for j = 1,max do
+t[j] = t[j] or 0
+ver = ver + (t[j] * factor^(max-j))
+end
+return ver
+end
+---------------------------------- Default Settings
+local estb = {'EARLIEST','MID','LATEST'}
+-- Main Script
+local settingfile = fhGetPluginDataFileName()
+if cvtVer('fh') > cvtVer('5.0.7') then
+   settingfile = fhGetPluginDataFileName('LOCAL_MACHINE') 
+end
+s = loadsettings(settingfile)
+-------------------------------------------------------------------------------- Check for Project and Warn if in Project Mode
 if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
-    ret = 	fhMessageBox(
+    ret = fhMessageBox(
     [[ Warning:
     This plugin is designed to delete data from the current file.
     You have a Project open. Please confirm you want to clean the data on ]]..fhGetContextInfo('CI_PROJECT_NAME'),
@@ -100,32 +175,39 @@ if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
 end
 -------------------------------------------------------------------------------- Prompt User to Confirm Options
 ret, s['RemovePrivate'], s['ClnFacts'],s['ClnMedia'],s['ClnNotes'],s['ClnName'],s['AssumeLiving'],
-s['LivingBirthDate'],s['ClnSourceRecords'],s['ClnNoteRecords'],s['ClnMediaRecords']  =
-iup.GetParam("Family Historian Privatise", param_action,
+s['LivingBirthDate'],s['NoBirthDate'],s['EstimateBirth'],s['ClnSourceRecords'],s['ClnNoteRecords'],s['ClnMediaRecords'] =
+iup.GetParam("Family Historian - Clean Living People", param_action,
 "Private People (Private Flag Set) Options %t\n"..
 "Remove Individuals Marked Private: %b\n"..
 "Living People (Living Flag Set) Options %t\n"..
-"Living Facts: %l|No Change|Remove All Dates     |Remove All Dates and Sources  |Remove All Facts|\n"..
+"Living Facts: %l|No Change|Remove All Dates |Remove All Dates and Sources |Remove All Facts|\n"..
 "Living Media: %l|No Change|Remove Media|\n"..
 "Living Notes: %l|No Change|Remove Notes|\n"..
 "Living Names: %l|No Change|Initials and Surname |Convert Whole Name to Initials|Replace with '"..s['LivingName'].."'|\n"..
 "Force Living Flag %b \n"..
-"  if no death date and born after: %i\n"..
+" if no death date and born after: %i\n"..
+" Assume living where no life dates: %b \n"..
+" Estimate Births using: %l|Default|Earliest Possible |Midway Date |Latest Possible|\n"..
 "Sources and Notes %t\n"..
 "Remove unused Source Records: %b\n"..
 "Remove unused Note Records: %b\n"..
 "Remove unused Media Records: %b\n"
 ,
 s['RemovePrivate'],s['ClnFacts'],s['ClnMedia'],s['ClnNotes'],s['ClnName'],s['AssumeLiving'],
-s['LivingBirthDate'],s['ClnSourceRecords'],s['ClnNoteRecords'],s['ClnMediaRecords'])
-
+s['LivingBirthDate'],s['NoBirthDate'],s['EstimateBirth'],s['ClnSourceRecords'],s['ClnNoteRecords'],s['ClnMediaRecords'])
 if (ret == 0) or ret == false then
     return
 end
+if s['EstimateBirth'] == 0 then s['EstimateBirth'] = 2 end
+local sBirthEst = estb[s['EstimateBirth']]
+-- Save Settings to file
+if settingfile ~= '' then  -- Good location for setting file
+   savesettings(s,settingfile)
+end
 -------------------------------------------------------------------------- Process File
 ptrRecord = fhNewItemPtr()
-ptrField  = fhNewItemPtr()
-ptrClear  = fhNewItemPtr()
+ptrField = fhNewItemPtr()
+ptrClear = fhNewItemPtr()
 tblDeleteList = {}
 tblChangeList = {}
 tblFamilyList = {}
@@ -140,11 +222,20 @@ while ptrRecord:IsNotNull() do
         if bLiving ~= 'Y' and s['AssumeLiving'] == 1 then
             local BirthYear = tonumber(fhGetItemText(ptrRecord,'~.BIRT.DATE:YEAR'))
             if BirthYear == nil then
-                BirthDate = fhCallBuiltInFunction('EstimatedBirthDate',ptrRecord,'EARLIEST',3)
-                BirthYear = fhCallBuiltInFunction('Year',BirthDate)
+                local BirthDate = fhCallBuiltInFunction('EstimatedBirthDate',ptrRecord,sBirthEst,9)
+                BirthYear = BirthDate:GetYear()
+                if BirthYear == 0 then
+                    -- Try Spouse
+                    local ptrSpou = fhGetItemPtr(ptrRecord,'~.~SPOU>')
+                    if ptrSpou:IsNotNull() then
+                        BirthDate = fhCallBuiltInFunction('EstimatedBirthDate',ptrSpou,sBirthEst,9)
+                        BirthYear = BirthDate:GetYear()
+                    end
+                end
             end
-            if BirthYear == nil then
-                --  Assume recent
+            -- print(fhGetDisplayText(ptrRecord), BirthYear)
+            if BirthYear == 0 and s['NoBirthDate'] == 1 then
+                -- Assume recent
                 BirthYear = s['LivingBirthDate']
             end
             local DeathYear = tonumber(fhGetItemText(ptrRecord,'~.DEAT.DATE:YEAR'))
@@ -163,10 +254,10 @@ while ptrRecord:IsNotNull() do
                     local Surname = string.match(fhGetValueAsText(ptrField),'/(.-)/')
                     local Given = fhGetItemText(ptrField,'~:GIVEN_ALL')
                     if s['ClnName'] == 1 then
-                        --  Change Given to Initials
+                        -- Change Given to Initials
                         newName = GetInitials(Given)..' /'..Surname..'/'
                     elseif s['ClnName'] == 2 then
-                        --  Change All to Initials
+                        -- Change All to Initials
                         newName = GetInitials(Given)..' /'..GetInitials(Surname)..'/'
                         
                     elseif s['ClnName'] == 3 then
@@ -205,8 +296,9 @@ for _,item in ipairs(tblFamilyList) do
         ptrField:MoveNext()
     end
 end
-
-ret = fhMessageBox('Please Confirm Changes:\n'..#tblDeleteList..' items will be deleted and '..#tblChangeList..' items changed','MB_OKCANCEL')
+ret = fhMessageBox('Please Confirm Changes:\n'..
+#tblDeleteList..' items will be deleted and '..
+#tblChangeList..' items changed','MB_OKCANCEL')
 if ret=='OK' then
     for _,item in ipairs(tblDeleteList) do
         fhDeleteItem(item)
@@ -220,7 +312,6 @@ if ret=='OK' then
     if s['ClnNoteRecords'] == 1 then
         dltUnused('NOTE')
     end
-    
     if s['ClnSourceRecords'] == 1 then
         dltUnused('SOUR')
     end

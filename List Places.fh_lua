@@ -1,0 +1,127 @@
+--[[
+@Title: Place List
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: January 2013 
+@Description: Lists All Places in the selected database with a use count
+]]
+
+function main()
+    tblOutput,iC = createResultTable()
+    -- Define Columns
+    tblOutput.place = {title='Place',type='text',width=140,align='align_left',content={}}
+    tblOutput.reverseplace = {title='Reversed Place',type='text',width=140,align='align_left',content={}}
+    tblOutput.count = {title='Count',type='integer',width=140,align='align_left',content={}}
+    local places = {}
+    for ptr in allItems() do
+        if fhGetTag(ptr) == 'PLAC' then
+            local strPlace = fhGetValueAsText(ptr)
+            if places[strPlace] then
+                places[strPlace] = places[strPlace] + 1
+            else
+                places[strPlace] = 1
+            end
+        end
+    end
+    for i,c in pairs(places) do
+        iC = iC + 1
+        tblOutput.place.content[iC] = i
+        tblOutput.reverseplace.content[iC] = reverseString(i)
+        tblOutput.count.content[iC] = c
+    end
+    fhOutputResultSetTitles("All Places", "All Places", "Place List Date: %#x")
+    for t in tblOutput() do
+        fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+    end
+end
+
+function reverseString(string)
+local array = explode(',',string)
+local newarray = {}
+local i = #array
+local j = 1
+while i > 0 do
+newarray[j] = array[i]
+j = j + 1
+i = i - 1
+end
+
+return table.concat(newarray,',')
+end
+function explode(div,str) 
+  if (div=='') then return false end
+  local pos,arr = 0,{}
+  -- for each divider found
+  for st,sp in function() return string.find(str,div,pos,true) end do
+    table.insert(arr,trim(string.sub(str,pos,st-1))) -- Attach chars left of current divider
+    pos = sp + 1 -- Jump past current divider
+  end
+  table.insert(arr,trim(string.sub(str,pos))) -- Attach chars right of last divider
+  return arr
+end
+function trim(s)
+  return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+function allItems(...)
+    local iTypeCount = nil
+    local iPos = 1
+    local p1 = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    local tblRecTypes = {}
+    
+    if arg['n'] == 0 then
+        -- No parameter do all Record Types
+        iTypeCount = fhGetRecordTypeCount() -- Get Count of Record types
+        for i = 1,iTypeCount do
+            tblRecTypes[i] = fhGetRecordTypeTag(i)
+        end
+    else
+        -- Got Parameters Process them instead
+        tblRecTypes = arg
+        iTypeCount = arg['n']
+    end
+    p1:MoveToFirstRecord(tblRecTypes[iPos])
+    return function()
+        repeat
+        while p1:IsNotNull() do
+            p2:MoveTo(p1)
+            p1:MoveNextSpecial()
+            if p2:IsNotNull() then
+                return p2
+            end
+        end
+        -- Loop through Record Types
+        iPos = iPos + 1
+        if iPos <= iTypeCount then
+            p1:MoveToFirstRecord(tblRecTypes[iPos])
+        end
+        until iPos > iTypeCount
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+main()

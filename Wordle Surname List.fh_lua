@@ -1,0 +1,110 @@
+--[[
+@Title: Wordle - List Builder
+@Author: Jane Taubman
+@Version: 0.2
+@LastUpdated: January 2014 
+@Description: Builds a list of Surnames from a selected group of people for use with the Wordle Web site
+]]
+function main()
+fhMessageBox('Select all the people who you want to included in the process. \n\nTip: Use the add using Relatives option to pick all your ancestors to see how it works')
+local bExcludeBrackets = true
+local strBracket = '({['
+local tblIndi = fhPromptUserForRecordSel('INDI')
+   local list = {}
+if #tblIndi == 0 then
+    return
+else
+
+	for i,ptr in pairs(tblIndi) do
+        local strSurname = fhGetItemText(ptr,'~.NAME:SURNAME')
+        if strSurname ~= '' then
+        local strStart = string.plain(strSurname:sub(1,1))
+        if (bExcludeBrackets and string.find(strBracket,strStart)) then
+           print(strSurname,'skipped')
+        else
+        list[strSurname] = (list[strSurname] or 0) + 1
+        end
+        end
+    end
+end
+local outlist = {}
+local outdetail = {}
+
+for i,v in pairs(list) do
+local res = i..':'..v
+local sStr = string.rep(i..' ',v)
+table.insert(outlist,res)
+table.insert(outdetail,sStr)
+end
+local strList = table.concat(outlist,'\n')
+clipboard = iup:clipboard()   
+clipboard.text = table.concat(outdetail,' ')
+launchPage(strList)
+end
+
+function string.plain(strTxt)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character,
+	-- where %% is the % escape, and %1 is the original character capture.
+	strTxt = tostring(strTxt or ""):gsub("(%W)","%%%1")
+	return strTxt
+end -- function string.plain
+
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if not fileHandle then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+ 
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+function launchPage(strList)
+local html = htmltemplate:gsub('{list}',strList)
+local settingfile = fhGetPluginDataFileName("CURRENT_PROJECT")
+settingfile = settingfile:gsub('%.dat','%.html')
+SaveStringToFile(html,settingfile)
+fhShellExecute(settingfile)
+print(html)
+
+end
+
+------------------------------------------------------- Call Main
+htmltemplate =[[
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+  <head>
+  <meta http-equiv="content-type" content="text/html; charset=windows-1250">
+  <meta name="generator" content="PSPad editor, www.pspad.com">
+  <title>Call Wordle</title>
+  </head>
+  <body>
+  <h1>Wordle - Surname Cloud Generator</h1>
+  <p>Wordle is a toy for generating “word clouds” from text that you provide. The plugin has populated
+  the people you selected and weighted the surnames based on the number of occurances.
+  </p><p>
+  The clouds give greater prominence to words that appear more frequently in the list. 
+  You can tweak your clouds with different fonts, layouts, and color schemes or press the randomise button. 
+  The images you create with Wordle are yours to use however you like. 
+  You can print them out, or save them to the Wordle gallery to share with your friends.</p>
+  <p>To capture them as images, the easiest way is to use the Open Window option and then grab a screen shot.</p>
+  <form action="http://www.wordle.net/compose" method="POST">
+    <textarea rows="4" cols="80" name="wordcounts" id="wordcounts" style="margin: 2px; height: 678px; width: 684px; display:none">
+{list}
+    </textarea>
+    <input type="submit" value="Launch Wordle">
+</form>
+  </body>
+</html>
+
+]]
+
+main()
+

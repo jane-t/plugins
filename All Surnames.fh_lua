@@ -15,15 +15,15 @@ pi2 = fhNewItemPtr()
 pfl = fhNewItemPtr()
 pf = fhNewItemPtr()
 count = 0
-local tbl = createResultTable
+local tbl = createResultTable()
 -- Define Columns
 tbl.surname = {title="Surname",type="text",width=60,sort=1}
 tbl.given   = {title="Given Names", type="text", width=80,sort=2}
 tbl.type   = {title="Lifedates", type="text", width=40}
 tbl.lifedates   = {title="Lifedates", type="text", width=40}
-tbl.marriage = {title="Marriage", type="text",width=80)
-tbl.record   = {title="Record",width=160)
-tbl.familyrecord   = {title="Family Record",width=160)
+tbl.marriage = {title="Marriage", type="text",width=80}
+tbl.record   = {title="Record",width=160}
+tbl.familyrecord   = {title="Family Record",width=160}
 
 local tblTypes = {'Primary','Secondary','Married'}
 
@@ -35,14 +35,14 @@ while not pi:IsNull() do
         index = 1
         while not pi2:IsNull() do
             count = count + 1
-            tblSurname[count] = fhGetItemText(pi2,'~:SURNAME')
-            tblGivenAll[count] = fhGetItemText(pi2,'~:GIVEN_ALL')
-            tblRecord[count]   = pi:Clone()
-            tblLifeDates[count] = fhCallBuiltInFunction('Lifedates',pi)
+            tbl.surname[count] = fhGetItemText(pi2,'~:SURNAME')
+            tbl.given[count] = fhGetItemText(pi2,'~:GIVEN_ALL')
+            tbl.record[count]   = pi:Clone()
+            tbl.lifedates[count] = fhCallBuiltInFunction('Lifedates',pi)
             if index == 1 then
-                tblNameType[count] = tblTypes[1]
+                tbl.type[count] = tblTypes[1]
             else
-                tblNameType[count] = tblTypes[2]
+                tbl.type[count] = tblTypes[2]
             end
             index = index + 1
             pi2:MoveNext("SAME_TAG") -- next Name
@@ -55,13 +55,13 @@ while not pi:IsNull() do
             while not pfl:IsNull() do
                 pf = fhGetValueAsLink(pfl)
                 count = count + 1
-                tblSurname[count]  = fhGetItemText(pf,'FAM.HUSB>NAME:SURNAME')
-                tblGivenAll[count] = fhGetItemText(pi,'INDI.NAME:GIVEN_ALL')
-                tblRecord[count]   = pi:Clone()
-                tblFamilyRecord[count]   = pf:Clone()
-                tblLifeDates[count] = fhCallBuiltInFunction('Lifedates',pi)
-                tblMarriageDate[count]  = fhGetItemText(pf,'FAM.MARR.DATE')
-                tblNameType[count] = tblTypes[3]
+                tbl.surname[count]  = fhGetItemText(pf,'FAM.HUSB>NAME:SURNAME')
+                tbl.given[count] = fhGetItemText(pi,'INDI.NAME:GIVEN_ALL')
+                tbl.record[count]   = pi:Clone()
+                tbl.familyrecord[count]   = pf:Clone()
+                tbl.lifedates[count] = fhCallBuiltInFunction('Lifedates',pi)
+                tbl.marriagedate[count]  = fhGetItemText(pf,'FAM.MARR.DATE')
+                tbl.type[count] = tblTypes[3]
                 pfl:MoveNext("SAME_TAG") -- next Family as spouse
             end
         end

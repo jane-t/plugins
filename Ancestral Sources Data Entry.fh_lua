@@ -1,683 +1,1887 @@
---[[
-@Title:			Ancestral Sources Data Entry
-@Author:			Mike Tate
-@LastUpdated:	26 Sep 2012
-@Version:			3.2
-@Description:	Launches latest Ancestral Sources Version for the current Project 
-					with the current selected person, for any chosen type of data entry.
-@V3.2:				Removed version from Title, added strWhite background to dialogues, check Version in Store.
-@V3.1:				FlgFile/FolderExists updated, better AS Not Found wording, and other minor changes.
-@V3.0:				Added the Marriage, Add Images, and Close on Save options, also Help window size is sticky.
-@V1.7:				Minor bug fixes and code revisions.
-@V1.6:				Added user font option, tool tips, help, and other minor updates.
-@V1.5:				Revised plugin data folder path, and updated coding style.
-@V1.4:				Now supports both Projects and standalone GEDCOM files.
-@V1.3:				Remembers some settings for each different PC environment.
-@V1.2:				Caters for multi-monitor virtual-screen multi-PC environments.
-@V1.1:				Caters for Ancestral Sources V2 installed in a non-default folder,
-					and also preserves plugin window position and settings per Project.
-]]
-
-	require "iuplua"									-- To access GUI window builder
-	require "lfs"										-- To access LUA filing system
-	require "iupluaole"									-- To access OLE subsystem
-	require "luacom"									-- To access COM subsystem
-
--- Global Data Constants Definition --
-function PresetGlobalConstants()
-
-	-- GUI Global Constants
-
-	StrPlugin			= "Ancestral Sources Data Entry"	-- Plugin title & version
-	StrIssue			= " V3.2"
-	StrVersion		= "Version 3.2.3"				-- Ancestral Sources program version
-	StrRed				= "255   0   0"					-- Color attributes (must exclude leading zeros)
-	StrAmber			= "250 160   0"
-	StrGreen			= "  0 120   0"
-	StrBlue			= "  0   0 255"
-	StrGray			= "120 120 120"
-	StrBlack			= "  0   0   0"
-	StrWhite			= "255 255 255"
-	StrBigMargin		= "10x10"							-- Layout attributes
-	StrMinMargin		= "1x1"
-	StrGap				= "10"
-
-	StrFontSetTitle	= "Set Interface Font"
-	IntFontPlain		= 1									-- Font Face & Style values for IntFontSet
-	IntFontBold		= 2
-	IntArialPlain	= 3
-	IntArialBold		= 4
-	IntTahomaPlain	= 5
-	IntTahomaBold	= 6
-	StrFontFace		= string.gsub(iup.GetGlobal("DEFAULTFONT"),",.*","")
-
-	StrType			= nil								-- Type of Ancestral Sources operation required e.g. " -SOURCE CENSUS" or " -SOURCE BAPTISM"
-
-	-- Filename Global Constants
- 
-	StrComputerName = os.getenv("COMPUTERNAME")	-- Used for local settings
- 
-	local strStickyFold
-	local strStickyOld
-	StrStickyFile = fhGetPluginDataFileName()
-	-- Allow plugins with variant filenames to use same plugin data files
-	StrStickyFile = string.gsub(StrStickyFile,"\\"..StrPlugin..".+%.[D,d][A,a][T,t]$","\\"..StrPlugin..".dat")
-	if StrStickyFile == "" then
-		-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
-		StrStickyFile = fhGetContextInfo("CI_GEDCOM_FILE")
-		strStickyFold = string.gsub(StrStickyFile, "%.[G,g][E,e][D,d]", "")
-		strStickyOld  = strStickyFold.."\\Launch "..StrPlugin..".dat"
-		StrStickyFile = string.gsub(StrStickyFile, "%.[G,g][E,e][D,d]", ".fh_data")
-		lfs.mkdir(StrStickyFile)
-		StrStickyFile = StrStickyFile.."\\Plugin Data"
-		lfs.mkdir(StrStickyFile)
-		StrStickyFile = StrStickyFile.."\\"..StrPlugin..".dat"
-
-		if FlgFileExists(strStickyOld) then
-			-- Sticky settings exist in old location, so move to new location
-			local fileHandle,strError = os.rename(strStickyOld,StrStickyFile)
-			if fileHandle == nil then
-				iup.Message("Error","Cannot move the old file from:\n"..strStickyOld.."\nto its new location at:\n"..StrStickyFile.."\n\n"..strError.."\n")
-			end
-			local fileHandle,strError = lfs.rmdir(string.gsub(strStickyFold,".*\\",""))
-			if fileHandle == nil then
-				iup.Message("Error","Cannot remove the old folder:\n"..strStickyFold.."\n\n"..strError.."\n")
-			end
-		end
-
-	end
-
-	strStickyOld = string.gsub(StrStickyFile, StrPlugin..".dat", "\\Launch "..StrPlugin..".dat")
- 	if FlgFileExists(strStickyOld) then
-		-- Sticky settings exist for old plugin filename, so rename to new plugin filename
-		local fileHandle,strError = os.rename(strStickyOld,StrStickyFile)
-		if fileHandle == nil then
-			iup.Message("Error","Cannot rename old file from:\n"..strStickyOld.."\nto new file:\n"..StrStickyFile.."\n\n"..strError.."\n")
-		end
-	end
-
-	StrFHUG = "http://www.fhug.org.uk/wiki/doku.php?id="
-
-end -- function PresetGlobalConstants
-
--- Split a string using Separator --
-function string:split(sep)
-	local sep = sep or ":"
-	local fields = {}
-	local pattern = string.format("([^%s]+)", sep)
-	self:gsub(pattern, function(c) fields[#fields+1] = c end)
-	return fields
-end -- function string:split
-
--- Split a string into numbers using separators space or comma or x --
-function string:SplitNumbers()
-	local tblNum = {}
-	self:gsub("([^%s,x]+)", function(c) tblNum[#tblNum+1] = c end)
-	for i=1, #tblNum do
-		tblNum[i] = tonumber(tblNum[i])
-	end
-	return tblNum
-end -- function string:SplitNumbers
-
--- Check if file exists --
-function FlgFileExists(strFileName)
-	if lfs.attributes(strFileName,"mode") == "file" then
-		return true
-	else
-		return false
-	end
-end -- function FlgFileExists
-
--- Check if folder exists --
-function FlgFolderExists(strFolderName)
-	if lfs.attributes(strFolderName,"mode") == "directory" then
-		return true
-	else
-		return false
-	end
-end -- function FlgFolderExists
-
--- Open File and return Handle --
-function OpenFile(strFileName,strMode)
-	local fileHandle, strError = io.open(strFileName,strMode)
-	if fileHandle == nil then
-		error("\n Unable to open file: "..strFileName.." \n "..strError.." \n")
-	end
-	return fileHandle
-end -- function OpenFile
-
--- Obtain Version in Plugin Store by Id or Name --
-function StrVersionInStore(strPlugin)
-	local strType = "name="
-	if tonumber(strPlugin) then strType = "id=" end
-	if strPlugin then
-		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
-		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..strPlugin
- 		http:Open("GET",strRequest,false)
-		http:Send()
-		local strReturn = http.Responsebody
-		local strVersion = ""
-		if strReturn ~= nil then
-			strVersion = strReturn:match("(%d.*),%d*")
-		end
-		return strVersion or "0"
-	else
-		return "0"
-	end
-end -- function StrVersionInStore
-
--- Check if New Version Available --
-function CheckVersionInStore(strOldVer)
-	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
-	local strNewVer = StrVersionInStore(strPlugin:gsub(" %- .*",""))
-	if strNewVer > strOldVer:match("[^%d]*([%d%.]*)") then
-		iup.Alarm(strPlugin..strOldVer,"Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.","OK")
-	end
-end -- function CheckVersionInStore
-
--- Reset Sticky Settings to Default Values --
-function ResetDefaultSettings()
-	IntMainX		= iup.CENTER			-- GUI Main window position X & Y co-ordinate
-	IntMainY		= iup.CENTER
-	IntDataX		= iup.CENTER			-- GUI Font window position X & Y co-ordinate
-	IntDataY		= iup.CENTER
-	IntHelpX		= iup.CENTER			-- GUI Help window position X & Y co-ordinate
-	IntHelpY		= iup.CENTER
-	StrHelpS		= "1030x730"
-	local strPublic = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")
-	if strPublic == "" then
-		StrFolder = StrPluginPath		-- Output folder for standalone Gedcom
-	else
-		StrFolder = strPublic			-- Output folder for Project structure
-	end
-	StrFiles		= nil					-- Program files installation folder
-	StrClose		= "ON"					-- Close on Save Entry radio button value
-end -- function ResetDefaultSettings
-
--- Load Sticky Settings from File --
-function LoadSettings(strFileName)
-
-	local tblStickyData = {}
-
-	-- Load Local Parameter for this PC --
-	local function strLoadLocal(strParam,strDefault)
-		-- Load V1.2 data without ComputerName prefix or V1.3 data with ComputerName prefix or strDefault value
-		local strValue
-		strValue = tblStickyData[strParam] or tblStickyData[StrComputerName.."-"..strParam] or strDefault
-		tblStickyData[strParam] = nil	-- Remove old V1.2 data without ComputerName prefix
-		return strValue
-	end
-
-	-- Load Global Parameter for all PC --
-	local function strLoadGlobal(strParam,strDefault)
-		return tblStickyData[strParam] or strDefault
-	end
-
-	-- Ensure Window Position is on Screen --
-	local function intintCheckPosition(x,y)
-		local tblScrn = iup.GetGlobal("VIRTUALSCREEN"):SplitNumbers()
-		-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
-		if tonumber(x) == nil then
-			x = iup.CENTER
-		elseif tonumber(x) > tblScrn[3] then
-			x = iup.CENTER
-		end
-		if tonumber(y) == nil then
-			y = iup.CENTER
-		elseif tonumber(y) > tblScrn[4] then
-			y = iup.CENTER
-		end
-		return tonumber(x),tonumber(y)
-	end -- local function intintCheckPosition
-
-	if FlgFileExists(strFileName) then
-		-- Load Settings File in table lines with key & val fields
-		local tblField = {}
-		for strLine in io.lines(strFileName) do
-			tblField = strLine:split("=")
-			tblStickyData[tblField[1]] = tblField[2]
-		end
-		IntMainX = tonumber(strLoadLocal("Pos_X",IntMainX))		-- Old GUI Pos_X & Pos_Y parameters
-		IntMainY = tonumber(strLoadLocal("Pos_Y",IntMainY))
-		IntMainX = tonumber(strLoadLocal("MainX",IntMainX))
-		IntMainY = tonumber(strLoadLocal("MainY",IntMainY))
-		IntHelpX = tonumber(strLoadLocal("HelpX",IntHelpX))
-		IntHelpY = tonumber(strLoadLocal("HelpY",IntHelpY))
-		StrHelpS = strLoadLocal			("HelpS",StrHelpS)
-		IntDataX = tonumber(strLoadLocal("DataX",IntDataX))
-		IntDataY = tonumber(strLoadLocal("DataY",IntDataY))
-		StrFiles = strLoadLocal("Files",StrFiles)
-		StrClose = strLoadGlobal("Close",StrClose)
-		IntFontSet = tonumber(strLoadGlobal("Fonts",IntFontSet))
-	end
-	IntMainX,IntMainY = intintCheckPosition(IntMainX,IntMainY)
-	IntHelpX,IntHelpY = intintCheckPosition(IntHelpX,IntHelpY)
-	GUI_FontDialogue(IntFontSet) 							-- Assign font set
-	SaveSettings(strFileName)									-- Save sticky data settings
-end -- function LoadSettings
-
--- Save Sticky Settings to File --
-function SaveSettings(strFileName)
-
-	local tblStickyData = {}
- 
-	-- Save Local Parameter for this PC --
-	local function doSaveLocal(strParam,param)
-		tblStickyData[StrComputerName.."-"..strParam] = param
-	end
- 
-	-- Save Global Parameter for all PC --
-	local function doSaveGlobal(strParam,param)
-		tblStickyData[strParam] = param
-	end
- 
-	doSaveLocal("MainX",IntMainX)
-	doSaveLocal("MainY",IntMainY)
-	doSaveLocal("HelpX",IntHelpX)
-	doSaveLocal("HelpY",IntHelpY)
-	doSaveLocal("HelpS",StrHelpS)
-	doSaveLocal("DataX",IntDataX)
-	doSaveLocal("DataY",IntDataY)
-	doSaveLocal("Files",StrFiles)
-	doSaveGlobal("Close",StrClose)
-	doSaveGlobal("Fonts",IntFontSet)
- 
-	local fileHandle = OpenFile(strFileName,"w")
-	for strKey,strVal in pairs(tblStickyData) do
-		fileHandle:write(strKey.."="..strVal.."\n")
-	end
-	fileHandle:close()
-end -- function SaveSettings
-
-function IsNormalWindow(dialogGUI)
-	-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
-	local tblPosn = dialogGUI.screenposition:SplitNumbers()
-	local intPosX = tblPosn[1]
-	local intPosY = tblPosn[2]
-	if intPosX < 0 and intPosY < 0 then						-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
-		return false												-- then is Maximised or Minimised
-	end
-	return true
-end -- function IsNormalWindow
-
--- GUI Font Face & Style Dialogue --
-function GUI_FontDialogue(intFontSet)
-
-	-- Note: Pixel sizes -21 = -20 & -17 = -16 & -14 = -13 and pixel sizes -22, -18 & -13 have no point size equivalent.
-	local tblFontSet = {}			-- Lookup table for StrFontHead and StrFontBody font sets
-	tblFontSet[IntFontPlain]		=	{ Head=StrFontFace..", Bold -16",	Body=StrFontFace..",      -16", }
-	tblFontSet[IntFontBold]		=	{ Head=StrFontFace..", Bold -16",	Body=StrFontFace..", Bold -15", }
-	tblFontSet[IntArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
-	tblFontSet[IntArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
-	tblFontSet[IntTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
-	tblFontSet[IntTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
-
-	-- Assign font set global variables
-	local function doAssignFontSet(intFontSet)
-		IntFontSet = intFontSet
-		StrFontHead = tblFontSet[intFontSet]["Head"] -- Font for all GUI dialog header text
-		StrFontBody = tblFontSet[intFontSet]["Body"] -- Font for all GUI dialog body text
-	end -- local function doAssignFontSet
-
-	-- If parameter exists, simply set it as current font set
-	if intFontSet then doAssignFontSet(intFontSet) return end
-
-	local strAnswer = "Change"
-
-	local strFontPlainTitle	= StrFontFace.." Plain"
-	local strFontBoldTitle		= StrFontFace.." Bold"
-	local strArialPlainTitle	= "Arial Plain"
-	local strArialBoldTitle	= "Arial Bold"
-	local strTahomaPlainTitle	= "Tahoma Plain"
-	local strTahomaBoldTitle	= "Tahoma Bold"
-
-	-- Create each GUI label and button with title and tooltip
-	local	lblHeadName		= iup.label	{ title=" Name :"				, tip="Names of the available Fonts"				, }
-	local	lblHeadPlain		= iup.label	{ title=" Plain :"				, tip="Plain versions of the Fonts"					, }
-	local	lblHeadBold		= iup.label	{ title=" Bold :"				, tip="Bold versions of the Fonts"					, }
-	local	lblFontName		= iup.label	{ title="Font "..StrFontFace	, tip="Default Windows fontface"					, }
-	local	btnFontPlain		= iup.button	{ title=strFontPlainTitle		, tip="Choose "..strFontPlainTitle.." style"		, }
-	local	btnFontBold		= iup.button	{ title=strFontBoldTitle		, tip="Choose "..strFontBoldTitle.." style"		, }
-	local	lblArialName		= iup.label	{ title="Font Arial"			, tip="Arial alternative fontface"					, }
-	local	btnArialPlain	= iup.button	{ title=strArialPlainTitle	, tip="Choose "..strArialPlainTitle.." style"	, }
-	local	btnArialBold		= iup.button	{ title=strArialBoldTitle		, tip="Choose "..strArialBoldTitle.." style"		, }
-	local	lblTahomaName	= iup.label	{ title="Font Tahoma"			, tip="Tahoma alternative fontface"					, }
-	local	btnTahomaPlain	= iup.button	{ title=strTahomaPlainTitle	, tip="Choose "..strTahomaPlainTitle.." style"	, }
-	local	btnTahomaBold	= iup.button	{ title=strTahomaBoldTitle	, tip="Choose "..strTahomaBoldTitle.." style"	, }
-	local	lblChoose			= iup.label	{ title="Choose your interface font style or"										, }
-	local	btnClose			= iup.button	{ title="Close"					, tip="Close this Font Style window"				, }
-
-	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
-	local	dialogFont		= iup.dialog { title=StrPlugin.." Font Style", dialogframe="YES", background=StrWhite, startfocus=btnClose,
-										iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
-											iup.frame { font=StrFontHead, fgcolor=StrBlack, active="YES", title="Font Style",
-												iup.vbox { margin=StrMinMargin,
-													iup.hbox { homogeneous="YES", lblHeadName,	lblHeadPlain,	lblHeadBold,		},
-													iup.hbox { homogeneous="YES", lblFontName,	btnFontPlain,	btnFontBold,		},
-													iup.hbox { homogeneous="YES", lblArialName,	btnArialPlain,	btnArialBold,	},
-													iup.hbox { homogeneous="YES", lblTahomaName,	btnTahomaPlain,	btnTahomaBold,	},
-													iup.hbox { lblChoose, btnClose, },
-												},
-											},
-										},
-										move_cb =function(self,x,y) IntDataX=x IntDataY=y end,
-										close_cb=function() strAnswer="Ignore" return iup.CLOSE end,
-									}
-
-	-- Assign font styles for GUI labels and buttons
-	local strFontPlain		= tblFontSet	[IntFontPlain]	["Body"]
-	local strFontBold		= tblFontSet	[IntFontBold]	["Body"]
-	local strArialPlain		= tblFontSet	[IntArialPlain]	["Body"]
-	local strArialBold		= tblFontSet	[IntArialBold]	["Body"]
-	local strTahomaPlain	= tblFontSet	[IntTahomaPlain]["Body"]
-	local strTahomaBold		= tblFontSet	[IntTahomaBold]	["Body"]
-
-	-- Set other GUI attributes for labels and buttons
-	for iupName, tblAttr in pairs( {
-		--	Control		=	1~fgcolor	, 2~font			, 3~FontSet		, 4~action function()
-		[lblHeadName]	= { StrBlack	, StrFontBody	, false			, false	},
-		[lblHeadPlain]	= { StrBlack	, strFontPlain	, false			, false	},
-		[lblHeadBold]	= { StrBlack	, strFontBold	, false			, false	},
-		[lblFontName]	= { StrBlack	, strFontPlain	, false			, false	},
-		[btnFontPlain]	= { StrGreen	, strFontPlain	, IntFontPlain	, false	},
-		[btnFontBold]	= { StrGreen	, strFontBold	, IntFontBold	, false	},
-		[lblArialName]	= { StrBlack	, strArialPlain	, false			, false	},
-		[btnArialPlain]	= { StrGreen	, strArialPlain	, IntArialPlain	, false	},
-		[btnArialBold]	= { StrGreen	, strArialBold	, IntArialBold	, false	},
-		[lblTahomaName]	= { StrBlack	, strTahomaPlain, false			, false	},
-		[btnTahomaPlain]= { StrGreen	, strTahomaPlain, IntTahomaPlain, false	},
-		[btnTahomaBold]	= { StrGreen	, strTahomaBold	, IntTahomaBold	, false	},
-		[lblChoose]		= { StrBlack	, StrFontBody	, false			, false	},
-		[btnClose]		= { StrRed	, StrFontBody	, false			, dialogFont.close_cb },
-		} ) do
-		iupName.expand	= "YES"
-		iupName.fgcolor	= tblAttr[1]
-		iupName.font		= tblAttr[2]
-		if tblAttr[3] then
-			if tblAttr[3] == IntFontSet then iupName.active = "NO" end	-- Disable button for currently selected font
-			iupName.action = function() doAssignFontSet(tblAttr[3]) return iup.CLOSE end
-		end
-		if tblAttr[4] then iupName.action = tblAttr[4] end
-	end
-
-	dialogFont:popup(IntDataX,IntDataY)
-
-	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
-
-	return strAnswer
-end -- function GUI_FontDialogue
-
--- GUI Help & Advice Dialogue --
-function GUI_HelpDialogue()
-
-	local function doActivateMainHelpButton()
-		if BtnMainHelp then BtnMainHelp.active = "YES" end
-		if BtnFileHelp then BtnFileHelp.active = "YES" end
-	end -- local function doActivateMainHelpButton
-
-	-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
-	local	oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
-			oleControl:CreateLuaCOM()
-
-	-- Create each GUI button with title and tooltip
-	local	btnMain	= iup.button	{ title="Ancestral Sources Data Entry"		, tip="Ancestral Sources Data Entry window"	, }
-	local	btnPath	= iup.button	{ title="Ancestral Sources Not Found"		, tip="Ancestral Sources Not Found window"	, }
-	local	btnAbout	= iup.button	{ title="About latest Ancestral Sources"	, tip="About Ancestral Sources "..StrVersion	, }
-	local	btnClose	= iup.button	{ title="Close this Window"					, tip="Close this Help and Advice window"		, }
-
-	-- The following control is global to allow Main GUI to alter font
-			HboxHelp		=	iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnMain, btnPath, btnAbout, btnClose, }
-	local	dialogHelp	=	iup.dialog { title=StrPlugin.." Help & Advice", background=StrWhite, startfocus=btnClose, rastersize=StrHelpS,
-									iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin, expandchildren="YES",
-										oleControl,
-										HboxHelp,
-									},
-									move_cb	= function(self,x,y) if IsNormalWindow(self) then IntHelpX=x IntHelpY=y end end,
-									resize_cb	= function(self) if IsNormalWindow(self) then StrHelpS=self.rastersize end end,
-									close_cb	= function() doActivateMainHelpButton() end,
-								}
-
-	local	strFHUG = StrFHUG.."plugins:help:as_data_entry:"
-
-	-- Set other GUI control attributes
-	for iupName, tblAttr in pairs( {
-		-- Control=	1~fgcolor	, 2~Navigate URL						, 3~action function()
-		[btnMain] = { StrGreen	, strFHUG.."as_data_entry"			, false },
-		[btnPath] = { StrGreen	, strFHUG.."as_not_found"				, false },
-		[btnAbout]= { StrGreen	, StrFHUG.."ancestralsources:about"	, false },
-		[btnClose]= { StrRed	, false									, function() dialogHelp:destroy() doActivateMainHelpButton() end },
-		} ) do
-		iupName.expand	= "HORIZONTAL"
-		iupName.size		= "x10"
-		iupName.fgcolor	= tblAttr[1]
-		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(tblAttr[2]) end end
-		if tblAttr[3] then iupName.action = tblAttr[3] end
-	end
-
-	dialogHelp:showxy(IntHelpX,IntHelpY)		-- Show Help GUI window
-	dialogHelp.rastersize=nil						-- Allow window to be resized
-
-	local strOrigin = ""
-	if BtnMainHelp then strOrigin = "as_data_entry" end
-	if BtnFileHelp then strOrigin = "as_not_found" end
-
-	oleControl.com:Navigate(strFHUG..strOrigin)
-
-	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
-
-end -- function GUI_HelpDialogue
-
--- GUI File Dialogue --
-function GUI_FileDialogue(strPathEdit)
-
-	local flgStatus	= true
-
-	while	( lfs.attributes(strPathEdit..StrASexe,"size") or 0 )
-		+	( lfs.attributes(strPathEdit..StrASchm,"size") or 0 ) < 5530000 and flgStatus do
-
-		if FlgFolderExists(strPathEdit) then StrDirectory = strPathEdit end 	-- Remember last valid folder for doPathEdit() browse directory GUI 
-
-	-- Create each GUI label and button with title and tooltip
-		local	lblMessage	= iup.label	{ title="This Plugin runs the Program with the same name,\nbut the Ancestral Sources Program "..StrVersion.."\nis not installed in the expected folder:\n"..strPathEdit
-																																	, tip="Ancestral Sources "..StrVersion.." does not appear to be installed on your PC", }
-		local	lblOptions	= iup.label	{ title="Please choose one of these options :-"							, tip="Choose one of the options below to resolve this situation"				, }
-		local	lblOption1	= iup.label	{ title="(1)  Install Ancestral Sources "..StrVersion.." ..."		, tip="Install Ancestral Sources "..StrVersion.." on your PC"								, }
-		local	btnDownload	= iup.button	{ title="Click here for downloads"											, tip="Click here to Download Ancestral Sources from FHUG Knowledge Base"		, }
-		local	lblOption2	= iup.label	{ title="(2)  Edit installation path listed below ..."					, tip="Edit the path below to refer to your installation of Ancestral Sources", }
-		local	btnPathEdit	= iup.button	{ title="Browse to installation path"										, tip="Select your installation path for Ancestral Sources"						, }
-		local	txtPathEdit	= iup.text	{ value=strPathEdit																, tip="Enter your installation path for Ancestral Sources here"					, }
-		local	btnRetry		= iup.button	{ title="Click here to check path"											, tip="Click here to check installation path above is now valid"				, }
-		local	lblOption3	= iup.label	{ title="(3)  Quit from this plugin ..."									, tip="Quit from this plugin making no changes"										, }
-		local	btnCancel		= iup.button	{ title="Click here to quit plugin"											, tip="Click here to quit this plugin"													, }
-				BtnFileHelp	= iup.button	{ title="Help and Advice"														, tip="Obtain online Help and Advice from the FHUG Knowledge Base"				, }
-
-		-- Create dialogue and turn off resize, menubox, maximize and minimize
-		local	dialogFile	= iup.dialog { title="Ancestral Sources Not Found", dialogframe="YES", background=StrWhite, defaultenter=btnCancel, rastersize="400",
-										iup.vbox { font=StrFontBody, expandchildren="YES", alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
-											lblMessage, iup.vbox{}, lblOptions, iup.vbox{}, lblOption1, btnDownload, iup.vbox{}, lblOption2, btnPathEdit, txtPathEdit, btnRetry, iup.vbox{}, lblOption3, btnCancel, iup.vbox{}, BtnFileHelp,
-										},
-										move_cb =function(self,x,y) IntMainX=x IntMainY=y end,
-										close_cb=function() flgStatus=false end,
-									}
-
-		local function doPathEdit()
-			local strDirectory = strPathEdit
-			if not FlgFolderExists(strDirectory) then strDirectory = StrDirectory end
-			local dialogPathEdit = iup.filedlg{dialogtype="DIR", title="Please select installation path", directory=strDirectory}
-			dialogPathEdit:popup(iup.CENTER, iup.CENTER)
-			if dialogPathEdit.status == "0" then strPathEdit = dialogPathEdit.value end
-			txtPathEdit.value = strPathEdit
-		end -- local	function doPathEdit
-
-		-- Set other GUI control attributes
-		for iupName, tblAttr in pairs( {
-			-- Control	=	1~fgcolor	, 2~alignment, 3~action function()
-			[lblMessage]	= { StrRed	, "ACENTER"	, false		},
-			[lblOptions]	= { StrBlack	, "ACENTER"	, false		},
-			[lblOption1]	= { StrGreen	, false		, false		},
-			[btnDownload]= { StrGreen	, false		, function() iup.Help(StrFHUG.."fhugdownloads:contents:ancestral_sources") flgStatus=false return iup.CLOSE end },
-			[lblOption2]	= {	 StrGreen	, false		, false		},
-			[btnPathEdit]= { StrGreen	, false		, function() doPathEdit() end },
-			[txtPathEdit]= { StrBlack	, false		, function(self,char,value) strPathEdit=value return char end },
-			[btnRetry]	= { StrGreen	, false		, function() StrProgramFiles=strPathEdit flgStatus=true return iup.CLOSE end },
-			[lblOption3]	= { StrGreen	, false		, false		},
-			[btnCancel]	= { StrGreen	, false		, function() flgStatus=false	return iup.CLOSE end },
-			[BtnFileHelp]= { StrGreen	, false		, function() BtnFileHelp.active="NO" GUI_HelpDialogue() end },
-			} ) do
-			iupName.expand	= "YES"
-			iupName.fgcolor	= tblAttr[1]
-			if tblAttr[2] then iupName.alignment = tblAttr[2] end
-			if tblAttr[3] then iupName.action = tblAttr[3] end
-		end
-
-		dialogFile:showxy(IntMainX,IntMainY)
-		iup.SetFocus(txtPathEdit)
-		if (iup.MainLoopLevel()==0) then iup.MainLoop() end
-		dialogFile:destroy()
-		BtnFileHelp = nil
-	end
-
-	return flgStatus
-
-end -- function GUI_FileDialogue
-
--- GUI Main Dialogue --
-function GUI_MainDialogue()
-
-	-- Create each GUI label and button with title and tooltip, etc
-	local	lblMessage	= iup.label	{ title="Please choose a data entry mode:", tip="Choose a data entry mode\n(Greyed-out buttons will be enabled as new features are added)"		, alignment="ACENTER", font=StrFontHead , }
-	local	btnCensus		= iup.button	{ title="Census Editor"						, tip="Choose the Census Editor mode"		, }
-	local	btnBirth		= iup.button	{ title="Birth Editor"							, tip="Choose the Birth Editor mode"		, }
-	local	btnBaptism	= iup.button	{ title="Baptism Editor"						, tip="Choose the Baptism Editor mode"		, }
-	local	btnMarriage	= iup.button	{ title="Marriage Editor"						, tip="Choose the Marriage Editor mode"	, }
-	local	btnDeath		= iup.button	{ title="Death Editor"							, tip="Choose the Death Editor mode"		, }
-	local	btnBurial		= iup.button	{ title="Burial Editor"						, tip="Choose the Burial Editor mode"		, }
-	local	btnProbate	= iup.button	{ title="Probate Editor"						, tip="Choose the Probate Editor mode"		, }
-	local	btnImages		= iup.button	{ title="Add Images to Sources"				, tip="Choose the Add Images mode"			, }
-	local	tglClosure	= iup.toggle	{ title=" Close on 'Save Entry to File' ?", tip="Choose whether to Close Ancestral Sources on 'Save Entry to File'", value=StrClose, }
-	local	btnFontSet	= iup.button	{ title=StrFontSetTitle						, tip="Choose user interface font style"	, }
-			BtnMainHelp	= iup.button	{ title="Help and Advice"						, tip="Obtain online Help and Advice from the FHUG Knowledge Base", }
-	local	btnCancel		= iup.button	{ title="Cancel Plugin"						, tip="Cancel this Plugin"					, }
-
-	local	vboxMain		= iup.vbox { font=StrFontBody, expandchildren="YES", alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
-									lblMessage, btnCensus, btnBirth, btnBaptism, btnMarriage, btnDeath, btnBurial, btnProbate, btnImages, iup.hbox { tglClosure, margin="18x8", }, btnFontSet, BtnMainHelp, btnCancel,
-								}
-
-	-- Create dialogue and turn off resize, menubox, maximize and minimize
-	local	dialogMain	= iup.dialog { title=StrPlugin..StrIssue, dialogframe="YES", background=StrWhite, startfocus=btnCancel, rastersize="300", vboxMain,
-									move_cb =function(self,x,y) IntMainX=x IntMainY=y end,
-									close_cb=function() return iup.CLOSE end,
-								}
-
-	local function doClose(iState)
-		if iState == 0 then
-			StrClose = "OFF"
-		elseif iState == 1 then
-			StrClose = "ON"
-		else
-			iup.Message(strTitle, "tglClosure invalid iState")
-			StrClose = "ERROR"
-		end
-	end -- local function doClose
-
-	local function doFontSet()
-		if GUI_FontDialogue() == "Change" then
-			lblMessage.font	= StrFontHead
-			vboxMain.font	= StrFontBody
-			if 	BtnMainHelp.active == "NO" then
-				HboxHelp.font = StrFontBody
-			end
-		end
-	end -- local function doFontSet
-
-	-- Set other GUI control attributes
-	for iupName, tblAttr in pairs( {
-		-- Control	=	1~fgcolor	, 2~active, 3~SOURCE	, 4~action function()
-		[lblMessage]	= { StrBlack	, false	, false		, false	},
-		[btnCensus]	= { StrGreen	, false	, "CENSUS"	, false	},
-		[btnBirth]	= { StrGreen	, "NO"		, "BIRTH"		, false	},
-		[btnBaptism]	= { StrGreen	, false	, "BAPTISM"	, false	},
-		[btnMarriage]= { StrGreen	, false	, "MARRIAGE"	, false	},
-		[btnDeath]	= { StrGreen	, "NO"		, "DEATH"		, false	},
-		[btnBurial]	= { StrGreen	, "NO"		, "BURIAL"	, false	},
-		[btnProbate]	= { StrGreen	, "NO"		, "PROBATE"	, false	},
-		[btnImages]	= { StrGreen	, false	, "IMAGES"	, false	},
-		[tglClosure]	= { false		, false	, false		, function(self,iState) doClose(iState) end },
-		[btnFontSet]	= { StrGreen	, false	, false		, function() doFontSet() end },
-		[BtnMainHelp]= { StrGreen	, false	, false		, function() BtnMainHelp.active="NO" GUI_HelpDialogue() end },
-		[btnCancel]	= { StrRed	, false	, false		, function() return iup.CLOSE end },
-		} ) do
-		iupName.expand	= "YES"
-		iupName.fgcolor	= tblAttr[1]
-		if tblAttr[2] then iupName.active = tblAttr[2] end
-		if tblAttr[3] then iupName.action = function() StrType=" -SOURCE "..tblAttr[3] return iup.CLOSE end end
-		if tblAttr[4] then iupName.action = tblAttr[4] end
-	end
-
-	dialogMain:showxy(IntMainX,IntMainY)
-
-	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
-
-end -- function GUI_MainDialogue
-
--- Invoke FH Shell Execute API --
-function DoExecute(strExecutable, strParameter)
-	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable, strParameter)
-	if not isOK then
-		fhMessageBox(strErrorText.." ("..intErrorCode..")")
-	end
-end -- function DoExecute
-
--- Main body of Plugin script starts here --
-
-	PresetGlobalConstants()														-- Preset global data constants
-
-	CheckVersionInStore(StrIssue)												-- Notify if later Version available
-
-	ResetDefaultSettings()															-- Preset default sticky settings
-
-	IntFontSet = IntFontBold														-- Initial Font Face & Style default
-
-	LoadSettings(StrStickyFile)													-- Load sticky data settings
-
-	StrASdir = "\\Ancestral Sources"											-- Ancestral Sources folder in Program Files
-	StrASexe = "\\Ancestral Sources.exe"										-- Ancestral Sources executable in Program Files
-	StrASchm = "\\Ancestral Sources.chm"										-- Ancestral Sources compiled help in Program Files
-	StrProgramFiles = StrFiles or os.getenv("PROGRAMFILES")..StrASdir	-- Program files folder for Ancestral Sources
-	if not FlgFileExists(StrProgramFiles..StrASexe) then					-- Try alternative Program Files OS Path on 64-bit PC
-		StrProgramFiles = ( os.getenv("PROGRAMW6432") or os.getenv("PROGRAMFILES") )..StrASdir
-	end
-	StrDirectory = StrProgramFiles												-- Default for doPathEdit() browse directory GUI
-	if GUI_FileDialogue(StrProgramFiles) then
-
-		local strProgram = StrProgramFiles..StrASexe
-		if not FlgFileExists(strProgram) then
-			error("\n Ancestral Sources executable not found.\n")
-		end
-
-		local strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
-		if not FlgFileExists(strProjectFile) then
-			error("\n Family Historian GEDCOM file not found.\n")
-		end
-
-		StrFiles = StrProgramFiles
-		SaveSettings(StrStickyFile)												-- Save sticky data settings
-
-		fhInitialise(5,0,0,"save_required")
-
-		GUI_MainDialogue()
-
-		if StrType then
-			local tblIndi = fhGetCurrentRecordSel("INDI")					-- Get Currently Selected Record(s)
-			local strIndi = " "
-			if #tblIndi > 0 then
-				strIndi = " -IND "..fhGetRecordId(tblIndi[1])				-- Get first Record Id
-			end
-			local strClose = ""
-			if StrClose == "ON" then strClose = " -CLOSE" end				-- Set closure on Save mode
-			DoExecute( '"'..strProgram..'"', '-FILE "'..strProjectFile..'"'..strIndi..StrType..strClose )
-		end
-
-	end
-	StrFiles = StrProgramFiles
-	SaveSettings(StrStickyFile)													-- Save sticky data settings
+--[[
+@Title:			Ancestral Sources Data Entry
+@Author:			Mike Tate
+@Version:			3.3
+@LastUpdated:	19 Dec 2013
+@Description:	Launches latest Ancestral Sources Version for the current Project, with the current selected person, for any chosen type of data entry.
+@V3.3:				Update to FlgFolderExists(), use getRegKey() to get AS version & install path, Version History help, NewGUI library, and plain string library snippets.
+@V3.2:				Removed version from Title, added strWhite background to dialogues, check Version in Store.
+@V3.1:				FlgFile/FolderExists updated, better AS Not Found wording, and other minor changes.
+@V3.0:				Added the Marriage, Add Images, and Close on Save options, also Help window size is sticky.
+@V1.7:				Minor bug fixes and code revisions.
+@V1.6:				Added user font option, tool tips, help, and other minor updates.
+@V1.5:				Revised plugin data folder path, and updated coding style.
+@V1.4:				Now supports both Projects and standalone GEDCOM files.
+@V1.3:				Remembers some settings for each different PC environment.
+@V1.2:				Caters for multi-monitor virtual-screen multi-PC environments.
+@V1.1:				Caters for Ancestral Sources V2 installed in a non-default folder,
+					and also preserves plugin window position and settings per Project.
+]]
+
+--[==[
+local fhLoadRequire = require("fhLoadRequire").fhLoadRequire				-- Interim fhLoadRequire() API
+
+if not fhLoadRequire("pl","pl.init") then return end						-- Load required Penlight modules
+require("pl.import_into")()
+require("pl.strict")																-- Strict check for undeclared globals
+
+if not fhLoadRequire("fh.library_v1") then return end 						-- Load required FH v1 modules
+require("fh.modules_v1")()
+stringx_v1.import()
+local gv1 = general_v1																-- To access FH general v1 module
+local GUI = iup_gui_v1																-- To access FH GUI builder module including "iuplua", "lfs", "fh.general_v1" & "fh.loadreq_v1", "fh.stringx_v1", etc
+--]==]
+
+--[[
+@Title:			aa Library Functions Preamble
+@Author:			Mike Tate
+@Version:			1.0
+@LastUpdated:	14 Nov 2013
+@Description:	All the library module functions as preamble for Plugins.
+]]
+
+---[==[
+
+-- Initial +fh+ functions below should eventually become library modules --
+
+--[[
+@Title:			+fh+stringx_v1
+@Author:			Mike Tate
+@LastUpdated:	22 Oct 2013
+@Version:			1.2
+@Description:	Extended string functions to supplement LUA string library.
+@V1.0:				Initial version.
+]]
+
+local function stringx_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}									-- Local environment table
+package.seeall(fh)								-- Enable all globals
+module(...,package.seeall)					-- Create matching module name
+setfenv(1,fh)									-- All public names are added to local fh table
+
+function ReportVersion()
+	local strMessage = "This is +fh+stringx_v1"
+	print(strMessage)
+	return strMessage
+end
+
+-- Split a string using "," or chosen separator --
+function split(strTxt,strSep)
+	local strSep = strSep or ","
+	local tblFields = {}
+	local strPattern = string.format("([^%s]+)", strSep)
+	strTxt = strTxt or ""
+	strTxt:gsub(strPattern, function(strField) tblFields[#tblFields+1] = strField end)
+	return tblFields
+end -- function split
+
+-- Split a string into numbers using " " or "," or "x" separators	-- Any non-number remains as a string
+function splitnumbers(strTxt)
+	local tblNum = {}
+	strTxt = strTxt or ""
+	strTxt:gsub("([^ ,x]+)", function(strNum) tblNum[#tblNum+1] = tonumber(strNum) or strNum end)
+	return tblNum
+end -- function splitnumbers
+
+-- Hide magic pattern symbols	^ $ ( ) % . [ ] * + - ?
+function plain(strTxt)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character,
+	-- where %% is the % escape, and %1 is the original character capture.
+	strTxt = (strTxt or ""):gsub("(%W)","%%%1")
+	return strTxt
+end -- function plain
+
+-- matches is plain text version of string.match()
+function matches(strTxt,strFind,intInit)
+	strFind = (strFind or ""):gsub("(%W)","%%%1")						-- Hide magic pattern symbols
+	return strTxt:match(strFind,intInit)
+end -- function matches
+
+-- replace is plain text version of string.gsub()
+function replace(strTxt,strOld,strNew,intNum)
+	strOld = (strOld or ""):gsub("(%W)","%%%1")							-- Hide magic pattern symbols
+	return strTxt:gsub(strOld,function() return strNew end,intNum)	-- Hide % capture symbols
+end -- function replace
+
+-- convert is pattern without captures version of string.gsub()
+function convert(strTxt,strOld,strNew,intNum)
+	return strTxt:gsub(strOld,function() return strNew end,intNum)	-- Hide % capture symbols
+end -- function convert
+
+-- import overloads fh functions into string table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			string[strIndex] = anyValue
+		end
+	end
+end -- function import
+
+return fh
+
+end -- local function stringx_v1
+
+--[[
+@Module:			fh.tablex_v1
+@Author:			Mike Tate
+@Version:			1.1
+@LastUpdated:	19 Oct 2013
+@Description:	A Table Load Save Module.
+@V1.0:				Initial version 0.94 is Lua 5.1 compatible.
+]]
+
+local function tablex_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+------------------------------------------------------ Start Table Load Save
+-- require "_tableloadsave"
+--[[
+   Save Table to File/Stringtable
+   Load Table from File/Stringtable
+   v 0.94
+   
+   Lua 5.1 compatible
+   
+   Userdata and indices of these are not saved
+   Functions are saved via string.dump, so make sure it has no upvalues
+   References are saved
+   ----------------------------------------------------
+   table.save( table [, filename] )
+   
+   Saves a table so it can be called via the table.load function again
+   table must a object of type 'table'
+   filename is optional, and may be a string representing a filename or true/1
+   
+   table.save( table )
+      on success: returns a string representing the table (stringtable)
+      (uses a string as buffer, ideal for smaller tables)
+   table.save( table, true or 1 )
+      on success: returns a string representing the table (stringtable)
+      (uses io.tmpfile() as buffer, ideal for bigger tables)
+   table.save( table, "filename" )
+      on success: returns 1
+      (saves the table to file "filename")
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   table.load( filename or stringtable )
+   
+   Loads a table that has been saved via the table.save function
+   
+   on success: returns a previously saved table
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   
+   chillcode, http://lua-users.org/wiki/SaveTableToFile
+   Licensed under the same terms as Lua itself.
+]]--
+
+   -- declare local variables
+   --// exportstring( string )
+   --// returns a "Lua" portable version of the string
+   local function exportstring( s )
+      s = string.format( "%q",s )
+      -- to replace
+      s = string.gsub( s,"\\\n","\\n" )
+      s = string.gsub( s,"\r","\\r" )
+      s = string.gsub( s,string.char(26),"\"..string.char(26)..\"" )
+      return s
+   end
+--// The Save Function
+function save(  tbl,filename )
+   local charS,charE = "   ","\n"
+   local file,err
+   -- create a pseudo file that writes to a string and return the string
+   if not filename then
+      file =  { write = function( self,newstr ) self.str = self.str..newstr end, str = "" }
+      charS,charE = "",""
+   -- write table to tmpfile
+   elseif filename == true or filename == 1 then
+      charS,charE,file = "","",io.tmpfile()
+   -- write table to file
+   -- use io.open here rather than io.output, since in windows when clicking on a file opened with io.output will create an error
+   else
+      file,err = io.open( filename, "w" )
+      if err then return _,err end
+   end
+   -- initiate variables for save procedure
+   local tables,lookup = { tbl },{ [tbl] = 1 }
+   file:write( "return {"..charE )
+   for idx,t in ipairs( tables ) do
+      if filename and filename ~= true and filename ~= 1 then
+         file:write( "-- Table: {"..idx.."}"..charE )
+      end
+      file:write( "{"..charE )
+      local thandled = {}
+      for i,v in ipairs( t ) do
+         thandled[i] = true
+         -- escape functions and userdata
+         if type( v ) ~= "userdata" then
+            -- only handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables, v )
+                  lookup[v] = #tables
+               end
+               file:write( charS.."{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( charS.."loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write(  charS..value..","..charE )
+            end
+         end
+      end
+      for i,v in pairs( t ) do
+         -- escape functions and userdata
+         if (not thandled[i]) and type( v ) ~= "userdata" then
+            -- handle index
+            if type( i ) == "table" then
+               if not lookup[i] then
+                  table.insert( tables,i )
+                  lookup[i] = #tables
+               end
+               file:write( charS.."[{"..lookup[i].."}]=" )
+            else
+               local index = ( type( i ) == "string" and "["..exportstring( i ).."]" ) or string.format( "[%d]",i )
+               file:write( charS..index.."=" )
+            end
+            -- handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables,v )
+                  lookup[v] = #tables
+               end
+               file:write( "{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( "loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write( value..","..charE )
+            end
+         end
+      end
+      file:write( "},"..charE )
+   end
+   file:write( "}" )
+   -- Return Values
+   -- return stringtable from string
+   if not filename then
+      -- set marker for stringtable
+      return file.str.."--|"
+   -- return stringttable from file
+   elseif filename == true or filename == 1 then
+      file:seek ( "set" )
+      -- no need to close file, it gets closed and removed automatically
+      -- set marker for stringtable
+      return file:read( "*a" ).."--|"
+   -- close file and return 1
+   else
+      file:close()
+      return 1
+   end
+end
+
+--// The Load Function
+function load( sfile )
+   local tables,err
+   -- catch marker for stringtable
+   if string.sub( sfile,-3,-1 ) == "--|" then
+      tables,err = loadstring( sfile )
+   else
+      tables,err = loadfile( sfile )
+   end
+   if err then return _,err
+   end
+   tables = tables()
+   for idx = 1,#tables do
+      local tolinkv,tolinki = {},{}
+      for i,v in pairs( tables[idx] ) do
+         if type( v ) == "table" and tables[v[1]] then
+            table.insert( tolinkv,{ i,tables[v[1]] } )
+         end
+         if type( i ) == "table" and tables[i[1]] then
+            table.insert( tolinki,{ i,tables[i[1]] } )
+         end
+      end
+      -- link values, first due to possible changes of indices
+      for _,v in ipairs( tolinkv ) do
+         tables[idx][v[1]] = v[2]
+      end
+      -- link indices
+      for _,v in ipairs( tolinki ) do
+         tables[idx][v[2]],tables[idx][v[1]] =  tables[idx][v[1]],nil
+      end
+   end
+   return tables[1]
+end
+
+------------------------------------------------------ End Table Load Save
+
+-- import overloads fh functions into table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			table[strIndex] = anyValue
+		end
+	end
+end -- function import
+
+return fh
+
+end -- local function tablex_v1
+
+--[[
+@Title:			+fh+general_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	A general functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function general_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "lfs"													-- To access LUA filing system
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+--	return pl.path.isfile(strFileName)
+---[=[
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFileExists
+
+-- Check if folder exists --
+function FlgFolderExists(strFolderName)
+--	return pl.path.isdir(strFolderName)
+---[=[
+	if lfs.attributes(strFolderName:gsub("\\$",""),"mode") == "directory" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFolderExists
+
+-- Check if folder writable --
+function FlgFolderWrite(strFolderName)
+	if FlgFolderExists(strFolderName) then
+		local fileHandle, strError = io.open(strFolderName.."\\xyz.xyz","w")
+		if fileHandle ~= nil then
+			fileHandle:close()
+			os.remove(strFolderName.."\\xyz.xyz")
+			return true
+		end
+	end
+	return false
+end -- function FlgFolderWrite
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if fileHandle == nil then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+	local fileHandle = OpenFile(strFileName,"r")
+	local strString = fileHandle:read("*all")
+	assert(fileHandle:close())
+	return strString
+end -- function StrLoadFromFile
+
+-- Return the Path, Filename, and extension as 3 values
+function SplitFilename(strFilename)
+	return strFilename:match("(.-)([^\\]-([^\\%.]+))$")
+end -- function SplitFilename
+
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+	if strDir:sub(-1) == "/" then
+		strDir = strDir:sub(1,-2)								-- Remove trailing "/"
+	end
+    
+	local function doYieldTree(strDir)
+--!		for strEntry in pl.path.dir(strDir) do
+		for strEntry in lfs.dir(strDir) do
+			if strEntry ~= "." and strEntry ~= ".." then
+				strEntry = strDir.."\\"..strEntry
+				local tblAttr, strError = lfs.attributes(strEntry)
+				if not tblAttr then tblAttr = { mode="attrfail", error=strError } end 
+				coroutine.yield(strEntry,tblAttr)
+				if tblAttr.mode == "directory" then
+					doYieldTree(strEntry)
+				end
+			end
+		end
+	end -- local function doYieldTree
+
+	return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+
+local function strErrorText(strError,strFileName,intRepeat)
+	return strError:gsub(strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")
+end -- local function strErrorText
+
+-- Delete file if it exists --
+function DeleteFile(strFileName,errFunction)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				if intRepeat > 1 and type(errFunction) == "function" then
+					errFunction(strErrorText(strError,strFileName,intRepeat))
+				end
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(strErrorText(strError,strFileName,intRepeat)) end
+		end
+	end
+end -- function DeleteFile
+
+-- Invoke FH Shell Execute API --
+function DoExecute(strExecutable,...)
+	local errFunction = fhMessageBox
+	if type(arg[#arg]) == 'function' then
+		errFunction = arg[#arg]
+		table.remove(arg)
+	end
+	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable,unpack(arg))
+	if not isOK then
+		errFunction(tostring(strErrorText).." ("..tostring(intErrorCode)..")")
+	end
+	return isOK
+end -- function DoExecute
+
+--[[
+@function:		BuildDataRef
+@description:	Get Full Data Reference for Pointer
+@parameters:		Item Pointer
+@returns:			Data Reference String, Record Id Integer, Record Type Tag String
+@requires:		None
+]]
+function BuildDataRef(ptrRef)
+
+	local strDataRef = ""										-- Data Reference with instance indices e.g. INDI.RESI[2].ADDR
+	local intRecId   = 0										-- Record Id for associated Record
+	local strRecTag  = ""										-- Record Tag of associated Record type i.e. INDI, FAM, NOTE, SOUR, etc
+
+	-- getDataRef() is called recursively per level of the Data Ref
+	-- ptrRef points to the upper Data Ref levels yet to be analysed
+	-- strRef compiles the lower Data Ref levels including instances
+
+	local function getDataRef(ptrRef,strRef)
+		local ptrTag = ptrRef:Clone()
+		local strTag = fhGetTag(ptrTag)						-- Current level Tag
+		ptrTag:MoveToParentItem(ptrTag)
+		if ptrTag:IsNotNull() then							-- Parent level exists
+			local intSib = 1
+			local ptrSib = ptrRef:Clone()					-- Pointer to siblings with same Tag
+			ptrSib:MovePrev("SAME_TAG")
+			while ptrSib:IsNotNull() do						-- Count previous siblings with same Tag
+				intSib = intSib + 1
+				ptrSib:MovePrev("SAME_TAG")
+			end
+			if intSib > 1 then 	strTag = strTag.."["..intSib.."]" end
+			getDataRef(ptrTag,"."..strTag..strRef)			-- Now analyse the parent level
+		else
+			strDataRef = strTag..strRef						-- Record level reached, so set return values
+			intRecId   = fhGetRecordId(ptrRef)
+			strRecTag  = strTag
+			if not fhIsValidDataRef(strDataRef) then print("BuildDataRef: "..strDataRef.." is Invalid") end
+		end
+	end -- local function getDataRef
+
+	if type(ptrRef) == "userdata" then getDataRef(ptrRef,"") end
+
+	return strDataRef, intRecId, strRecTag
+
+end -- function BuildDataRef
+
+--[[
+@function:		GetDataRefPtr
+@description:	Get Pointer for Full Data Reference
+@parameters:		Data Reference String, Record Id Integer, Record Type Tag String (optional)
+@returns:			Item Pointer which IsNull() if any parameters are invalid
+@requires:		None
+]]
+function GetDataRefPtr(strDataRef,intRecId,strRecTag)
+	strDataRef = strDataRef or ""
+	if not strRecTag then
+		strRecTag = strDataRef:gsub("^(%u+).*$","%1")	-- Extract Record Tag from Data Ref
+	end
+	local ptrRef = fhNewItemPtr()
+	ptrRef:MoveToRecordById(strRecTag,intRecId or 0)	-- Lookup the Record by Id
+	ptrRef:MoveTo(ptrRef,strDataRef)						-- Move to the Data Ref
+	return ptrRef
+end -- function GetDataRefPtr
+
+function TblDataRef(ptrRef)
+	local tblRef = {}
+	tblRef.DataRef, tblRef.RecId, tblRef.RecTag = BuildDataRef(ptrRef)
+	return tblRef
+end -- function TblDataRef
+
+function PtrDataRef(tblRef)
+	local tblRef = tblRef or {}								-- Ensure table and its fields exist
+	return GetDataRefPtr(tblRef.DataRef or "",tblRef.RecId or 0,tblRef.RecTag or "")
+end -- function PtrDataRef
+
+return fh
+
+end -- local function general_v1
+
+--[[
+@Module:			fh.iterate_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	An iterater functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function iterate_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+-- Iterator for all records of one chosen type --
+function Records(strType)
+	local ptrAll = fhNewItemPtr()							-- Pointer to all records in turn
+	local ptrRec = fhNewItemPtr()							-- Pointer to record returned to user
+	ptrAll:MoveToFirstRecord(strType)
+	return function ()
+		ptrRec:MoveTo(ptrAll)
+		ptrAll:MoveNext()
+		if ptrRec:IsNotNull() then return ptrRec end
+	end
+end -- function Records
+
+-- Iterator for all the record types --
+function RecordTypes()
+	local intNext = 0											-- Next record type number
+	local intLast = fhGetRecordTypeCount()					-- Last record type number
+	return function()
+		intNext = intNext + 1
+		if intNext <= intLast then
+			return fhGetRecordTypeTag(intNext)				-- Return record type tag
+		end
+	end
+end -- function RecordTypes
+
+-- Iterator for all items in all records of chosen types --
+function Items(...)
+	local intType = 1											-- Integer record type number
+	local tblType = {}											-- Table of record type tags
+	local ptrNext = fhNewItemPtr()							-- Pointer to next item in turn
+	local ptrItem = fhNewItemPtr()							-- Pointer to item returned to user
+
+	if #arg == 0 then
+		for intType = 1, fhGetRecordTypeCount() do		-- No parameters so use all record types
+			tblType[intType] = fhGetRecordTypeTag(intType)
+		end
+	else
+		tblType = arg											-- Got parameters so use them instead
+	end
+--	print(tblType[intType],intType)
+	ptrNext:MoveToFirstRecord(tblType[intType])			-- Get first record of first type
+
+	return function()
+		repeat
+			while ptrNext:IsNotNull() do						-- Loop through all items
+				ptrItem:MoveTo(ptrNext)
+				ptrNext:MoveNextSpecial()
+				if ptrItem:IsNotNull() then return ptrItem end
+			end
+			intType = intType + 1								-- Loop through each record type
+			if intType <= #tblType then
+				ptrNext:MoveToFirstRecord(tblType[intType])
+			end
+		until intType > #tblType
+	end
+end -- function Items
+
+-- Iterator for all facts of an individual --
+function Facts(ptrIndi)
+	local ptrItem = fhNewItemPtr()							-- Pointer to each item at level 1
+	local ptrFact = fhNewItemPtr()							-- Pointer to each fact returned to user
+	ptrItem:MoveToFirstChildItem(ptrIndi)
+	return function ()
+		while ptrItem:IsNotNull() do
+			ptrFact:MoveTo(ptrItem)
+			ptrItem:MoveNext()
+			if fhIsFact(ptrFact) then return ptrFact end
+		end
+	end
+end -- function Facts
+
+return fh
+
+end -- local function iterate_v1
+
+--[[
+@Module:			fh.progbar_v1
+@Author:			Mike Tate
+@LastUpdated:	30 Oct 2013
+@Version:			1.1
+@Description:	Progress Bar library module.
+@V1.0:				Initial version.
+]]
+
+local function progbar_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "iuplua"												-- To access GUI window builder
+
+local tblBars = {}												-- Table for optional external attributes
+local strFont = nil												-- Font dialogue default is current font
+local strStop = "255 0 0"										-- Stop button colour default is red
+local strBack = "255 255 255"								-- Background colour default is white
+local intPosX = iup.CENTER									-- Show window default position is central
+local intPosY = iup.CENTER
+local intMax, intVal, intPercent, intStart, intDelta, intScale, strClock, isBarStop
+local lblText, barGauge, lblDelta, btnStop, dlgGauge
+
+local function doFocus()										-- Bring the Progress Bar window into Focus
+	dlgGauge.BringFront="YES"									-- If used too often, inhibits other windows scroll bars, etc
+end -- local function doFocus
+
+local function doUpdate()										-- Update the Progress Gauge and the Delta % with clock
+	barGauge.Value = intVal
+	lblDelta.Title = string.format("%4d %%      %s ",intPercent,strClock)
+end -- local function doUpdate
+
+local function doReset()										-- Reset all dialogue variables and Update display
+	intVal		= 0													-- Current value of Progress Bar
+	intPercent= 0.01											-- Percentage of progress
+	intStart	= os.time()										-- Start time of progress
+	intDelta	= 0													-- Delta time of progress
+	intScale	= math.ceil( intMax / 1000 )					-- Scale of percentage per second of progress (initial guess is corrected in Step function)
+	strClock	= "00 : 00 : 00"								-- Clock delta time display
+	isBarStop	= false											-- Stop button pressed signal
+	doUpdate()
+	doFocus()
+end -- local function doReset
+
+function Start(strTitle,intMaximum)							-- Create & start Progress Bar window
+	if not dlgGauge then
+		strTitle	= strTitle or ""							-- Dialogue and button title
+		intMax		= intMaximum or 100							-- Maximun range of Progress Bar, default is 100
+		local strSize = tostring( math.max( 100, string.len(" Stop "..strTitle) * 8 ) ).."x30"			-- Adjust Stop button size to Title
+		lblText	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Progress Message" }
+		barGauge	= iup.progressbar { RasterSize="400x30", Value=0, Max=intMax, Tip="Progress Bar" }
+		lblDelta	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Percentage and Elapsed Time" }
+		btnStop	= iup.button	{ Title=" Stop "..strTitle, RasterSize=strSize, FgColor=strStop, Tip="Stop Progress Button", action=function() isBarStop = true end }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
+		dlgGauge	= iup.dialog	{ Title=strTitle.." Progress ", Font=strFont, Background=strBack, DialogFrame="YES",	-- Remove Windows minimize/maximize menu
+							iup.vbox{ Alignment="ACENTER", Gap="10", Margin="10x10",
+								lblText,
+								barGauge,
+								lblDelta,
+								btnStop,
+							},
+							move_cb	= function(self,x,y) tblBars.X = x tblBars.Y = y end,
+							close_cb	= btnStop.action,		-- Windows Close button = Stop button
+						}
+		if type(tblBars.GUI) == "table"
+		and type(tblBars.GUI.ShowDialogue) == "function" then
+			dlgGauge.move_cb = nil								-- Use GUI library to show & move window
+			tblBars.GUI.ShowDialogue("Bars",dlgGauge,btnStop,"showxy")
+		else
+			dlgGauge:showxy(intPosX,intPosY)				-- Show the Progress Bar window
+		end
+		doReset()													-- Reset the Progress Bar display
+	end
+end -- function Start
+
+function Message(strText)										-- Show the Progress Bar message
+	if dlgGauge then lblText.Title = strText end
+end -- function Message
+
+function Step(intStep)											-- Step the Progress Bar forward
+	if dlgGauge then
+		intVal = intVal + ( intStep or 1 )					-- Default step is 1
+		local intNew = math.ceil( intVal / intMax * 100 * intScale ) / intScale
+		if intPercent ~= intNew then							-- Update progress once per percent or per second, whichever is smaller
+			intPercent = math.max( 0.1, intNew )			-- Ensure percentage is greater than zero
+			if intVal > intMax then intVal = intMax intPercent = 100 end		-- Ensure values do not exceed maximum
+			intNew = os.difftime(os.time(),intStart)
+			if intDelta < intNew then							-- Update clock of elapsed time
+				intDelta = intNew
+				intScale = math.ceil( intDelta / intPercent )	-- Scale of seconds per percentage step
+				local intHour = math.floor( intDelta / 3600 )
+				local intMins = math.floor( intDelta / 60 - intHour * 60 )
+				local intSecs = intDelta - intMins * 60 - intHour * 3600
+				strClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+			end
+			doUpdate()											-- Update the Progress Bar display
+		end
+		iup.LoopStep()
+	end
+end -- function Step
+
+function Focus()												-- Bring the Progress Bar window to front
+	if dlgGauge then doFocus() end
+end -- function Focus
+
+function Reset()												-- Reset the Progress Bar display
+	if dlgGauge then doReset() end
+end -- function Reset
+
+function Stop()													-- Check if Stop button pressed
+	iup.LoopStep()
+	return isBarStop
+end -- function Stop
+
+function Close()												-- Close the Progress Bar window
+	isBarStop = false
+	if dlgGauge then dlgGauge:destroy() dlgGauge = nil end
+end -- function Close
+
+function Setup(tblSetup)										-- Setup optional table of external attributes
+	if tblSetup then
+		tblBars = tblSetup
+		strFont = tblBars.Font or strFont					-- Font dialogue
+		strStop = tblBars.Stop or strStop					-- Stop button colour
+		strBack = tblBars.Back or strBack					-- Background colour
+		intPosX = tblBars.X or intPosX						-- Window position
+		intPosY = tblBars.Y or intPosY
+	end
+end -- function Setup
+
+return fh
+
+end -- local function progbar_v1
+
+--[[
+@Title:			+fh+iup_gui_v1
+@Author:			Mike Tate
+@Version:			1.4
+@LastUpdated:	12 Nov 2013
+@Description:	Graphical User Interface Library Module
+@V1.0:				Initial version.
+]]
+
+local function iup_gui_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}																		-- Local environment table
+package.seeall(fh)																	-- Enable all globals
+module(...,package.seeall)														-- Create matching module name
+setfenv(1,fh)																		-- All public names are added to local fh table
+
+require "iuplua"																	-- To access GUI window builder
+require "iupluacontrols"															-- To access GUI window controls
+require "lfs"																		-- To access LUA filing system
+require "iupluaole"																	-- To access OLE subsystem
+require "luacom"																	-- To access COM subsystem
+
+local general = general_v1														-- To access FH general module
+local stringx = stringx_v1														-- To access FH stringx module but cannot import
+
+function ReportVersion()
+	local strMessage = "This is +fh+iup_gui_v1"
+	print(strMessage)
+	return strMessage
+end
+
+-- Shared Interface Attributes & Functions --
+
+Plugin		= fhGetContextInfo("CI_PLUGIN_NAME")								-- Plugin Name
+Version	= " "																		-- Plugin Version
+History	= Version																	-- Version History
+
+Red			= "255 0 0"																-- Color attributes (must exclude leading zeros & spaces to allow value comparisons)
+Maroon		= "128 0 0"
+Amber		= "250 160 0"
+Orange		= "255 165 0"
+Yellow		= "255 255 0"
+Olive		= "128 128 0"
+Lime		= "0 255 0"
+Green		= "0 128 0"
+Cyan		= "0 255 255"
+Teal		= "0 128 128"
+Blue		= "0 0 255"
+Navy		= "0 0 128"
+Magenta	= "255 0 255"
+Purple		= "128 0 128"
+Black		= "0 0 0"
+Gray		= "128 128 128"
+Silver		= "192 192 192"
+Smoke		= "240 240 240"
+White		= "255 255 255"
+Risk		= Red																		-- Risk colour for hazardous controls such as Close/Delete buttons
+Warn		= Orange																	-- Warn colour for caution controls and warnings
+Safe		= Green																	-- Safe colour for active controls such as most buttons
+Info		= Black																	-- Info colour for text controls such as labels/tabs
+Back		= White																	-- Background colour for all windows
+
+Gap			= "8"																		-- Layout attributes Gap was "10"
+Border		= "8x8"																	-- 	was BigMargin="10x10"
+Margin		= "1x1"																	--	was MinMargin
+Balloon	= "NO"																		-- Tooltip balloon mode
+
+FontSet	=	1																		-- GUI font set assigned by FontAssignment but used globally
+FontHead	= ""
+FontBody	= ""
+
+GUI = { }																				-- Sub-table for GUI Dialogue attributes to allow any "Name"
+
+--[[
+GUI.Name					table of dialogue attributes, where Name is Font, Help, Main, Memo, Bars, etc
+GUI.Name.CoordX			x co-ordinate	( Loaded & Saved by default )
+GUI.Name.CoordY			y co-ordinate	( Loaded & Saved by default )
+GUI.Name.Dialog			dialogue handle
+GUI.Name.Focus			focus button handle
+GUI.Name.Frame			dialogframe mode, default "no" is dialogframe="NO" + showxy(), "showxy" is dialogframe="YES" + showxy(), "popup" or "keep" is dialogframe="NO" + popup()
+GUI.Name.Height			height
+GUI.Name.minsize 		minsize default
+GUI.Name.MinSize		minsize			( NOT NOW Loaded & Saved by default )
+GUI.Name.rastersize 	rastersize default
+GUI.Name.Raster			rastersize		( Loaded & Saved by default )
+GUI.Name.Width			width
+GUI.Name.Back			ProgressBar background colour
+GUI.Name.Font			ProgressBar font style
+GUI.Name.Stop			ProgressBar Stop button colour
+GUI.Name.GUI				Module table usable by other modules e.g. progbar.Setup
+							Help dialogue Window attributes :-
+GUI.Help.GetHelp 		Parent dialogue GetHelp button
+GUI.Help.RootURL 		Wiki Help & Advice root URL
+GUI.Help[n]				Help dialogue nth button :-
+GUI.Help[n].Name		Name for title attribute
+GUI.Help[n].Tip 		Tooltip for tip attribute
+GUI.Help[n].URL 		Page URL to append to root URL 
+GUI.Help[n].Page		Page order for intTabPosn
+--]]
+
+-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+--x 	local tblScrn = iup.GetGlobal("VIRTUALSCREEN"):splitnumbers()
+local tblScrn = stringx.splitnumbers(iup.GetGlobal("VIRTUALSCREEN"))	-- Used by CustomDialogue() and CheckWindowPosition() below
+local intMaxW = tblScrn[3]
+local intMaxH = tblScrn[4]
+
+local function tblOfNames(...)													-- Get table of dialogue Names including "Font","Help","Main" by default
+	local tblNames = {"Font","Help","Main"}
+	for intName, strName in ipairs(arg) do
+		if type(strName) == "string"
+		and strName ~= "Font"
+		and strName ~= "Help"
+		and strName ~= "Main" then
+			table.insert(tblNames,strName)
+		end
+	end
+	return tblNames
+end -- local function tblOfNames
+
+local function tblNameFor(strName)												-- Get table of parameters for chosen dialogue Name
+	strName = tostring(strName)
+	if not GUI[strName] then														-- Need new table with default minimum & raster size, and X & Y co-ordinates
+		GUI[strName] = { }
+		local tblName = GUI[strName]
+		tblName.MinSize = "x"
+		tblName.Raster  = "x"
+		tblName.CoordX  = iup.CENTER
+		tblName.CoordY  = iup.CENTER
+	end
+	return GUI[strName]
+end -- local function tblNameFor
+
+local function intDimension(intMin,intVal,intMax)							-- Return a number bounded by intMin and intMax
+	if not intVal then return 0 end												-- Except if no value then return 0
+	intVal = tonumber(intVal) or (intMin+intMax)/2
+	return math.max(intMin,math.min(intVal,intMax))
+end -- local function intDimension
+
+function CustomDialogue(strName,strMin,strRas,intX,intY)					-- GUI custom window minimum & raster size, and X & Y co-ordinates
+	local tblName = tblNameFor(strName)
+	local tblSize, intWide, intHigh
+	if strMin then																	-- Ensure minimum size is between 200x200 and screen size
+		tblSize = stringx.splitnumbers(strMin)
+		intWide = intDimension(200,tblSize[1],intMaxW)
+		intHigh = intDimension(200,tblSize[2],intMaxH)
+		tblName.minsize = tostring(intWide.."x"..intHigh)
+	end
+	if strRas then																	-- Ensure raster size is between minimum and screen size
+		tblSize = stringx.splitnumbers(strRas)
+		intWide = intDimension(intWide,tblSize[1],intMaxW)
+		intHigh = intDimension(intHigh,tblSize[2],intMaxH)
+		tblName.rastersize = tostring(intWide.."x"..intHigh)
+	end
+	if intX then intX = intDimension(0,intX,intMaxW-intWide) end			-- Ensure X & Y co-ordinates position window on screen
+	if intY then intY = intDimension(0,intY,intMaxH-intHigh) end
+	tblName.MinSize = tblName.minsize		or "x"  -- was iup.NULL
+	tblName.Raster  = tblName.rastersize	or "x"  -- was iup.NULL
+	tblName.CoordX  = tonumber(intX)		or iup.CENTER
+	tblName.CoordY  = tonumber(intY)		or iup.CENTER
+end -- function CustomDialogue
+
+function DefaultDialogue(...)													-- GUI default window minimum & raster size, and X & Y co-ordinates
+	for intName, strName in ipairs(tblOfNames(...)) do
+		CustomDialogue(strName)
+	end
+end -- function DefaultDialogue
+
+function DialogueAttributes(strName)											-- Provide named Dialogue Attributes
+	local tblName = tblNameFor(strName)											-- tblName.Dialog = dialog handle, so any other attributes could be retrieved
+--x	local tblSize = (tblName.Raster or "x"):splitnumbers()					-- Split Raster Size into width=tblSize[1] and height=tblSize[2]
+	local tblSize = stringx.splitnumbers(tblName.Raster or "x")			-- Split Raster Size into width=tblSize[1] and height=tblSize[2]
+	tblName.Width  = tblSize[1]
+	tblName.Height = tblSize[2]
+	tblName.Font = FontBody														-- Following only needed for NewProgressBar
+	tblName.Back = Back
+	tblName.Stop = Risk
+	tblName.GUI  = fh																-- Module table
+	return tblName
+end -- function DialogueAttributes
+
+local tblLoadData = {}
+
+function LoadLocal(strParam,strDefault)										-- Load Local Parameter for this PC
+	return tblLoadData[ComputerName.."-"..strParam] or strDefault
+end -- function LoadLocal
+
+function LoadGlobal(strParam,strDefault)										-- Load Global Parameter for all PC
+	return tblLoadData[strParam] or strDefault
+end -- function LoadGlobal
+
+function LoadDialogue(...)														-- Load Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		tblName.Raster = tostring(LoadLocal(strName.."S",tblName.Raster))  -- Legacy of "S" becomes "R"
+		tblName.Raster = tostring(LoadLocal(strName.."R",tblName.Raster))
+		tblName.CoordX = tonumber(LoadLocal(strName.."X",tblName.CoordX))
+		tblName.CoordY = tonumber(LoadLocal(strName.."Y",tblName.CoordY))
+		CheckWindowPosition(tblName)
+	end
+end -- function LoadDialogue
+
+function LoadSettings(...)														-- Load Sticky Settings from File
+	local strFileName = StickyFile
+	if general.FlgFileExists(strFileName) then								-- Load Settings File in table lines with key & val fields
+		local tblField = {}
+		for strLine in io.lines(strFileName) do
+			if strLine == "return {"												-- Unless entire Sticky Data table was saved
+			and type(table.load) == "function" then
+				tblLoadData, StrErr = table.load(strFileName)				-- Load Settings File table
+				break
+			end
+--x			tblField = strLine:split("=")
+			tblField = stringx.split(strLine,"=")
+			tblLoadData[tblField[1]] = tblField[2]
+		end
+		FontSet = tonumber(LoadGlobal("FontSet",FontSet))
+		History = tostring(LoadGlobal("History",History))
+	end
+	LoadDialogue(...)
+	FontAssignment(FontSet)
+end -- function LoadSettings
+
+local tblSaveData = {}
+
+function SaveLocal(strParam,anyValue)											-- Save Local Parameter for this PC
+	tblSaveData[ComputerName.."-"..strParam] = anyValue
+end -- function SaveLocal
+
+function SaveGlobal(strParam,anyValue)											-- Save Global Parameter for all PC
+	tblSaveData[strParam] = anyValue
+end -- function SaveGlobal
+
+function SaveDialogue(...)														-- Save Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		SaveLocal(strName.."R",tblName.Raster)
+		SaveLocal(strName.."X",tblName.CoordX)
+		SaveLocal(strName.."Y",tblName.CoordY)
+	end
+end -- function SaveDialogue
+
+function SaveSettings(...)														-- Save Sticky Settings to File
+	SaveDialogue(...)
+	SaveGlobal("FontSet",FontSet)
+	SaveGlobal("History",History)
+	local strFileName = StickyFile
+	if type(table.save) == "function" then										-- Save entire Settings File table
+		table.save(tblSaveData,strFileName)
+	else
+		local fileHandle = general.OpenFile(strFileName,"w")				-- Else save Settings File lines with key & val fields
+		for strKey,strVal in pairs(tblSaveData) do
+			fileHandle:write(strKey.."="..strVal.."\n")
+		end
+		fileHandle:close()
+	end
+end -- function SaveSettings
+
+-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+--x 	local tblScrn = iup.GetGlobal("VIRTUALSCREEN"):splitnumbers()
+local tblScrn = stringx.splitnumbers(iup.GetGlobal("VIRTUALSCREEN"))	-- Used only by CheckWindowPosition below
+
+function CheckWindowPosition(tblName)											-- Ensure dialogue window coordinates are on Screen
+	if tonumber(tblName.CoordX) == nil
+	or tonumber(tblName.CoordX) > intMaxW then
+		tblName.CoordX = iup.CENTER
+	end
+	if tonumber(tblName.CoordY) == nil
+	or tonumber(tblName.CoordY) > intMaxH then
+		tblName.CoordY = iup.CENTER
+	end
+end -- function CheckWindowPosition
+
+function IsNormalWindow(iupDialog)												-- Check dialogue window is not Maximised or Minimised
+	-- tblPosn[1] = origin x, tblPosn[2] = origin y, tblPosn[3] = width, tblPosn[4] = height
+--x 	local tblPosn = iupDialog.screenposition:splitnumbers()
+	local tblPosn = stringx.splitnumbers(iupDialog.screenposition)
+	local intPosX = tblPosn[1]
+	local intPosY = tblPosn[2]
+	if intPosX < 0 and intPosY < 0 then											-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
+		return false																	-- then is Maximised or Minimised
+	end
+	return true
+end -- function IsNormalWindow
+
+function ShowDialogue(strName,iupDialog,btnFocus,strFrame)				-- Set standard frame attributes and display dialogue window
+	local tblName = tblNameFor(strName)
+	iupDialog = iupDialog or tblName.Dialog									-- Retrieve previous parameters if needed
+	btnFocus  = btnFocus  or tblName.Focus
+	strFrame  = strFrame  or tblName.Frame
+	strFrame  = strFrame  or "NO"												-- Default frame mode is dialog:showxy(X,Y) with dialogframe="NO"
+	strFrame  = strFrame:lower()													-- Other modes are "show", "popup" & "keep" with dialogframe="YES"
+	if strFrame:gsub("%s-%a-map%a*[%s%p]*","") == "" then					-- May be prefixed with "map" mode to just map dialogue initially
+		strFrame = strFrame.." & no"
+	end
+	if type(iupDialog) == "userdata" then
+		tblName.Dialog = iupDialog
+		tblName.Focus  = btnFocus													-- Preserve parameters
+		tblName.Frame  = strFrame
+--		iupDialog.Background = GUI.Back											-- Background colour
+		iupDialog.Background = Back												-- Background colour
+		iupDialog.Shrink = "YES"													-- Sometimes needed to shrink controls to raster size
+		if type(btnFocus) == "userdata" then									-- Set button as focus for Esc and Enter keys
+			iupDialog.StartFocus   = iupDialog.StartFocus   or btnFocus
+			iupDialog.DefaultEsc   = iupDialog.DefaultEsc   or btnFocus
+			iupDialog.DefaultEnter = iupDialog.DefaultEnter or btnFocus
+		end
+		iupDialog.MinSize    = tblName.MinSize or "x"						-- Minimum size (default "x" becomes nil)
+		iupDialog.RasterSize = tblName.Raster  or "x"						-- Raster size  (default "x" becomes nil)
+		if strFrame:match("no") then												-- The dialogframe mode is "NO" by default
+			strFrame = strFrame.." & show"										-- Define display mode, and move & resize functions
+			iupDialog.move_cb = iupDialog.move_cb or function(self,x,y) if IsNormalWindow(self) then tblName.CoordX=x tblName.CoordY=y end end
+			iupDialog.resize_cb = iupDialog.resize_cb or function(self) if IsNormalWindow(self) then tblName.Raster=self.RasterSize end end
+		else
+			iupDialog.DialogFrame = "YES"										-- Define dialogframe mode, and move & resize function
+			iupDialog.move_cb = iupDialog.move_cb or function(self,x,y) tblName.CoordX=x tblName.CoordY=y end
+			iupDialog.resize_cb = iupDialog.resize_cb or function(self) tblName.Raster=self.RasterSize end
+		end
+		iupDialog.close_cb = iupDialog.close_cb or function() return iup.CLOSE end	-- Define default X Close action
+		if strFrame:match("map") then											-- Only dialogue mapping is required
+			iupDialog:map()
+			tblName.Frame = strFrame:gsub("map","")							-- Remove "map" from frame mode ready for subsequent call
+			return
+		end
+		if iup.MainLoopLevel() == 0												-- Called from outside Main GUI, so must use showxy() and not popup()
+		or strFrame:match("sho") then											-- Use showxy() to dispay dialogue window for "showxy" mode
+			iupDialog:showxy(tblName.CoordX,tblName.CoordY)
+			if History ~= Version then											-- Initially show new Version History Help
+				if type(HelpDialogue) == "function" then
+					History = Version
+					HelpDialogue(Version)											-- But only after Help dialogue exists
+					iupDialog.BringFront = "YES"
+				end
+			end
+			if strName ~= "Help" and iup.MainLoopLevel() == 0 then iup.MainLoop() end
+		else
+			iupDialog:popup(tblName.CoordX,tblName.CoordY)					-- Use popup() to display dialogue window for "popup" or "keep" modes
+		end
+		if strFrame:match("pop") then
+			tblName.Dialog = nil													-- When popup closed, clear key parameters, but not for "keep" mode
+			tblName.Raster = nil
+		end
+--x		local tblPosn = iupDialog.ScreenPosition:splitnumbers()
+		local tblPosn = stringx.splitnumbers(iupDialog.ScreenPosition)	-- Ensure X & Y coordinates are raster values
+		tblName.CoordX = tblPosn[1]
+		tblName.CoordY = tblPosn[2]
+	end
+end -- function ShowDialogue
+
+-- Font Dialogue Attributes and Functions --
+
+local intFontPlain  = 1															-- Font Face & Style values for FontSet in Font... functions
+local intFontBold   = 2
+local intArialPlain = 3
+local intArialBold  = 4
+local intTahomaPlain= 5
+local intTahomaBold = 6
+local intUserPlain  = 7
+local intUserBold   = 8
+local strUserFont   = iup.GetGlobal("DEFAULTFONT")
+local strUserHead   = strUserFont:gsub(",(%D+)%d+",",%112")
+local strUserBold   = strUserFont:gsub(", ",", Bold ")
+local strFontFace   = strUserFont:gsub(",.*","")
+
+local tblFontSet = {}																-- Lookup table for FontHead and FontBody in Font... functions
+tblFontSet[intFontPlain]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..",      -16", }
+tblFontSet[intFontBold]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..", Bold -15", }
+tblFontSet[intArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
+tblFontSet[intArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
+tblFontSet[intTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
+tblFontSet[intTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
+tblFontSet[intUserPlain]		=	{ Head=strUserHead					,	Body=strUserFont				 , }
+tblFontSet[intUserBold]		=	{ Head=strUserBold					,	Body=strUserFont				 , }
+-- Note: Pixel sizes -21 = -20 & -17 = -16 & -14 = -13 and pixel sizes -22, -18 & -13 have no point size equivalent.
+
+function FontAssignment(intFontSet)												-- Assign Font Face & Style GUI values
+	FontSet  = intFontSet
+	FontHead = tblFontSet[intFontSet]["Head"]									-- Font for all GUI dialog header text
+	FontBody = tblFontSet[intFontSet]["Body"]									-- Font for all GUI dialog body text
+	local tblHelp = tblNameFor("Help")
+	if type(tblHelp.Dialog) == "userdata" then
+		tblHelp.Dialog.Font = FontBody											-- Update Help dialogue font if it exists
+	end
+end -- function FontAssignment
+
+function FontDialogue()															-- GUI Font Face & Style Dialogue
+
+	local isFontChosen = true
+
+	local strFontPlainTitle	= strFontFace.." Plain"
+	local strFontBoldTitle 	= strFontFace.." Bold"
+	local strArialPlainTitle	= "Arial Plain"
+	local strArialBoldTitle	= "Arial Bold"
+	local strTahomaPlainTitle	= "Tahoma Plain"
+	local strTahomaBoldTitle	= "Tahoma Bold"
+	local strUserPlainTitle	= "Default Plain"
+	local strUserBoldTitle 	= "Default Bold"
+
+	-- Create each GUI label and button with title and tooltip
+	local lblHeadName		= iup.label	{ Title=" Name :"				, Tip="Names of the available Fonts"				, }
+	local lblHeadPlain		= iup.label	{ Title=" Plain :"				, Tip="Plain versions of the Fonts"					, }
+	local lblHeadBold		= iup.label	{ Title=" Bold :"				, Tip="Bold versions of the Fonts"					, }
+	local lblFontName		= iup.label	{ Title="Font "..strFontFace	, Tip="Windows default but larger font"			, }
+	local btnFontPlain		= iup.button	{ Title=strFontPlainTitle		, Tip="Choose "..strFontPlainTitle.." style"		, }
+	local btnFontBold		= iup.button	{ Title=strFontBoldTitle		, Tip="Choose "..strFontBoldTitle.." style"		, }
+	local lblArialName		= iup.label	{ Title="Font Arial"			, Tip="Arial alternative fontface"					, }
+	local btnArialPlain		= iup.button	{ Title=strArialPlainTitle	, Tip="Choose "..strArialPlainTitle.." style"	, }
+	local btnArialBold		= iup.button	{ Title=strArialBoldTitle		, Tip="Choose "..strArialBoldTitle.." style"		, }
+	local lblTahomaName		= iup.label	{ Title="Font Tahoma"			, Tip="Tahoma alternative fontface"					, }
+	local btnTahomaPlain	= iup.button	{ Title=strTahomaPlainTitle	, Tip="Choose "..strTahomaPlainTitle.." style"	, }
+	local btnTahomaBold		= iup.button	{ Title=strTahomaBoldTitle	, Tip="Choose "..strTahomaBoldTitle.." style"	, }
+	local lblUserName		= iup.label	{ Title="Font Default"			, Tip="Windows default user font"					, }
+	local btnUserPlain		= iup.button	{ Title=strUserPlainTitle		, Tip="Choose "..strUserPlainTitle.." style"		, }
+	local btnUserBold		= iup.button	{ Title=strUserBoldTitle		, Tip="Choose "..strUserBoldTitle.." style"		, }
+	local lblChoose 		= iup.label	{ Title="Choose your window font style or"											, }
+	local btnDestroy		= iup.button	{ Title="Close"					, Tip="Close this Font Style window"				, }
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local	dialogFont		= iup.dialog { Title=Plugin.." Font Style",
+										iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Border,
+											iup.frame { Font=FontHead, FgColor=Info, Active="YES", Title="Font Style",
+												iup.vbox { Margin=Margin,
+													iup.hbox { Homogeneous="YES", lblHeadName,	lblHeadPlain,	lblHeadBold,		},
+													iup.hbox { Homogeneous="YES", lblFontName,	btnFontPlain,	btnFontBold,		},
+													iup.hbox { Homogeneous="YES", lblArialName,	btnArialPlain,	btnArialBold,	},
+													iup.hbox { Homogeneous="YES", lblTahomaName,	btnTahomaPlain,	btnTahomaBold,	},
+													iup.hbox { Homogeneous="YES", lblUserName,	btnUserPlain,	btnUserBold,		},
+													iup.hbox { lblChoose, btnDestroy, },
+												},
+											},
+										},
+										close_cb = function() isFontChosen=false return iup.CLOSE end,
+									}
+
+	-- Assign font styles for GUI labels and buttons
+	local strFontPlain		= tblFontSet	[intFontPlain]	["Body"]
+	local strFontBold		= tblFontSet	[intFontBold]	["Body"]
+	local strArialPlain		= tblFontSet	[intArialPlain]	["Body"]
+	local strArialBold		= tblFontSet	[intArialBold]	["Body"]
+	local strTahomaPlain	= tblFontSet	[intTahomaPlain]["Body"]
+	local strTahomaBold		= tblFontSet	[intTahomaBold]	["Body"]
+	local strUserPlain		= tblFontSet	[intUserPlain]	["Body"]
+	local strUserBold		= tblFontSet	[intUserBold]	["Head"]
+
+	-- Set other GUI attributes for labels and buttons
+	for iupName, tblAttr in pairs( {
+		--	Control		= 1~FgColor	, 2~Font		, 3~FontSet		, 4~action function()
+		[lblHeadName]	= { Info	, FontBody		, false			, false	},
+		[lblHeadPlain]	= { Info	, strFontPlain	, false			, false	},
+		[lblHeadBold]	= { Info	, strFontBold	, false			, false	},
+		[lblFontName]	= { Info	, strFontPlain	, false			, false	},
+		[btnFontPlain]	= { Safe	, strFontPlain	, intFontPlain	, false	},
+		[btnFontBold]	= { Safe	, strFontBold	, intFontBold	, false	},
+		[lblArialName]	= { Info	, strArialPlain	, false			, false	},
+		[btnArialPlain]	= { Safe	, strArialPlain	, intArialPlain	, false	},
+		[btnArialBold]	= { Safe	, strArialBold	, intArialBold	, false	},
+		[lblTahomaName]	= { Info	, strTahomaPlain, false			, false	},
+		[btnTahomaPlain]= { Safe	, strTahomaPlain, intTahomaPlain, false	},
+		[btnTahomaBold]	= { Safe	, strTahomaBold	, intTahomaBold	, false	},
+		[lblUserName]	= { Info	, strUserPlain	, false			, false	},
+		[btnUserPlain]	= { Safe	, strUserPlain	, intUserPlain	, false	},
+		[btnUserBold]	= { Safe	, strUserBold	, intUserBold	, false	},
+		[lblChoose]		= { Info	, FontBody		, false			, false	},
+		[btnDestroy]		= { Risk	, FontBody		, false			, dialogFont.close_cb },
+		} ) do
+		iupName.TipBalloon	= Balloon
+		iupName.Expand	= "YES"
+		iupName.FgColor	= tblAttr[1]
+		iupName.Font		= tblAttr[2]
+		if tblAttr[3] then
+			if tblAttr[3] == FontSet then iupName.Active = "NO" end		-- Disable button for currently selected font
+			iupName.action = function() FontAssignment(tblAttr[3]) return iup.CLOSE end
+		end
+		if tblAttr[4] then iupName.action = tblAttr[4] end
+	end
+
+	ShowDialogue("Font",dialogFont,btnDestroy,"popup")
+
+	return isFontChosen
+end -- function FontDialogue
+
+-- Help Dialogue Attributes and Functions
+
+HelpDialogue = ""																	-- HelpDialogue must be declared for ShowDialogue
+
+local strHelpButtonActive = nil  -- defaults to "YES"						-- Help button active attribute mode used only in NewHelpDialogue
+
+function NewHelpDialogue(btnGetHelp,strRootURL)								-- Prototype for GUI Help Dialogue, with parent Help button, and web page root/namespace URL
+	local tblHelp = tblNameFor("Help")
+	local oleControl, btnDestroy, hboxHelp, dialogHelp						-- Dialogue component upvalues
+	if type(btnGetHelp) == "userdata" then
+		btnGetHelp.Active = strHelpButtonActive
+		if btnGetHelp.Active == "NO" then										-- Help button inactive, so Help dialogue exists, so just update parent button
+			tblHelp.GetHelp = btnGetHelp											-- Allows successive parent GUI to share one Help dialogue
+			return
+		end
+	end
+	tblHelp.GetHelp = btnGetHelp
+	strRootURL = strRootURL or Plugin:gsub(" ","_"):lower()				-- Default to Plugin name as Wiki namespace
+	if strRootURL:match("^[%w_]+$") then										-- Append Wiki namespace to Wiki root URL
+		strRootURL = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:"..strRootURL..":"
+	end
+	tblHelp.RootURL = strRootURL
+	local intURL = 1																-- Index to Version History help page URL
+	local tblURL = { }																-- List of help page URL
+
+	local function doCommonAction()												-- Common action when creating/destroying Help dialogue
+		local strMode = "NO"
+		if dialogHelp then
+			dialogHelp:destroy()													-- If dialogue exists then destroy window
+			dialogHelp = nil
+			tblHelp.Dialog = nil													-- Also clear dialog handle
+			strMode = nil -- defaults to "YES"
+		end 
+		if type(tblHelp.GetHelp) == "userdata" then							-- Set parent dialogue Help button active mode
+			tblHelp.GetHelp.Active = strMode
+		end
+		strHelpButtonActive = strMode
+	end -- local function doCommonAction
+
+	function HelpDialogue(anyPage)												-- GUI Help Dialogue for chosen web page
+		--[=[
+			Parameter anyPage can be one of several values:
+			1. Page number from 0 to index tblURL, often equal to intTabPosn.
+			2. Version to display Version History page for version chosen.
+			3. String with " "="_" and lowercase substring of a page name in tblURL.
+		--]=]
+
+		if not dialogHelp then
+			doCommonAction()
+			-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
+			oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+			oleControl:CreateLuaCOM()
+			btnDestroy = iup.button { Title="Close Window", Tip="Close this Help and Advice window", TipBalloon=Balloon, Expand="HORIZONTAL", Size="x10", FgColor=Risk, action=function() doCommonAction() end }
+			hboxHelp = iup.hbox { margin=Margin, homogeneous="NO" }
+			-- Create each GUI button with title, tooltip, color, action, etc, and table of web page URL
+			for intButton, tblButton in ipairs(tblHelp) do
+				local intPage = tblButton.Page or intButton
+				local strURL  = tblButton.URL
+				if strURL:match("ver.-hist") then intURL = intPage end
+				tblURL[intPage] = strURL
+				local btnName = iup.button { Title=tblButton.Name, Tip=tblButton.Tip, TipBalloon=Balloon, Expand=btnDestroy.Expand, Size=btnDestroy.Size, FgColor=Safe, action=function() oleControl.com:Navigate(tblHelp.RootURL..strURL) end }
+				iup.Append(hboxHelp,btnName)
+			end
+			iup.Append(hboxHelp,btnDestroy)
+			dialogHelp = iup.dialog { Title=Plugin.." Help & Advice", Font=FontBody,
+								iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Border, ExpandChildren="YES",
+									oleControl,
+									hboxHelp,
+								},
+								close_cb = function() doCommonAction() end,
+							}
+			ShowDialogue("Help",dialogHelp,btnDestroy)						-- Show Help dialogue window
+		end
+		anyPage = anyPage or 0
+		if type(anyPage) == "number" then										-- Select page by Tab = Button = Help page index
+			anyPage = math.max(1,math.min(#tblURL,anyPage+1))
+			anyPage = tblURL[anyPage] or ""
+		elseif anyPage == Version then											-- Select the Version History features section
+			anyPage = anyPage:gsub("[%s%p]","")
+			anyPage = anyPage:gsub("^(%d)","V%1")
+			anyPage = tblURL[intURL].."#features_of_"..anyPage
+		elseif type(anyPage) == "string" then									-- Select page by matching name text
+			local strPage = anyPage:gsub(" ","_"):lower()
+			anyPage = tblURL[1] or ""												-- Default to first web page
+			for intURL = 1, #tblURL do
+				local strURL = tblURL[intURL]
+				if strURL:match(strPage) then
+					anyPage = strURL
+					break
+				end
+			end
+		else
+			anyPage = tblURL[1] or ""												-- Default to first web page
+		end
+		oleControl.com:Navigate(tblHelp.RootURL..anyPage)					-- Navigate to chosen web page
+	end -- function HelpDialogue
+
+end -- function NewHelpDialogue
+
+function AddHelpButton(strName,strTip,strURL,intPage)						-- Add button to GUI Help Dialogue
+	local tblHelp = tblNameFor("Help")
+	if tblHelp and not strHelpButtonActive then
+		for intHelp, tblHelp in ipairs(tblHelp) do							-- Check button does not already exist
+			if tblHelp.Name == strName then return end
+		end
+		if tonumber(intPage) then intPage = intPage + 1 end					-- Optional external intPage number matches intTabPosn
+		table.insert( tblHelp, { Name=strName, Tip=strTip, URL=strURL, Page=intPage } )
+	end
+end -- function AddHelpButton
+
+local function anyMemoControl(anyName,fgColor)								-- Compose any control Title and FgColor
+	local strName = tostring(anyName)											-- anyName may be a string, and fgColor is default FgColor
+	local tipText = nil
+	if type(anyName) == "table" then											-- anyName may be a table = { Title string , FgColor string , ToolTip string (optional) }
+		strName = anyName[1]
+		fgColor = anyName[2]:match("%d* %d* %d*") or fgColor
+		tipText = anyName[3]
+	end
+	return strName, fgColor, tipText
+end -- local function anyMemoControl
+
+local function anyMemoDialogue(anyHead,anyMemo,...)							-- Display framed memo dialogue with buttons
+	local intButt = 0																-- Returned value if "X Close" button is used
+	local tblButt = { [0]="X Close" }											-- Button names lookup table
+	if not anyHead then anyHead = "" end
+	local strHead, fgcHead, tipHead = anyMemoControl(anyHead,Info)
+	local strMemo, fgcMemo, tipMemo = anyMemoControl(anyMemo,Info)
+	-- Create the GUI labels and buttons
+--	local lblMemo = iup.label { Title=strMemo, FgColor=fgcMemo, Tip=tipMemo, TipBalloon=Balloon, Alignment="ACENTER", Padding=GUI.Margin, Expand="YES", WordWrap="YES" }
+	local lblMemo = iup.label { Title=strMemo, FgColor=fgcMemo, Tip=tipMemo, TipBalloon=Balloon, Alignment="ACENTER", Padding=Margin, Expand="YES", WordWrap="YES" }
+	local lblLine = iup.label { Separator="HORIZONTAL" }
+	local iupHbox = iup.hbox  { Homogeneous="YES" }
+	local btnButt = iup.button { }
+	if #arg == 0 then arg[1] = "OK" end											-- If no buttons listed then default to an "OK" button
+	for intArg, anyButt in ipairs(arg) do
+		local strButt, fgcButt, tipButt = anyMemoControl(anyButt,Safe)
+		tblButt[intArg] = strButt
+--		btnButt = iup.button { Title=strButt, FgColor=fgcButt, Tip=tipButt, TipBalloon=Balloon, Expand="NO", MinSize="80", Padding=GUI.Margin, action=function() intButt=intArg return iup.CLOSE end }
+		btnButt = iup.button { Title=strButt, FgColor=fgcButt, Tip=tipButt, TipBalloon=Balloon, Expand="NO", MinSize="80", Padding=Margin, action=function() intButt=intArg return iup.CLOSE end }
+		iup.Append( iupHbox, btnButt )
+	end
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local iupMemo = iup.dialog { Title=Plugin..Version..strHead,
+--							iup.vbox { Alignment="ACENTER", Gap=GUI.Gap, Margin=GUI.Margin,
+							iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Margin,
+								iup.frame { Title=strHead, FgColor=fgcHead, Font=FontHead,
+									iup.vbox { Alignment="ACENTER", Font=FontBody, lblMemo, lblLine, iupHbox },
+								},
+							},
+						}
+	ShowDialogue("Memo",iupMemo,btnButt,"popup")								-- Show popup Memo dialogue window with righthand button in focus
+	iupMemo:destroy()
+	return intButt, tblButt[intButt]
+end -- local function anyMemoDialogue
+
+function MemoDialogue(anyMemo,...)												-- Multi-Button GUI like iup.Alarm and fhMessageBox, with "Memo" in frame
+	return anyMemoDialogue("Memo",anyMemo,...)
+end -- function MemoDialogue
+
+function WarnDialogue(anyHead,anyMemo,...)									-- Multi-Button GUI like iup.Alarm and fhMessageBox, with heading in frame
+	return anyMemoDialogue(anyHead,anyMemo,...)
+end -- function WarnDialogue
+
+function VersionInStore(anyPlugin)												-- Obtain the Version in Plugin Store by Name or Id
+	local strType = "name="
+	if type(anyPlugin) == "number"
+	or tonumber(anyPlugin) then strType = "id=" end
+	if anyPlugin then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..anyPlugin
+ 		http:Open("GET",strRequest,false)
+		http:Send()
+		local strReturn = http.Responsebody
+		local strVersion = "0"
+		if strReturn ~= nil then
+			strVersion = strReturn:match("([%d%.]*),%d*")					-- Version digits & dots then comma and Id digits 
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function VersionInStore
+
+local function intVersion(strVersion)											-- Convert version string to comparable integer
+	local intVersion = 0
+--x	local tblVersion = strVersion:split(".")
+	local tblVersion = stringx.split(strVersion,".")
+	for i=1,5 do
+		intVersion = intVersion * 1000 + tonumber(tblVersion[i] or 0)
+	end
+	return intVersion
+end -- local function intVersion
+
+function CheckVersionInStore()													-- Check if later Version available in Plugin Store
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = VersionInStore(strPlugin:gsub(" %- .*",""))
+	local strOldVer = Version
+	if intVersion(strNewVer) > intVersion(strOldVer:match("%D*([%d%.]*)")) then
+		MemoDialogue( "Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.", "OK" )
+	end
+end -- function CheckVersionInStore
+
+function Initialise(strVersion,strPlugin)										-- Initialise the GUI module with optional Version & Plugin name
+
+	local strAppData = fhGetContextInfo("CI_APP_DATA_FOLDER")
+
+	Plugin = fhGetContextInfo("CI_PLUGIN_NAME")								-- Plugin Name from file
+	Version = strVersion or " "													-- Plugin Version
+	if Version == " " then
+		local strTitle = "\n@Title is missing"
+		local strAuthor = "\n@Author is missing"
+		local strVersion = "\n@Version is missing"
+		local strPlugin = strAppData.."\\Plugins\\"..Plugin..".fh_lua"
+		for strLine in io.lines(strPlugin) do									-- Read each line from the Plugin file
+			strPlugin = strLine:match("^@Title:%s*(.*)")
+			if strPlugin then
+				strPlugin = strPlugin:gsub("&&","&")
+				if Plugin:match("^"..strPlugin:gsub("(%W)","%%%1")) then
+					Plugin = strPlugin												-- Prefer Title to Filename if it matches
+					strTitle = nil
+				else
+					strTitle = "\n@Title differs from Filename"				-- Report abnormality
+				end
+			end
+			if strLine:match("^@Author:%s*(.*)") then							-- Check @Author exists
+				strAuthor = nil
+			end 
+			Version = strLine:gsub("^@Version:%D*([%d%.]*)%D*"," %1 ")
+			if Version ~= strLine then											-- Obtain the @Version from Plugin file
+				strVersion = nil
+				break
+			end
+		end
+		if strTitle or strAuthor or strVersion then							-- Report any header abnormalities
+			fhMessageBox("\nScript Header: "..Plugin..(strTitle or "")..(strAuthor or "")..(strVersion or ""))
+		end
+	end
+	History = Version																-- Version History
+	Plugin  = strPlugin or Plugin												-- Plugin Name from argument or default from file
+
+	CustomDialogue("Help","800x600","1030x730")								-- Custom "Help" dialogue sizes
+
+	DefaultDialogue()																-- Default "Font","Help","Main" dialogues
+
+	FontAssignment(intFontPlain)													-- Assign default Font Face & Style
+
+	-- File System & Sticky Data Names & Functions --
+
+	local strStickyFile = fhGetPluginDataFileName()
+	-- Allow plugins with variant filenames to use same plugin data files
+	strStickyFile = strStickyFile:gsub("\\"..Plugin:gsub(" ","_"):lower(),"\\"..Plugin)
+	strStickyFile = strStickyFile:gsub("\\"..Plugin..".+%.[D,d][A,a][T,t]$","\\"..Plugin..".dat")
+	if strStickyFile == "" then
+		-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
+		strStickyFile = fhGetContextInfo("CI_GEDCOM_FILE")
+		strStickyFile = strStickyFile:gsub("%.[G,g][E,e][D,d]",".fh_data")
+		lfs.mkdir(strStickyFile)
+		strStickyFile = strStickyFile.."\\Plugin Data"
+		lfs.mkdir(strStickyFile)
+		strStickyFile = strStickyFile.."\\"..Plugin..".dat"
+	end
+
+	-- Sticky File name for saving parameters
+	StickyFile = strStickyFile
+
+	-- Plugin data folder path name
+	PluginPath = StickyFile:gsub("\\"..Plugin.."%.[D,d][A,a][T,t]$","")
+
+	-- Plugin data file root name
+	PluginRoot = PluginPath.."\\"..Plugin
+
+	-- Public data folder path name
+	PublicPath = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")
+	if PublicPath == "" then PublicPath = PluginPath end
+
+	-- Program Data Calico Pie path name
+	CalicoPie = strAppData:gsub("\\Calico Pie\\.*","\\Calico Pie")
+
+	-- Local PC Computer Name
+	ComputerName = os.getenv("COMPUTERNAME")
+
+end -- function Initialise
+
+Initialise()		-- Initialise module with default values
+
+return fh
+
+end -- local function iup_gui_v1
+
+stringx_v1 = stringx_v1("stringx")
+--tablex_v1  = tablex_v1 ("tablex")
+general_v1 = general_v1("general")
+--iterate_v1 = iterate_v1("iterate")
+--progbar_v1 = progbar_v1("progbar")
+iup_gui_v1 = iup_gui_v1("iup_gui")
+
+-- All above should eventually become library modules as loaded below --
+
+--]==]
+
+--[==[
+local fhLoadRequire = require("fhLoadRequire").fhLoadRequire				-- Interim fhLoadRequire() API
+
+if not fhLoadRequire("pl","pl.init") then return end						-- Load required Penlight modules
+require("pl.import_into")()
+require("pl.strict")																-- Strict check for undeclared globals
+
+if not fhLoadRequire("fh.library_v2") then return end 						-- Load required FH v2 modules
+require("fh.modules_v2")()
+--]==]
+stringx_v1.import()																	-- To access FH string extension v1 module
+--tablex_v1.import()																	-- To access FH table extension v1 module
+local general = general_v1														-- To access FH general useful v1 module
+--local iterate = iterate_v1														-- To access FH iterate items v1 module
+--local progbar = progbar_v1														-- To access FH progress bar v1 module including "iuplua"
+local iup_gui = iup_gui_v1														-- To access FH GUI builder v1 module including "iuplua", "lfs", "fh.general_v1" & "fh.loadreq_v1", "fh.stringx_v1", etc
+
+-- Preset Global Data Definitions --
+function PresetGlobalData()
+	iup_gui.Balloon	= "YES"
+	iup_gui.CustomDialogue("Main","450x290","600x350")
+	StrFHUG  = "http://www.fhug.org.uk/wiki/doku.php?id="					-- Help window FHUG root URL
+	StrASVer = "3.2.3"																-- Ancestral Sources version number
+end -- function PresetGlobalData
+
+-- Reset Sticky Settings to Default Values --
+function ResetDefaultSettings()
+	iup_gui.DefaultDialogue("Memo")												-- GUI window position X & Y co-ordinates, and minsize & rastersize for "Main","Font","Help","Memo" dialogues
+	iup_gui.History = " "															-- Version History reset for initial Help
+	StrFiles = nil																	-- Program files installation folder
+	StrClose = "ON"																	-- Close on Save Entry radio button value
+end -- function ResetDefaultSettings
+
+-- Load Sticky Settings from File --
+function LoadSettings()
+	iup_gui.LoadSettings()															-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+	StrFiles = tostring(iup_gui.LoadGlobal("Files",StrFiles))
+	StrClose = tostring(iup_gui.LoadGlobal("Close",StrClose))
+	SaveSettings()																	-- Save sticky data settings
+end -- function LoadSettings
+
+-- Save Sticky Settings to File --
+function SaveSettings()
+	iup_gui.SaveGlobal("Files",StrFiles)
+	iup_gui.SaveGlobal("Close",StrClose)
+	iup_gui.SaveSettings()															-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+end -- function SaveSettings
+
+-- Make New Help Dialogue from Prototype --
+function MakeHelpDialogue(btnGetHelp)
+	local strFHUG = "plugins:help:as_data_entry:"
+	iup_gui.NewHelpDialogue(btnGetHelp,StrFHUG)								-- Supply control Help button and common web page root URL
+	iup_gui.AddHelpButton("Ancestral Sources Data Entry"	,"Ancestral Sources Data Entry window"	,strFHUG.."as_data_entry"		)
+	iup_gui.AddHelpButton("About Ancestral Sources"			,"About Ancestral Sources "..StrASVer	,"ancestralsources:about"		)
+	iup_gui.AddHelpButton("Version History"					,"Version History of Features"			,strFHUG.."version_history"	)
+end -- function MakeHelpDialogue
+
+-- GUI Main Dialogue --
+function GUI_MainDialogue()
+
+	local function doExecute(strExecutable, strParameter)					-- Invoke FH Shell Execute API
+		local function ReportError(strMessage)
+			GUI_ModeDialogue(	"Shell Execute Error",
+									"ERROR: "..strMessage.." :\n"..strExecutable.."\n"..strParameter.."\n\n",
+									"OK"	)
+		end -- local function ReportError
+		return general.DoExecute(strExecutable, strParameter, ReportError)
+	end -- local function doExecute
+
+	local function runBatchFileOK(strBatchScript,strFilename)				-- Invoke a Batch Script and check Filename
+		local strBatchFile = iup_gui.PluginRoot..".bat"
+		general.DeleteFile(strBatchFile)
+		general.SaveStringToFile(strBatchScript,strBatchFile)
+		general.DeleteFile(strFilename)											-- Delete output file and run batch file
+		doExecute(strBatchFile)
+		local intOldSize = -1
+		local intNewSize = -1
+		local intCounter = 40
+		repeat
+			if intNewSize > 1000 then
+				if intNewSize > intOldSize then intCounter = 40 end			-- Extend timeout counter if output file gets bigger
+				intOldSize = intNewSize
+			end
+			fhSleep(200,100)														-- Allow batch file to run
+			intNewSize = lfs.attributes(strFilename,"size") or 0
+			intCounter = intCounter - 1
+		until intOldSize == intNewSize or intCounter < 0					-- Wait until output file stops getting bigger or takes too long
+		general.DeleteFile(strBatchFile)
+		if intCounter < 0 then return false end
+		return true
+	end -- local function runBatchFileOK
+
+	local strHKLMkey = "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Ancestral Sources_is1"
+	local strHKLMval = "InstallLocation"
+
+	local function doGetPath()													-- Get AS installation path using Batch Script
+		local strFilePath = nil
+		local strRegQuery = 														-- Script to run REG QUERY on HKLM key /REG:64
+		[=[
+		@ECHO OFF
+		IF EXIST "{Keys}" DEL "{Keys}"
+		ECHO.
+		ECHO REG QUERY "{HKLM}" /REG:64 /S > "{Keys}"
+		ECHO.
+		REG QUERY "{HKLM}" /REG:64 /S > "{Keys}"
+		IF ERRORLEVEL 1 (
+			ECHO.
+			PAUSE
+		)
+		EXIT
+		]=]
+		local strQueryFile = iup_gui.PluginRoot..".keys"
+		strRegQuery = strRegQuery:replace("{HKLM}",strHKLMkey)
+		strRegQuery = strRegQuery:replace("{Keys}",strQueryFile)
+		if runBatchFileOK(strRegQuery,strQueryFile) then					-- Invoke the Batch Script file to REG QUERY HKLM keys /REG:64
+			for strLine in io.lines(strQueryFile) do
+				if not strFilePath then
+					strFilePath = strLine:match("%s+"..strHKLMval.."%s+REG_SZ%s+(.+)")
+				end
+			end
+			general.DeleteFile(strQueryFile)
+		end
+		return strFilePath
+	end -- local function doGetPath
+
+	local function getRegKey(strKey)											-- Read Windows Registry Key Value
+		local luaShell = luacom.CreateObject "WScript.Shell"
+		local strValue 
+		if pcall( function() strValue = luaShell:RegRead(strKey) end ) then
+			return strValue, false
+		else
+			return nil, true
+		end
+	end -- local function getRegKey
+
+	local strType = nil																-- AS data entry type option
+
+	local strDataMode = "YES"														-- Active mode for all data entry options
+	local strDownload = "YES"														-- Active mode for the download button
+	local strTitle = "This Plugin launches the Ancestral Sources application,\n"
+	local strVersion, isError = getRegKey("HKCU\\Software\\Ancestral Sources\\00\\Version")
+	if isError then																	-- AS Version key missing so not installed
+		strTitle = strTitle.."which is not installed but is available via this download button:"
+		strDataMode = "NO"
+	elseif strVersion:match( StrASVer ) then									-- AS Version installed is the latest
+		strTitle = strTitle.."and its latest version "..StrASVer.." is installed on this PC."
+		strDownload = "NO"
+	else																				-- AS Version installed is not latest
+		strTitle = strTitle.."but later version "..StrASVer.." is available via this download button:"
+	end
+
+	local strPath = "\\Ancestral Sources\\Ancestral Sources.exe"			-- AS usual folder & executable file name 
+	local strProg = StrFiles or os.getenv("PROGRAMFILES")..strPath		-- AS sticky/default installation location
+	if strDataMode == "YES" then
+		if not general.FlgFileExists(strProg) then							-- Try alternative 64-bit PC AS default installation location
+			strProg = ( os.getenv("PROGRAMW6432") or os.getenv("PROGRAMFILES") )..strPath
+			if not general.FlgFileExists(strProg) then
+				strProg = getRegKey(strHKLMkey.."\\"..strHKLMval)			-- Try the Windows Registry 32-bit AS unusual installation location
+				if not strProg then
+					strProg = doGetPath()											-- Try the Windows Registry 64-bit AS unusual installation location
+				end
+				if strProg then
+					strProg = strProg.."Ancestral Sources.exe"
+					if not general.FlgFileExists(strProg) then
+						iup_gui.WarnDialogue("Program Missing","\n Ancestral Sources executable was not found in Windows Registry path \n "..strProg.." \n")
+						return nil, nil
+					end
+				else
+					iup_gui.WarnDialogue("Path Missing","\n Ancestral Sources executable installation path was not found in \n the default Program Files folders nor the Windows Registry keys. \n")
+					return nil, nil
+				end
+			end
+		end
+		StrFiles = strProg
+	end
+
+	-- Create each GUI label and button with title and tooltip, etc
+	local lblVersion	= iup.label	{ Title=strTitle									, Tip="Ancestral Sources version "..StrASVer.." should be installed on your PC"						, Alignment="ACENTER", Font=iup_gui.FontBody, }
+	local btnDownload	= iup.button	{ Title="Click here for latest download"		, Tip="Click here to Download Ancestral Sources from FHUG Knowledge Base", }
+	local lblMessage	= iup.label	{ Title="Please choose a data entry mode:"	, Tip="Choose a data entry mode\n(Greyed-out buttons will be enabled as new features are added)", Alignment="ACENTER", Font=iup_gui.FontHead, }
+	local btnCensus		= iup.button	{ Title="Census\nentries"							, Tip="Choose the 'Create census entries' mode"				, }
+	local btnBirth		= iup.button	{ Title="Birth\nentries"							, Tip="Choose the 'Create birth entries' mode"				, }
+	local btnBaptism	= iup.button	{ Title="Baptism\nentries"						, Tip="Choose the 'Create baptism entries' mode"			, }
+	local btnMarriage	= iup.button	{ Title="Marriage\nentries"						, Tip="Choose the 'Create marriage entries' mode"			, }
+	local btnDeath		= iup.button	{ Title="Death\nentries"							, Tip="Choose the 'Create death entries' mode"				, }
+	local btnBurial		= iup.button	{ Title="Burial\nentries"							, Tip="Choose the 'Create burial/cremation entries' mode"	, }
+	local btnProbate	= iup.button	{ Title="Probate\nentries"						, Tip="Choose the 'Create probate entries' mode"			, }
+	local btnImages		= iup.button	{ Title="Add images to existing sources"		, Tip="Choose the 'Add images to existing sources' mode"	, }
+	local tglClosure	= iup.toggle	{ Title=" Close on 'Save Entry To File' ?"	, Tip="Choose whether to Close Ancestral Sources on 'Save Entry To File'",	Value=StrClose, }
+	local btnDefault	= iup.button	{ Title="Restore Defaults"						, Tip="Restore default Settings for Window positions\nand Close on 'Save Entry To File' option", }
+	local btnSetFont	= iup.button	{ Title="Set Window Font"							, Tip="Choose user interface font style"	, }
+	local btnGetHelp	= iup.button	{ Title="Help and Advice"							, Tip="Obtain online Help and Advice from the FHUG Knowledge Base", }
+	local btnDestroy	= iup.button	{ Title="Cancel Plugin"							, Tip="Cancel this Plugin"					, }
+
+	local vboxDataMode	= iup.vbox { 
+									lblMessage,
+									iup.hbox { Homogeneous="YES", Margin=iup_gui.Border, btnCensus, btnBirth, btnBaptism, btnMarriage, btnDeath, btnBurial, btnProbate, },
+									iup.hbox { Homogeneous="YES", Margin=iup_gui.Border, iup.hbox { tglClosure, Margin="20", }, btnImages, },
+								}
+	local vboxMain		= iup.vbox { Font=iup_gui.FontBody, ExpandChildren="NO", Alignment="ACENTER", Gap=iup_gui.Gap, Margin=iup_gui.Margin,
+									lblVersion,
+									iup.hbox { btnDownload, },
+									vboxDataMode,
+									iup.hbox { Homogeneous="YES", Margin=iup_gui.Border, btnDefault, btnSetFont, btnGetHelp, btnDestroy, }
+								}
+
+	-- Create dialogue and turn off resize, menubox, maximize and minimize
+	local dialogMain	= iup.dialog { Title=iup_gui.Plugin..iup_gui.Version,
+									vboxMain,
+								}
+
+	MakeHelpDialogue(btnGetHelp)													-- Make the Help & Advice dialogue and supply control button
+
+	local function doAdjustMode()												-- Adjust display mode of some controls
+		if strDownload == "YES" then
+			lblVersion.Font	= iup_gui.FontHead									-- Version message is only bold when new download available
+		else
+			lblVersion.Font	= iup_gui.FontBody
+			btnDownload.Floating = "YES"
+		end
+		btnDownload.Visible = strDownload										-- Enable/disable download button depending on AS version installed
+		btnDownload.Active  = strDownload
+		vboxDataMode.Active = strDataMode										-- Enable/disable data entry buttons depending if AS is installed
+	end -- local function doAdjustMode
+
+	local function doClosure(iState)											-- Toggle the Close on 'Save Entry to File' option
+		if iState == 0 then
+			StrClose = "OFF"
+		elseif iState == 1 then
+			StrClose = "ON"
+		else
+			iup.Message(iup_gui.Plugin, "tglClosure invalid iState "..iState)
+			StrClose = "ERROR"
+		end
+	end -- local function doClosure
+
+	local function doDefault()													-- Handle the Restore Defaults button
+		ResetDefaultSettings()
+		iup_gui.ShowDialogue("Help")
+		iup_gui.ShowDialogue("Main")
+		tglClosure.Value = StrClose
+		SaveSettings()																-- Save sticky data settings
+	end -- local function doDefault
+
+	local function doSetFont()													-- Handle the Set Window Font button
+		vboxMain.Active = "NO"
+		if iup_gui.FontDialogue() then
+			doAdjustMode()
+			lblMessage.Font	= iup_gui.FontHead
+			vboxMain.Font	= iup_gui.FontBody
+		end
+		vboxMain.Active = "YES"
+	end -- local function doSetFont
+
+	local intVer = tonumber(strVersion:match("^(%d)"))
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control	=	1~V1	,	2~V2	,	3~V3	,	4~V4	, 5~SOURCE	,	6~FgColor		, 7~action function()
+		[lblVersion]	= { false	,	false	,	false	,	false	, false		, iup_gui.Info	, false	},
+		[btnDownload]= { false	,	false	,	false	,	false	, false		, iup_gui.Safe	, function() iup.Help(StrFHUG.."fhugdownloads:contents:ancestral_sources") return iup.CLOSE end },
+		[lblMessage]	= { false	,	false	,	false	,	false	, false		, iup_gui.Info	, false	},
+		[btnCensus]	= { false	,	false	,	false	,	false	, "CENSUS"	, iup_gui.Safe	, false	},
+		[btnBirth]	= { "NO"	,	"NO"	,	"NO"	,	false	, "BIRTH"		, iup_gui.Safe	, false	},
+		[btnBaptism]	= { "NO"	,	false	,	false	,	false	, "BAPTISM"	, iup_gui.Safe	, false	},
+		[btnMarriage]= { "NO"	,	"NO"	,	false	,	false	, "MARRIAGE"	, iup_gui.Safe	, false	},
+		[btnDeath]	= { "NO"	,	"NO"	,	"NO"	,	false	, "DEATH"		, iup_gui.Safe	, false	},
+		[btnBurial]	= { "NO"	,	"NO"	,	"NO"	,	false	, "BURIAL"	, iup_gui.Safe	, false	},
+		[btnProbate]	= { "NO"	,	"NO"	,	"NO"	,	false	, "PROBATE"	, iup_gui.Safe	, false	},
+		[btnImages]	= { "NO"	,	"NO"	,	false	,	false	, "IMAGES"	, iup_gui.Safe	, false	},
+		[tglClosure]	= { "NO"	,	"NO"	,	false	,	false	, false		, false			, function(self,iState) doClosure(iState) end },
+		[btnDefault]	= { false	,	false	,	false	,	false	, false		, iup_gui.Safe	, function() doDefault() end },
+		[btnSetFont]	= { false	,	false	,	false	,	false	, false		, iup_gui.Safe	, function() doSetFont() end },
+		[btnGetHelp]	= { false	,	false	,	false	,	false	, false		, iup_gui.Safe	, function() iup_gui.HelpDialogue(0) end },
+		[btnDestroy]	= { false	,	false	,	false	,	false	, false		, iup_gui.Risk	, function() return dialogMain.close_cb() end },
+		} ) do
+		iupName.TipBalloon = iup_gui.Balloon
+		if iupName == btnDownload then iupName.Padding = "20x4" else iupName.Expand = "YES" end
+		if tblAttr[intVer] then iupName.Active = tblAttr[intVer] end
+		if tblAttr[5] then iupName.action = function() strType=" -SOURCE "..tblAttr[5] return iup.CLOSE end end
+		if tblAttr[6] then iupName.FgColor= tblAttr[6] end
+		if tblAttr[7] then iupName.action = tblAttr[7] end
+	end
+
+	doAdjustMode()
+
+	iup_gui.ShowDialogue("Main",dialogMain,btnDestroy)
+
+	if strType then
+		local strFile = fhGetContextInfo("CI_GEDCOM_FILE")					-- Get current GEDCOM file
+		local tblIndi = fhGetCurrentRecordSel("INDI")						-- Get current selected record(s)
+		local strIndi = " "
+		if #tblIndi > 0 then
+			strIndi = " -IND "..fhGetRecordId(tblIndi[1])					-- Get first Record Id
+		end
+		local strClose = ""
+		if StrClose == "ON" then strClose = " -CLOSE" end					-- Set closure on Save mode
+		doExecute( '"'..strProg..'"', '-FILE "'..strFile..'"'..strIndi..strType..strClose )
+	end
+
+end -- function GUI_MainDialogue
+
+-- Main code starts here --
+
+	fhInitialise(5,0,0,"save_required")
+
+	PresetGlobalData()																-- Preset global data definitions
+
+	ResetDefaultSettings()															-- Preset default sticky settings
+
+	LoadSettings()																	-- Load sticky data settings
+
+	iup_gui.CheckVersionInStore()												-- Notify if later Version available
+
+	GUI_MainDialogue()
+
+	SaveSettings()																	-- Save sticky data settings

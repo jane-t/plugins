@@ -1,0 +1,139 @@
+--[[
+@Title: Relations Count
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: November 2013 
+@Description: List number of each type of relations for a selected individual
+]]
+
+function main()
+    local pi
+  local tblResults = createResultTable()
+    -- Define Columns
+    tblResults.title  = {title='Relationship',type="text"}
+    tblResults.count  = {title='Count',type="integer",align='align_right'}
+    tblResults.type  = {title='Type',type="integer",align='align_right',sort='1',visibility='hide'}
+    tblResults.ancestor  = {title='Direct Ancestor',type="text"}
+    tblResults.decendant  = {title='Direct Decendant',type="text"}
+ 
+    local tblIndi = fhGetCurrentRecordSel('INDI')
+    local sum = {}
+    pi = tblIndi[1]
+    if pi == nil then
+        tblIndi = fhPromptUserForRecordSel('INDI')
+        if #tblIndi == 0 then
+            return
+        else
+            pi = tblIndi[1]
+        end
+    end
+        if pi == nil then return end
+        for p2 in records('INDI') do
+            local res,da,dd = fhCallBuiltInFunction('Relationship',pi,p2,'TEXT')
+            if sum[res] then 
+                sum[res].count = (sum[res].count + 1) 
+
+
+
+else 
+            local type,da,dd = compRel(fhCallBuiltInFunction('Relationship',pi,p2,'CODE'))
+           
+sum[res]= {count=1,type=type,da=da,dd=dd}
+end
+        end
+for i,value in pairs(sum) do
+    tblResults:newRow()
+        -- Set Columns
+        tblResults.title:set(i)
+        tblResults.count:set(value.count)
+        tblResults.type:set(value.type)
+        tblResults.ancestor:set(value.da)
+        tblResults.decendant:set(value.dd)
+
+end
+  local title = "Relationship Counts for"..fhGetDisplayText(pi)
+  fhOutputResultSetTitles(title,title, "Date: %#x")
+    tblResults:outputResults()
+end
+function compRel(sType)
+-- "Gens. Up=2, Gens. Down=1, Half=0, Spouse Start=1, Spouse End=1"
+local iGensUp, iGensDown,half,eSpozStart, eSpozEnd = sType:match("Gens. Up=(%d-), Gens. Down=(%d-), Half=(%d), Spouse Start=(%d), Spouse End=(%d)")
+if iGensUp == nil then return 9999 else
+iGensUp, iGensDown,half,eSpozStart, eSpozEnd  = tonumber(iGensUp), tonumber(iGensDown),tonumber(half),tonumber(eSpozStart),tonumber(eSpozEnd)
+local w,da,dd=0,'',''
+if tonumber(iGensUp) > 0 then local w=iGensDown * 4 end
+local val = (3 * (iGensUp + iGensDown)) - w + half + (eSpozStart * 3) + (eSpozEnd * 3);
+if iGensUp > 0 and iGensDown==0 and eSpozStart==0 and half == 0 then da = 'Y '..iGensUp end
+if iGensUp == 0 and iGensDown>0 and eSpozStart==0 and half == 0 then dd = 'Y '..iGensDown end
+return val, da,dd
+end
+end
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+
+function createResultTable()
+    local tblOutput_mt = {} -- create metatable
+    local iC = 0 -- Define count of lines
+    local tblOutput = {} -- Define Columns Table
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex =
+
+    function (t,k,v)
+        -- Set Values to Defaults if not supplied
+        if v.content == nil then v.content = {} end
+        if v.title == nil then v.title = k end
+        if v.type == nil then v.type = 'item' end
+        if v.width == nil then v.width = 140 end
+        if v.align == nil then v.align = 'align_left' end
+        if v.sort == nil then v.sort = 0 end
+        if v.sortAscending == nil then v.sortAscending = true end
+        if v.sortType == nil then v.sortType = 'default' end
+        if v.visibility == nil then v.visibility = 'show' end
+        v.set =
+
+        function(self,value)
+            self.content[iC] = value
+        end
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call =
+
+    function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then
+                return t[m.seq[i]]
+            end
+        end
+    end
+    tblOutput.newRow = function(t)
+        iC = iC + 1
+    end
+    tblOutput.rowCount = function(t)
+        return iC
+    end
+    tblOutput.outputResults = function(self)
+        for l in self() do
+            fhOutputResultSetColumn(l.title, l.type, l.content, iC, l.width,l.align,l.sort,l.sortAscending,l.sortType,l.visibility )
+        end
+    end
+    setmetatable(tblOutput, tblOutput_mt)
+    return tblOutput
+end
+------------------------------------------- Start Main
+main()

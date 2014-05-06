@@ -1,0 +1,9 @@
+--[[
+@Title: Launch Code Snippets
+@Author: Jane Taubman	
+@Version: 0.1
+@LastUpdated: March 2014 
+@Description: Launch Code Snippets
+]]
+local pgm = [[D:\Work\Dropbox\SnippetManager\Snippet Manager.exe]]
+fhShellExecute(pgm)

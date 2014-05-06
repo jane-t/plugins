@@ -44,7 +44,7 @@ function main()
            settingsPrompt()
         elseif iButton == 4 then
            -- Show Help Window
-           GUI_HelpDialogue()
+           dlgHelp('FTP Website Manager','ftp_website_manager')
         elseif iButton == 5 or iButton == 0 then
            bclose = true 
         end
@@ -402,80 +402,6 @@ function LoadFromFile(strFileName)
     return strString
 end -- function LoadFromFile
 -- Load Module
-function loadrequire(module,extended)
-    if not(extended) then extended = module end
-    local function installmodule(module,filename)
-        local bmodule = false
-        if not(filename) then
-            filename = module..'.mod'
-            bmodule = true
-        end
-        local storein = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\Plugins\\'
-        -- Check if subdirectory needed
-        local path = string.match(filename, "(.-)[^/]-[^%.]+$")
-        if path ~= "" then
-            path = path:gsub('/','\\')
-            -- Create sub-directory
-            lfs.mkdir(storein..path)
-        end
-        -- Get file down and install it
-        local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
-        local url = "http://www.family-historian.co.uk/lnk/getpluginmodule.php?file="..filename
-        http:Open("GET",url,false)
-        http:Send()
-        http:WaitForResponse(30)
-        local status = http.StatusText
-        if status == 'OK' then
-            length = http:GetResponseHeader('Content-Length')
-            data = http.ResponseBody
-            if bmodule then
-                local modlist = loadstring(http.ResponseBody)
-                for _,f in pairs(modlist()) do
-                    if not(installmodule(module,f)) then
-                        break
-                    end
-                end
-            else
-                local function OpenFile(strFileName,strMode)
-                    local fileHandle, strError = io.open(strFileName,strMode)
-                    if not fileHandle then
-                        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
-                    end
-                    return fileHandle
-                end -- OpenFile
-                local function SaveStringToFile(strString,strFileName)
-                    local fileHandle = OpenFile(strFileName,"wb")
-                    fileHandle:write(strString)
-                    assert(fileHandle:close())
-                end -- SaveStringToFile
-                SaveStringToFile(data,storein..filename)
-            end
-            return true
-        else
-            fhMessageBox('An error occurred in Download please try later')
-            return false
-        end
-    end
-    local function requiref(module)
-        require(module)
-    end
-    res = pcall(requiref,extended)
-    if not(res) then
-        local ans = fhMessageBox(
-        'This plugin requires '..module..' support, please click OK to download and install the module',
-        'MB_OKCANCEL','MB_ICONEXCLAMATION')
-        if ans ~= 'OK' then
-            return false
-        end
-        if installmodule(module) then
-            package.loaded[extended] = nil  -- Reset Failed Load
-            require(extended)
-        else
-            return false
-        end
-    end
-    return true
-end
 
 --[[
 @Title:		User Interface Buttons Snippet
@@ -512,117 +438,50 @@ end -- function iupButtons
 
 
 
---[[
-@Title:		Display FHUG Wiki Help Snippet
-@Author:	Mike Tate
-@LastUpdated:	May 2012
-@Version:	1.1
-@Description:	Displays FHUG Wiki help pages in a popup GUI.
-]]
+function dlgHelp(sUrl,sTitle)
+    local sPath = 'http://www.fhug.org.uk/wiki/?id=plugins:help:'..sUrl
+    local btn_ok = iup.button { title="Close",padding = '5x5',size='50'}
+   local btn_back = iup.button { title="<-",padding = '5x5',size='20',tip='Page Back'}
+   local btn_forward = iup.button { title="->",padding = '5x5',size='20',tip='Page Forward'}
  
--- GUI Help & Advice Dialogue --
-function GUI_HelpDialogue()
+   local wb = iup.webbrowser{} 
  
-	local StrPlugin	= "Display FHUG Wiki"	-- Plugin title & version
-	local StrIssue	= " V1.0"
-	local StrRed		= "255 000 000"		-- Color attributes
-	local StrGreen	= "000 120 000"
-	local StrBlue		= "000 000 255"
-	local StrBlack	= "000 000 000"
-	local StrWhite	= "255 255 255"
-	local StrBigMargin	= "10x10"		-- Layout attributes
-	local StrMinMargin	= "1x1"
-	local StrGap		= "10"
-	local StrFontFace	= string.gsub(iup.GetGlobal("DEFAULTFONT"),",.*","")
-	local StrFontHead	= StrFontFace..", Bold -16"
-	local StrFontBody	= StrFontFace..",      -16"
+    local vbox = iup.vbox {
+        wb,
+        iup.hbox{
+        btn_ok,btn_back,btn_forward;expandchildren = 'YES', expand="YES"},
+        expandchildren = 'YES', alignment = 'ACENTER', gap = '5', margin = '5x5',expand="YES"
+    }
+    local dlg = iup.dialog{vbox;expandchildren = 'YES', title=sTitle,size="HALFxHALF", 
+                           startfocus=btn_ok, close_cb=function()  return iup.CLOSE end}
  
-	local StrFHUG = "http://www.fhug.org.uk/wiki/wiki/doku.php?id=" 
-	local function doActivateMainHelpButton()
-		if BtnMainHelp then BtnMainHelp.active = "YES" end
-	end
- 
-	-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
-	local	oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
-		oleControl:CreateLuaCOM()
- 
-	-- Create each GUI button with title and tooltip
-	local btnClose	= iup.button	{ title="Close this Window"		, tip="Close this Help and Advice window" }
- 
-	-- The following control is global to allow Main GUI to alter font
-	HboxHelp = iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnMain, btnPath, btnClose, }
- 
-	local dialogHelp = iup.dialog { title=StrPlugin.." Help & Advice", background=StrWhite, startfocus=btnClose, rastersize="1000x700",
-				iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin, expandchildren="YES",
-					oleControl,
-					HboxHelp,
-				},
-				close_cb=function() doActivateMainHelpButton() end,
-			}
- 
-	local strFHUG = StrFHUG.."plugins:help:"
- 
-	-- Set other GUI control attributes
-	for iupName, tblAttr in pairs( {
-		-- Control= 1~fgcolor	, 2~Navigate URL		, 3~action function()
-		[btnClose]= { StrRed	, false				, function() dialogHelp:destroy() doActivateMainHelpButton() end },
-		} ) do
-		iupName.expand	= "HORIZONTAL"
-		iupName.size	= "x10"
-		iupName.fgcolor	= tblAttr[1]
-		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(tblAttr[2]) end end
-		if tblAttr[3] then iupName.action = tblAttr[3] end
-	end
- 
-	dialogHelp:show()
-	dialogHelp.rastersize=iup.NULL	-- Allow window to be resized
- 
-	oleControl.com:Navigate(strFHUG.."ftp_website_manager")
- 
-	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
- 
-end -- function GUI_HelpDialogue
-
-function dump (tt, indent, done, label)
-    if label == nil then
-       label = 'Dump'
+    function btn_ok:action(dlg)
+        return iup.CLOSE
     end
-    if debug == true then
-        done = done or {}
-        indent = indent or 0
-        if type(tt) == "table" then
-            if indent == 0 then
-                io.write(string.rep (" ", indent))
-                io.write(label..'\n')
-            end
-            for key, value in pairs (tt) do
-                io.write(string.rep (" ", indent)) -- indent it
-                if type (value) == "table" and not done [value] then
-                    done [value] = true
-                    io.write(string.format("[%s] => table\n", tostring (key)));
-                    io.write(string.rep (" ", indent+4)) -- indent it
-                    io.write("(\n");
-                    dump (tostring(key),value, indent + 7, done)
-                    io.write(string.rep (" ", indent+4)) -- indent it
-                    io.write(")\n");
-                else
-                    io.write(string.format("[%s] => %s\n",
-                    tostring (key), tostring(value)))
-                end
-            end
-        else
-            io.write(label..':'..tostring(tt))
-        end
-    else
-        return
+    function btn_back:action(dlg)
+        wb.backforward = -1
     end
+    function btn_forward:action(dlg)
+        wb.backforward = 1
+    end
+ 
+    dlg:show()
+    wb.value = sPath
+    dlg.minsize = dlg.size
+    iup.MainLoop()
+    dlg:destroy()
+    return
 end
+
 ------------------------------------------------------ End of Functions
 require 'lfs'
 require 'luacom'
 require 'iupluaole'
-if not(loadrequire('luasql','luasql.sqlite3')) then return end
-if not(loadrequire('md5')) then return end
-if not(loadrequire('socket')) then return end
+require 'iupluaweb'
+fu = require 'fhhutils'
+
+if not(fu.loadrequire('luasql','luasql.sqlite3')) then return end
+if not(fu.loadrequire('md5')) then return end
+if not(fu.loadrequire('socket')) then return end
 ftp = require("socket.ftp")
 main()

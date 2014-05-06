@@ -122,6 +122,13 @@ htmlbody = [[<b>{INDI.NAME} (ID:{ref})</b> Project: <a href="file:///{project}">
 {INDI.~SPOU[1]>|<h6>Spouse(s)</h6>|, } {INDI.FAMS[1]>MARR[1]} 
 {INDI.~SPOU[2]>|<br />|, } {INDI.FAMS[2]>MARR[1]} 
 {INDI.~SPOU[3]>|<br />|, } {INDI.FAMS[3]>MARR[1]} 
+<h6>Childen</h6>
+{INDI.~CHIL[1]>| |, }{INDI.~CHIL[1]>BIRT[1]}
+{INDI.~CHIL[2]>|<br /> |, }{INDI.~CHIL[2]>BIRT[1]}
+{INDI.~CHIL[3]>|<br /> |, }{INDI.~CHIL[3]>BIRT[1]}
+{INDI.~CHIL[4]>|<br /> |, }{INDI.~CHIL[4]>BIRT[1]}
+{INDI.~CHIL[5]>|<br /> |, }{INDI.~CHIL[5]>BIRT[1]}
+{INDI.~CHIL[6]>|<br /> |, }{INDI.~CHIL[6]>BIRT[1]}
 
 <h3>Comment</h3>
 <p>{comment}</p>

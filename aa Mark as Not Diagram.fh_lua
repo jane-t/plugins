@@ -1,0 +1,62 @@
+--[[
+@Title: Hide from Diagrams
+@Author: 
+@Version: 
+@LastUpdated: 
+@Description: 
+]]
+
+function mainfunction()
+    pTitle = ''
+    -- Prompt User to Enter Search Field
+    local ret, pTitle =
+    iup.GetParam("Hide from Diagrams Media Links", param_action,
+    " containing the following as a title: %s\n",
+    pTitle)
+    if (ret == 0) then
+        return
+    end
+    local ptrTitle = fhNewItemPtr()
+    local ptrExcl = fhNewItemPtr()
+    local ptrLink = fhNewItemPtr()
+    for ptr in records('OBJE') do
+        ptrTitle:MoveTo(ptr,'~.TITL')
+        strTitle = fhGetDisplayText(ptrTitle)
+        if strTitle ~= nil then
+            if strTitle:find(pTitle) then
+                -- Read all Links
+                ptrLink:MoveTo(ptr,'~.NOTE2')
+                while ptrLink:IsNotNull() do
+                    ptrExcl:MoveTo(ptrLink,'~._EXCL')
+                    if ptrExcl:IsNull() then
+                        -- Create Exclusion
+                        ptrExcl = fhCreateItem('_EXCL',ptrLink)
+                        res = fhSetValueAsText(ptrExcl,'Diagrams')
+                        print(res)
+                        print(fhGetDisplayText(ptrExcl),fhGetTag(ptrExcl),fhGetValueAsText(ptrExcl))
+                    else
+                        print(fhGetItemText(ptrExcl,'~'))
+                        if fhGetItemText(ptrExcl,'~') == '' then
+                            res = fhSetValueAsText(ptrExcl,'Diagrams')
+                        end
+                        print(fhGetDisplayText(ptrExcl),fhGetTag(ptrExcl),fhGetValueAsText(ptrExcl))
+                    end
+                    ptrLink:MoveNext('SAME_TAG')
+                end
+            end
+        end
+    end
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+require "iup"
+mainfunction()

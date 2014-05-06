@@ -1,0 +1,216 @@
+--[[
+@Title: Gendex Creator For Website Folder
+@Author: Jane Taubman
+@Version: 1.1
+@LastUpdated: May 2013 
+@Description: Creates GedDex File for Created Web Site for use with the http://gendexnetwork.org/ index.
+Only Individuals who have either a Individual Summary page or are the spouse on a Family Group sheet page will be included in the index file.
+Additionally Individuals with either the Living or Private Flag will be excluded from the index automatically.
+1.1 New Date converter and added missing Surname field.
+]]
+
+function main()
+    local dir = settingsPrompt()
+    local ids = {}
+    if dir then
+        local list = buildfilelist(dir)
+        local pf = fhNewItemPtr()
+        for pi in records('INDI') do
+            -- exclude private and living individuals
+            lflg = fhGetItemText(pi,'~._FLGS.__LIVING')
+            pflg = fhGetItemText(pi,'~._FLGS.__PRIVATE')
+            if not(lflg == 'Y') and not(pflg == 'Y') then
+                -- check for ind page
+                local strI = 'ind'..fhGetRecordId(pi)
+                if list[strI] then
+                    table.insert(ids,{pi:Clone(),strI})
+                end
+                pf:MoveTo(pi,'~.FAMS>')
+                if pf:IsNotNull() then
+                    strI = 'fam'..fhGetRecordId(pf)
+                    if list[strI] then
+                        table.insert(ids,{pi:Clone(),strI})
+                    end
+                end
+            end
+        end
+        -- Build table for data
+        local gendex = {}
+        i = 1
+        local pName = fhNewItemPtr()
+        for _,id in ipairs(ids) do
+            
+            pName:MoveTo(id[1],'~.NAME')
+            strName = fhGetValueAsText(pName)
+            gendex[i] = table.concat({id[2]..'.html',
+                fhGetItemText(id[1],'~.NAME:SURNAME'),
+                strName,
+                getEventDate(id[1],{'BIRT','CHR','BAPT'}),
+                getEventPlace(id[1],{'BIRT','CHR','BAPT'}),
+                getEventDate(id[1],{'DEAT','BURI','CREM'}),
+                getEventPlace(id[1],{'DEAT','BURI','CREM'}),
+                ''
+            },'|')
+            i = i + 1
+        end
+        -- Save to Gendex.txt
+        SaveStringToFile(table.concat(gendex,'\n'),dir..'\\gendex.txt')
+        fhMessageBox('gendex.txt written to '..dir)
+    end
+end
+---------------------------- functions
+
+function cleanDate(strDate)
+    local str = strDate:upper()
+    str = str:gsub('%(.-%)','')
+    str = str:gsub('Q%d%s','')
+    return str
+end
+function initGedComDate()
+local dtFmt = {Approximate = 'ABT &d1',
+Calculated = 'CAL &d1', 
+Estimated  = 'EST &d1',
+From       = 'FROM &d1',
+['To']         = 'TO &d2',
+['From-To']    = 'FROM &d1 TO &d2',
+After      = 'AFT &d1',
+Before     = 'BEF &d1',
+Between    = 'BET &d1 AND &d2',
+Blank      = '&d1'
+}
+
+dMonths = {'JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC',''}
+return function (dt)
+function bldDate(dp)
+print(dp:GetDay(),dp:GetMonth())
+local d = dp:GetDay()
+local m = dp:GetMonth()
+local y = dp:GetYear()
+local strdp = ''
+if y ~= 0 then strdp = strdp..y end
+if m ~= 0 then strdp = dMonths[m]..' '..strdp end
+if d ~= 0 then strdp = d..' '..strdp end
+if dp:GetBC() then strdp = strdp..'BC' end
+return strdp
+end
+local dpDatePt1 = dt:GetDatePt1()
+local dpDatePt2 = dt:GetDatePt2()
+local dtType = dt:GetType()
+local dtSubType = dt:GetSubtype()
+if dtSubType == '' then dtSubType = 'Blank' end
+
+local str = dtFmt[dtSubType]:gsub('&d1',bldDate(dpDatePt1))
+local str = str:gsub('&d2',bldDate(dpDatePt2))
+
+return str
+end
+end
+function getEventDate(pi,factList)
+local strDate
+local dtPtr = fhNewItemPtr()
+for _,fact in ipairs(factList) do
+    if strDate == nil then
+       dtPtr:MoveTo(pi,'~.'..fact..'.DATE')
+       -- strDate = fhGetItemText(pi,'~.'..fact..'.DATE:COMPACT')
+       strDate = fhGetValueAsDate(dtPtr)
+    end 
+    
+end
+return gedDate(strDate)
+end
+function getEventPlace(pi,factList)
+local strDate = ""
+for _,fact in ipairs(factList) do
+    if strDate == ""  then
+       strDate = fhGetItemText(pi,'~.'..fact..'.PLAC')
+    end     
+end
+return strDate
+end
+function settingsPrompt()
+    local ret,directory = '', fhGetContextInfo('CI_PROJECT_PUBLIC_FOLDER')..'\\FH Website'
+    ret, directory =
+    iup.GetParam("Create GedDex For Website - Settings", param_action,
+    "Source Folder %f[DIR||'..strftpsource..']\n",
+    directory)
+    if (ret == true) then
+        directory = string.gsub(directory,'%\$','')
+        return directory
+    else
+        return false
+    end
+end
+
+function buildfilelist(folder)
+    local filelist = {}
+    local function splitfilename(strfilename)
+        -- Returns the Path Filename and extension as 3 values
+        return string.match(strfilename, "(.-)([^\\]-).([^%.]+)$")
+    end
+    for filename,attr in dirtree(folder) do
+        if attr.error then
+            print('filename:'..filename..' caused error '..attr.error)
+        else
+            if attr.mode == 'file' then
+                local _,id,ex = splitfilename(filename)
+                if ex == 'html' then
+                    filelist[id] = true
+                end
+            end
+        end
+    end
+    return filelist
+end
+
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."\\"..entry
+                local attr,err=lfs.attributes(entry)
+                if attr == nil then attr = {mode='attrfail',error=err} end
+                coroutine.yield(entry,attr)
+                if attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"w")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end -- function SaveStringToFile
+---------------------------- requires
+require 'lfs'
+---------------------------- call main
+gedDate = initGedComDate()
+main()

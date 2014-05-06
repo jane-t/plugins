@@ -1,0 +1,48 @@
+--[[
+@Title: Re-Title Media Attached to Sources
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated:  
+@Description: 
+]]
+
+function main()
+    local pMedia = fhNewItemPtr()
+    local pMediaRec = fhNewItemPtr()
+    local pMediaTitle = fhNewItemPtr()
+    for pi in records('SOUR') do
+         local sTitle = fhGetItemText(pi,'~.TITL')
+        pMedia:MoveTo(pi,'~.OBJE')
+        while pMedia:IsNotNull() do
+            if sTitle and STitle ~= '' then
+                pMediaRec = fhGetValueAsLink(pMedia)
+                pMediaTitle:MoveTo(pMediaRec,'~.TITL')
+                local mTitle = ''
+                if pMediaTitle:IsNull() then
+                    pMediaTitle = fhCreateItem('TITL',pMediaRec)
+                else
+                    mTitle = fhGetValueAsText(pMediaTitle)
+                end                
+                if mTitle ~= sTitle then
+                    bChk = fhSetValueAsText(pMediaTitle,sTitle)
+                    if not(bChk) then error('bang') end
+       print (fhGetDisplayText(pi))
+
+                end
+            end
+            pMedia:MoveNext('SAME_TAG')
+        end
+    end
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+main()

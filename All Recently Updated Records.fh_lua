@@ -1,0 +1,95 @@
+--[[
+@Title: All Recently Updated Records
+@Author: Jane Taubman	
+@Version: 1.0
+@LastUpdated: June 2014 
+@Description: Lists all Records (of any type) updated. 
+There is currently a limitation which means the time of the change is not available from a plugin.
+]]
+
+function main()
+    local pdays = 7
+    -- Prompt User to Confirm Options
+    local ret, pdays =
+    iup.GetParam("List Recent Records", param_action,
+    "Number of Days to Show: %i\n",
+    pdays)
+    if (ret == 0 or ret == false) then  -- Cancel or X quit plugin
+        return
+    end
+    local tblOutput,iC = createResultTable()
+    -- Define Columns
+    tblOutput.updated = {title='Updated',type='date-point',width=60,align='align_left',sort=1,content={}}
+    tblOutput.record = {title='Record',type='item',width=400,align='align_left',sort=0,content={}}
+    tblOutput.type = {title='Type',type='text',width=40,align='align_left',sort=0,content={}}
+    local updTime = fhNewItemPtr()
+    local dtToday = fhCallBuiltInFunction('Today')
+    local dtComp = fhCallBuiltInFunction('CalcDate',dtToday,0,0,(pdays*-1 -1))
+    for rectype in recordtypes() do
+        for record in records(rectype) do
+            lstDate = fhCallBuiltInFunction('LastUpdated',record)
+            if lstDate:Compare(dtComp) == 1 then
+                iC = iC + 1
+                tblOutput.record.content[iC] = record:Clone()
+                tblOutput.updated.content[iC] = lstDate:Clone()
+                tblOutput.type.content[iC] = rectype
+                updTime:MoveTo(record,'~.CHAN')
+            end
+        end
+    end
+    fhOutputResultSetTitles("All Records updated in last "..pdays.." days", "All Records updated in last "..pdays.." days", "Date: %#x")
+    for t in tblOutput() do
+        fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align,t.sort)
+    end
+end
+-------------------------- functions
+
+function recordtypes()
+    local t = 0
+    local m = fhGetRecordTypeCount()
+    return function()
+        t = t + 1
+        if t <= m then
+            return fhGetRecordTypeTag(t)
+        end
+    end
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+-------------------------- Run Main Function
+main()

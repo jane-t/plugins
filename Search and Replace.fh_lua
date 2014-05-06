@@ -1,299 +1,3292 @@
 --[[
-@title: Search and Replace
-@author: Jane Taubman
-@lastupdated: March 2013
-@Version: 1.6
-@description:
-Searches for and replaces any given text within the current project, with an option to ask for confirmation for each change.
-At the end, lists all changed fields with links back to the record (double-click on an item to view it in the Property Box).
-@update:
-1.1 Add Skip tick box to replace prompt.
-1.2 Change to Provide a Skip Button, to cancel click the close button on the window.
-1.3 Add Case insensitive searching and cancel or close the window will abort the replaces, while still listing the changes made.
-1.4 Add options for whole word search only and prevent wild card patterns being used automatically 
-1.5 General Code Tidy
-1.6 Add more details to the replace prompt for the context of the field being changed.
-]]
------------------------------------------------------ Start Search Replace Prompt
+@Title:			Search and Replace
+@Author:			Mike Tate
+@Version:			2.1
+@LastUpdated:	2 May 2014
+@Description:	Searches for and replaces any given text or date within the current project, with an option to ask for confirmation for each change.
+					At the end, lists all changed fields with links back to the record (double-click on an item to view it in the Property Box).
+@Version 2.1:	iup_gui update, comments removed, Attribute values & other dropdown lists, support tab & newline, inhibit Whole Words for spaces/punctuation, allow repeated words, fix XP tooltips, etc.
+@Version 2.0:	Better Item Details, Attribute values, more field search options, Search Only mode, updated GUI, Help & Advice, Sticky Settings, Libraries, etc.
+@Version 1.7:	Add the Date and specific Tag related field search & replace capability (see lines marked with -- V1.7) plus major code tidy.
+@Version 1.6:	Add more details to the replace prompt for the context of the field being changed.
+@Version 1.5:	General code tidy (not published).
+@Version 1.4:	Add options for whole word search only and prevent wild card patterns being used automatically 
+@Version 1.3:	Add Case insensitive searching and cancel or close the window will abort the replaces, while still listing the changes made.
+@Version 1.2:	Change to Provide a Skip Button, to cancel click the close button on the window.
+@Version 1.1:	Add Skip tick box to replace prompt.
+--]]
 
-function linecount(string,maxlines)
 --[[
-  @function linecount
-  @description
-  Works out approximate number of lines to display a text string in an input box.
-  @parms
-      string:  string to process mandatory
-      maxlines:  maximum height for text box,  defaults to 9 lines if not provided
-    ]]
-    maxlines = maxlines or 9
-    local intLines = 1
-    for strLine in string.gmatch(string.."\n","(.-)\n") do
-        intLines = intLines + math.ceil(string.len(strLine)/80)
-    end
-    return math.min(intLines,maxlines)
+@Title:			aa Library Functions Preamble
+@Author:			Mike Tate
+@Version:			1.7
+@LastUpdated:	13 Apr 2014
+@Description:	All the library module functions as preamble for Plugins.
+]]
+
+---[==[
+
+-- Initial +fh+ functions below should eventually become library modules --
+
+--[[
+@Title:			+fh+stringx_v2
+@Author:			Mike Tate
+@LastUpdated:	28 Dec 2013
+@Version:			2.4
+@Description:	Extended string functions to supplement LUA string library.
+@V2.4:				Tolerant of integer & nil parameters just link match & gsub.
+@V1.0:				Initial version.
+]]
+
+local function stringx_v2(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}									-- Local environment table
+package.seeall(fh)								-- Enable all globals
+module(...,package.seeall)					-- Create matching module name
+setfenv(1,fh)									-- All public names are added to local fh table
+
+function ReportVersion()
+	local strMessage = "This is +fh+stringx_v2"
+	print(strMessage)
+	return strMessage
 end
 
-function srPrompt(txtType,strFrom,strTo,bConfirm,sMessage)
-    local btn_ok = iup.button { title="Replace",padding = '5x5',size='50'}
-    local btn_skip = iup.button { title="Skip",padding = '5x5',size='50'}
-    local btn_cancel = iup.button { title="Cancel",padding = '5x5',size='50'}
-    
-    local inp_from_string = iup.text{expand="HORIZONTAL",minsize='150'}
-    local inp_to_string = iup.text{expand="HORIZONTAL"}
-    local inp_confirm = iup.toggle {'1'}
-    if txtType == "M" then
-        inp_from_string.multiline = 'YES'
-        inp_from_string.size = '0x80'
-        inp_from_string.wordwrap = 'YES'
-        inp_from_string.visiblelines = linecount(strFrom,10)
-        inp_to_string.multiline = 'YES'
-        inp_to_string.size = '0x80'
-        inp_to_string.wordwrap = 'YES'
-        inp_to_string.visiblelines = linecount(strTo,10)
-    end
-    local bSkip = false
-    local bQuit = false
-    
-    local vbox = iup.vbox {
-        iup.label {title=sMessage},
-        iup.label {title="Original"},
-        inp_from_string,
-        iup.label {title="Replacement"},
-        inp_to_string,
-        iup.hbox {
-            iup.label {title="Confirm All Replacements"},
-        inp_confirm},
-        iup.hbox{
-        btn_ok,btn_skip,btn_cancel,expandchildren = 'YES', expand="YES"},
-        expandchildren = 'YES', alignment = 'ACENTER', gap = '10', margin = '10x10',expand="YES"
-    }
-    local dlg = iup.dialog{vbox;expandchildren = 'YES', title="Search and Replace",size="HALF", startfocus=btn_ok}
+-- Split a string using "," or chosen separator --
+function split(strTxt,strSep)
+	local tblFields = {}
+	local strPattern = string.format("([^%s]+)", strSep or ",")
+	strTxt = tostring(strTxt or "")
+	strTxt:gsub(strPattern, function(strField) tblFields[#tblFields+1] = strField end)
+	return tblFields
+end -- function split
 
-    function btn_ok:action(dlg)
-        btn = 'replace'
-        return iup.CLOSE
-    end
+-- Split a string into numbers using " " or "," or "x" separators	-- Any non-number remains as a string
+function splitnumbers(strTxt)
+	local tblNum = {}
+	strTxt = tostring(strTxt or "")
+	strTxt:gsub("([^ ,x]+)", function(strNum) tblNum[#tblNum+1] = tonumber(strNum) or strNum end)
+	return tblNum
+end -- function splitnumbers
 
-    function btn_skip:action(dlg)
-        btn = 'skip'
-        return iup.CLOSE
-    end
+-- Hide magic pattern symbols	^ $ ( ) % . [ ] * + - ?
+function plain(strTxt)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character,
+	-- where %% is the % escape, and %1 is the original character capture.
+	strTxt = tostring(strTxt or ""):gsub("(%W)","%%%1")
+	return strTxt
+end -- function plain
 
-    function btn_cancel:action(dlg)
-        btn = 'cancel'
-        return iup.CLOSE
-    end
-    inp_from_string.value = strFrom
-    inp_to_string.value = strTo
-    if bConfirm then
-        inp_confirm.value = 'ON'
-    else
-        inp_confirm.value = 'OFF'
-    end
-    dlg:show()
-    
-    dlg.minsize = dlg.size
-    iup.MainLoop()
-    
-    strFrom = inp_from_string.value
-    strTo = inp_to_string.value
-    bConfirm = (inp_confirm.value == 'ON')
-    dlg:destroy()
-    return strFrom,strTo,bConfirm,btn
-end
------------------------------------------------------ End Search Replace Prompt
+-- matches is plain text version of string.match()
+function matches(strTxt,strFind,intInit)
+	strFind = tostring(strFind or ""):gsub("(%W)","%%%1")				-- Hide magic pattern symbols
+	return tostring(strTxt or ""):match(strFind,tonumber(intInit))
+end -- function matches
 
-function DoAllItems(strType,tblClass,action)
-    -- strType: Main Item Type (eg text)
-    -- strClass: Keyworded Array of Classes
-    -- action: function to perform
-    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
-    -- Loop through Record Types
-    local ii = 0
-    local ptr = fhNewItemPtr()
-    local bContinue = true
-    for ii =1,iCount do
-        strRecType = fhGetRecordTypeTag(ii)
-        ptr:MoveToFirstRecord(strRecType)
-        while ptr:IsNotNull() do
-            strDataClass = fhGetDataClass(ptr)
-            if fhGetValueType(ptr) == strType and tblClass[fhGetDataClass(ptr)] == true then
-                bContinue = action(ptr)
-            end
-            if not(bContinue) then
-                ptr:SetNull()
-            else
-                ptr:MoveNextSpecial()
-            end
-        end
-    end
-end
+-- replace is plain text version of string.gsub()
+function replace(strTxt,strOld,strNew,intNum)
+	strOld = tostring(strOld or ""):gsub("(%W)","%%%1")					-- Hide magic pattern symbols
+	return tostring(strTxt or ""):gsub(strOld,function() return strNew end,tonumber(intNum))	-- Hide % capture symbols
+end -- function replace
 
-function param_action(dialog,index)
-    if index == -3 then
-        bSkip = true
-        return 1
-    end
-end
--- Build Pattern from String for case insensitive search
+-- convert is pattern without captures version of string.gsub()
+function convert(strTxt,strOld,strNew,intNum)
+	return tostring(strTxt or ""):gsub(tostring(strOld or ""),function() return strNew end,tonumber(intNum))	-- Hide % capture symbols
+end -- function convert
 
-function nocase (s)
-    s = string.gsub(s, "%a", function (c)
-        return string.format("[%s%s]", string.lower(c),
-        string.upper(c))
-    end)
-    return s
-end
+-- import overloads fh functions into string table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			string[strIndex] = anyValue
+		end
+	end
+end -- function import
+return fh
 
-function strPlainText(strText)
-    -- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
-    return strText:gsub("(%W)","%%%1")
-end
+end -- local function stringx_v2
 
-function Replace(ptr)
-    local ptrRecord = fhNewItemPtr()
-    local strFromString = fhGetValueAsText(ptr)
-    local strBoxType = 's'
-    local strToString = ''
-    local strSearchFor = strSearchi
-    local strReplaceWith = strReplace
-    bSkip = false
-    if fhGetDataClass(ptr) == 'longtext' then
-        strBoxType = 'M'
-    end
-    if p.Whole == 1 and p.Plain == 1 then
-        strSearchFor = '([%s%p])('..strSearchi..')([%s%p])'
-        strReplaceWith = '%1'..strReplace..'%3'
-    end
-    local strToString = string.gsub(strFromString,strSearchFor,strReplaceWith)
-    if p.Whole == 1 and p.Plain == 1 then
-        -- Special Case search for last word and first word
-        local strSearchFor3 = '([%s%p])('..strSearchi..')$'
-        local strReplaceWith3 = '%1'..strReplace
-        strToString = string.gsub(strToString,strSearchFor3,strReplaceWith3)
-        local strSearchFor3 = '^('..strSearchi..')([%s%p])'
-        local strReplaceWith3 = strReplace..'%2'
-        strToString = string.gsub(strToString,strSearchFor3,strReplaceWith3)
-    end
-    if strFromString ~= strToString then
-        ptrRecord:MoveToRecordItem(ptr)
-        if p.Confirm == 1 and strFromString ~= strToString then
-            bConfirm = true
-            strFromString,strToString,bConfirm,btn = srPrompt(strBoxType,strFromString,strToString,bConfirm,ptrDetails(ptr))
-            if btn == 'cancel' or btn == nil then
-                return false
-            elseif btn == 'replace' then
-                -- Replace String
-                table.insert(tblRecord,ptrRecord:Clone())
-                table.insert(tblItem,ptr:Clone())
-                table.insert(tblReplaced,strFromString)
-                fhSetValueAsText(ptr,strToString)
-                fhUpdateDisplay()
-            elseif btn == 'skip' then
-            end
-            if bConfirm == false then
-                p.Confirm = 0
-            end
-        else
-            -- Replace String
-            table.insert(tblRecord,ptrRecord:Clone())
-            table.insert(tblItem,ptr:Clone())
-            table.insert(tblReplaced,strFromString)
-            fhSetValueAsText(ptr,strToString)
-            fhUpdateDisplay()
-            
-        end
-    end
-    return true
-end
+--[[
+@Module:			fh.tablex_v1
+@Author:			Mike Tate
+@Version:			1.1
+@LastUpdated:	19 Oct 2013
+@Description:	A Table Load Save Module.
+@V1.0:				Initial version 0.94 is Lua 5.1 compatible.
+]]
 
-function ptrDetails(ptr)
-local desc = {}
-local wrkPtr = ptr:Clone()
-table.insert(desc,BuildDR(ptr))
-wrkPtr:MoveToParentItem(wrkPtr)
-while wrkPtr:IsNotNull() do
-table.insert(desc,1,fhGetDisplayText(wrkPtr))
-wrkPtr:MoveToParentItem(wrkPtr)
-end
-wrkPtr:MoveToRecordItem(ptr) 
-table.insert(desc,1,'Record: '..fhGetTag(wrkPtr)..' '..fhGetRecordId(wrkPtr))
-return table.concat(desc,'\n')
-end
+local function tablex_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
 
-function BuildDR(ptr)
-   local ptrTemp = fhNewItemPtr()
-   ptrTemp:MoveTo(ptr)
-   strDR = fhGetTag(ptrTemp)
-   while fhHasParentItem(ptrTemp) do
-      ptrTemp:MoveToParentItem(ptrTemp)
-      strDR = fhGetTag(ptrTemp)..'.'..strDR
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+------------------------------------------------------ Start Table Load Save
+-- require "_tableloadsave"
+--[[
+   Save Table to File/Stringtable
+   Load Table from File/Stringtable
+   v 0.94
+   
+   Lua 5.1 compatible
+   
+   Userdata and indices of these are not saved
+   Functions are saved via string.dump, so make sure it has no upvalues
+   References are saved
+   ----------------------------------------------------
+   table.save( table [, filename] )
+   
+   Saves a table so it can be called via the table.load function again
+   table must a object of type 'table'
+   filename is optional, and may be a string representing a filename or true/1
+   
+   table.save( table )
+      on success: returns a string representing the table (stringtable)
+      (uses a string as buffer, ideal for smaller tables)
+   table.save( table, true or 1 )
+      on success: returns a string representing the table (stringtable)
+      (uses io.tmpfile() as buffer, ideal for bigger tables)
+   table.save( table, "filename" )
+      on success: returns 1
+      (saves the table to file "filename")
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   table.load( filename or stringtable )
+   
+   Loads a table that has been saved via the table.save function
+   
+   on success: returns a previously saved table
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   
+   chillcode, http://lua-users.org/wiki/SaveTableToFile
+   Licensed under the same terms as Lua itself.
+]]--
+
+   -- declare local variables
+   --// exportstring( string )
+   --// returns a "Lua" portable version of the string
+   local function exportstring( s )
+      s = string.format( "%q",s )
+      -- to replace
+      s = string.gsub( s,"\\\n","\\n" )
+      s = string.gsub( s,"\r","\\r" )
+      s = string.gsub( s,string.char(26),"\"..string.char(26)..\"" )
+      return s
    end
-   return strDR
+--// The Save Function
+function save(  tbl,filename )
+   local charS,charE = "   ","\n"
+   local file,err
+   -- create a pseudo file that writes to a string and return the string
+   if not filename then
+      file =  { write = function( self,newstr ) self.str = self.str..newstr end, str = "" }
+      charS,charE = "",""
+   -- write table to tmpfile
+   elseif filename == true or filename == 1 then
+      charS,charE,file = "","",io.tmpfile()
+   -- write table to file
+   -- use io.open here rather than io.output, since in windows when clicking on a file opened with io.output will create an error
+   else
+      file,err = io.open( filename, "w" )
+      if err then return _,err end
+   end
+   -- initiate variables for save procedure
+   local tables,lookup = { tbl },{ [tbl] = 1 }
+   file:write( "return {"..charE )
+   for idx,t in ipairs( tables ) do
+      if filename and filename ~= true and filename ~= 1 then
+         file:write( "-- Table: {"..idx.."}"..charE )
+      end
+      file:write( "{"..charE )
+      local thandled = {}
+      for i,v in ipairs( t ) do
+         thandled[i] = true
+         -- escape functions and userdata
+         if type( v ) ~= "userdata" then
+            -- only handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables, v )
+                  lookup[v] = #tables
+               end
+               file:write( charS.."{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( charS.."loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write(  charS..value..","..charE )
+            end
+         end
+      end
+      for i,v in pairs( t ) do
+         -- escape functions and userdata
+         if (not thandled[i]) and type( v ) ~= "userdata" then
+            -- handle index
+            if type( i ) == "table" then
+               if not lookup[i] then
+                  table.insert( tables,i )
+                  lookup[i] = #tables
+               end
+               file:write( charS.."[{"..lookup[i].."}]=" )
+            else
+               local index = ( type( i ) == "string" and "["..exportstring( i ).."]" ) or string.format( "[%d]",i )
+               file:write( charS..index.."=" )
+            end
+            -- handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables,v )
+                  lookup[v] = #tables
+               end
+               file:write( "{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( "loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write( value..","..charE )
+            end
+         end
+      end
+      file:write( "},"..charE )
+   end
+   file:write( "}" )
+   -- Return Values
+   -- return stringtable from string
+   if not filename then
+      -- set marker for stringtable
+      return file.str.."--|"
+   -- return stringttable from file
+   elseif filename == true or filename == 1 then
+      file:seek ( "set" )
+      -- no need to close file, it gets closed and removed automatically
+      -- set marker for stringtable
+      return file:read( "*a" ).."--|"
+   -- close file and return 1
+   else
+      file:close()
+      return 1
+   end
 end
 
-------------
--- Main Code
--------------
--- Prompt for Options
--- Prompt for confirmation using iup.GetParm %b are tick boxes
--- set initial values
-p ={}
-p.a ={text=1,longtext=1,name=1,place=1,wordlist=1}
-p.Sensitive= 0
-p.Confirm  = 1
-p.Whole  = 1
-p.Plain = 1
-bSkip = false
-tblRecord = {}
-tblItem = {}
-tblReplaced = {}
--- Prompt User to Confirm Options
-pprompt = [[Search For: %s
-Replace with: %s
-Confirm Every Change: %b
-Case Sensitive: %b
-Replace in the following Classes %t
-Text fields: %b{Name Prefix/Suffix/Given/Nickname, Attribute values, Cause, Where Within Source, Title, Type, Custom Id, City, State, Postcode, Country, Phone, E-mail, Website, File, Format, Keywords, Sentence, etc.}
-Long Text: %b{Note, Address, Author, Text From Source, Publication Info, Link/Note}
-Names: %b{Name fields only}
-Places: %b{Place fields only}
-Extra Search Options %t
-Plain Text Search: %b{Plain Text or Regular Expression search & replace.}
-Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}]]
+--// The Load Function
+function load( sfile )
+   local tables,err
+   -- catch marker for stringtable
+   if string.sub( sfile,-3,-1 ) == "--|" then
+      tables,err = loadstring( sfile )
+   else
+      tables,err = loadfile( sfile )
+   end
+   if err then return _,err
+   end
+   tables = tables()
+   for idx = 1,#tables do
+      local tolinkv,tolinki = {},{}
+      for i,v in pairs( tables[idx] ) do
+         if type( v ) == "table" and tables[v[1]] then
+            table.insert( tolinkv,{ i,tables[v[1]] } )
+         end
+         if type( i ) == "table" and tables[i[1]] then
+            table.insert( tolinki,{ i,tables[i[1]] } )
+         end
+      end
+      -- link values, first due to possible changes of indices
+      for _,v in ipairs( tolinkv ) do
+         tables[idx][v[1]] = v[2]
+      end
+      -- link indices
+      for _,v in ipairs( tolinki ) do
+         tables[idx][v[2]],tables[idx][v[1]] =  tables[idx][v[1]],nil
+      end
+   end
+   return tables[1]
+end
 
--- Prompt User to Confirm Options
-bOK, strSearch,strReplace,p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.Plain,p.Whole =
-iup.GetParam("Family Historian Text Search and Replace",nil,
-pprompt,
-"","",p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.Plain,p.Whole)
--- Set Values for "odd text fields" from normal text field
-p.a.word = p.a.text
-p.a.wordlist = p.a.text
-strSearchi = strSearch
-if p.Plain == 1 then
-    strSearchi = strPlainText(strSearchi)
+------------------------------------------------------ End Table Load Save
+
+-- import overloads fh functions into table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			table[strIndex] = anyValue
+		end
+	end
+end -- function import
+
+return fh
+
+end -- local function tablex_v1
+
+--[[
+@Title:			+fh+encoder_v2
+@Author:			Mike Tate
+@LastUpdated:	29 Oct 2013
+@Version:			2.2
+@Description:	Text encoder module for HTML XHTML XML URI UTF8 ISO CP1252 character codings.
+@V2.0:				StrUTF8_Encode() replaced by StrUTF_CP1252() for entire UTF-8 range, plus new StrCP1252_ISO().
+@V1.0:				Initial version.
+]]
+
+local function encoder_v2(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh) 													-- All public names are added to local fh table
+
+function ReportVersion()
+	local strMessage = "This is +fh+encoder_v2"
+	print(strMessage)
+	return strMessage
 end
-if p.Sensitive == 0 then
-    strSearchi = nocase(strSearchi)
+
+local br_Tag = "<br />"										-- Markup language break tag default
+local br_Lua = "<br ?/?>"										-- Lua pattern for break tag recognition
+
+local tblCodePage = {}											-- Code Page to XML/XHTML/HTML/URI/UTF8 encodings: http://en.wikipedia.org/wiki/Windows-1252 & 1250 & etc
+
+-- Control characters "\000" to "\031" for URI & Markup "[%c]" encodings are disallowed except for "\t" to "\r"
+
+	tblCodePage["\000"] = ""	-- NUL
+	tblCodePage["\001"] = ""	-- SOH
+	tblCodePage["\002"] = ""	-- STX
+	tblCodePage["\003"] = ""	-- ETX
+	tblCodePage["\004"] = ""	-- EOT
+	tblCodePage["\005"] = ""	-- ENQ
+	tblCodePage["\006"] = ""	-- ACK
+	tblCodePage["\a"] = ""		-- BEL
+	tblCodePage["\b"] = ""		-- BS
+	tblCodePage["\t"] = "+"	-- HT	space  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["\n"] = "%0A"	-- LF	br_Tag in Markup
+	tblCodePage["\v"] = "%0A"	-- VT	br_Tag in Markup
+	tblCodePage["\f"] = "%0A"	-- FF	br_Tag in Markup
+	tblCodePage["\r"] = "%0D"	-- CR	br_Tag in Markup
+	tblCodePage["\014"] = ""	-- SO
+	tblCodePage["\015"] = ""	-- SI
+	tblCodePage["\016"] = ""	-- DLE
+	tblCodePage["\017"] = ""	-- DC1
+	tblCodePage["\018"] = ""	-- DC2
+	tblCodePage["\019"] = ""	-- DC3
+	tblCodePage["\020"] = ""	-- DC4
+	tblCodePage["\021"] = ""	-- NAK
+	tblCodePage["\022"] = ""	-- SYN
+	tblCodePage["\023"] = ""	-- ETB
+	tblCodePage["\024"] = ""	-- CAN
+	tblCodePage["\025"] = ""	-- EM
+	tblCodePage["\026"] = ""	-- SUB
+	tblCodePage["\027"] = ""	-- ESC
+	tblCodePage["\028"] = ""	-- FS
+	tblCodePage["\029"] = ""	-- GS
+	tblCodePage["\030"] = ""	-- RS
+	tblCodePage["\031"] = ""	-- US
+
+-- ASCII characters "\032" to "\127" for URI "[%s%p]" encodings: http://en.wikipedia.org/wiki/URL and http://en.wikipedia.org/wiki/Percent-encoding
+
+	tblCodePage[" "] = "+"		-- or "%20"	Space
+	tblCodePage["!"] = "%21"	-- Reserved character
+	tblCodePage['"'] = "%22"								--	"&quot;" in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["#"] = "%23"	-- Reserved character
+	tblCodePage["$"] = "%24"	-- Reserved character
+	tblCodePage["%"] = "%25"	-- Must be encoded
+	tblCodePage["&"] = "%26"	-- Reserved character	-- "&amp;"  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["'"] = "%27"	-- Reserved character	-- "&apos;" in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["("] = "%28"	-- Reserved character
+	tblCodePage[")"] = "%29"	-- Reserved character
+	tblCodePage["*"] = "%2A"	-- Reserved character
+	tblCodePage["+"] = "%2B"	-- Reserved character
+	tblCodePage[","] = "%2C"	-- Reserved character
+--	tblCodePage["-"] = "%2D"	-- Unreserved character not encoded
+--	tblCodePage["."] = "%2E"	-- Unreserved character not encoded
+	tblCodePage["/"] = "%2F"	-- Reserved character
+--	Digits 0 to 9				-- Unreserved characters not encoded
+	tblCodePage[":"] = "%3A"	-- Reserved character
+	tblCodePage[";"] = "%3B"	-- Reserved character
+	tblCodePage["<"] = "%3C"								-- "&lt;"  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["="] = "%3D"	-- Reserved character
+	tblCodePage[">"] = "%3E"								-- "&gt;"  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["?"] = "%3F"	-- Reserved character
+	tblCodePage["@"] = "%40"	-- Reserved character
+--	Letters A to Z				-- Unreserved characters not encoded
+	tblCodePage["["] = "%5B"	-- Reserved character
+	tblCodePage["\\"]= "%5C"
+	tblCodePage["]"] = "%5D"	-- Reserved character
+	tblCodePage["^"] = "%5E"
+--	tblCodePage["_"] = "%5F"	-- Unreserved character not encoded
+	tblCodePage["`"] = "%60"
+--	Letters a to z				-- Unreserved characters not encoded
+	tblCodePage["{"] = "%7B"
+	tblCodePage["|"] = "%7C"
+	tblCodePage["}"] = "%7D"
+--	tblCodePage["~"] = "%7E"	-- Unreserved character not encoded
+	tblCodePage["\127"] = ""	-- DEL
+
+-- Code Page 1252 Unicode characters "\128" to "\255" for UTF-8 scheme "[Ä-ˇ]" encodings: http://en.wikipedia.org/wiki/UTF-8
+
+	tblCodePage["Ä"] = string.char(0xE2,0x82,0xAC)	-- "&euro;"
+	tblCodePage["\129"] = ""  -- Undefined
+	tblCodePage["Ç"] = string.char(0xE2,0x80,0x9A)
+	tblCodePage["É"] = string.char(0xC6,0x92)
+	tblCodePage["Ñ"] = string.char(0xE2,0x80,0x9E)
+	tblCodePage["Ö"] = string.char(0xE2,0x80,0xA6)
+	tblCodePage["Ü"] = string.char(0xE2,0x80,0xA0)
+	tblCodePage["á"] = string.char(0xE2,0x80,0xA1)
+	tblCodePage["à"] = string.char(0xCB,0x86)
+	tblCodePage["â"] = string.char(0xE2,0x80,0xB0)
+	tblCodePage["ä"] = string.char(0xC5,0xA0)
+	tblCodePage["ã"] = string.char(0xE2,0x80,0xB9)
+	tblCodePage["å"] = string.char(0xC5,0x92)
+	tblCodePage["\141"] = ""  -- Undefined
+	tblCodePage["é"] = string.char(0xC5,0xBD)
+	tblCodePage["\143"] = ""  -- Undefined
+	tblCodePage["\144"] = ""  -- Undefined
+	tblCodePage["ë"] = string.char(0xE2,0x80,0x98)
+	tblCodePage["í"] = string.char(0xE2,0x80,0x99)
+	tblCodePage["ì"] = string.char(0xE2,0x80,0x9C)
+	tblCodePage["î"] = string.char(0xE2,0x80,0x9D)
+	tblCodePage["ï"] = string.char(0xE2,0x80,0xA2)
+	tblCodePage["ñ"] = string.char(0xE2,0x80,0x93)
+	tblCodePage["ó"] = string.char(0xE2,0x80,0x94)
+	tblCodePage["\152"] = string.char(0xCB,0x9C)	-- Small Tilde
+	tblCodePage["ô"] = string.char(0xE2,0x84,0xA2)
+	tblCodePage["ö"] = string.char(0xC5,0xA1)
+	tblCodePage["õ"] = string.char(0xE2,0x80,0xBA)
+	tblCodePage["ú"] = string.char(0xC5,0x93)
+	tblCodePage["\157"] = ""  -- Undefined
+	tblCodePage["û"] = string.char(0xC5,0xBE)
+	tblCodePage["ü"] = string.char(0xC5,0xB8)
+	tblCodePage["\160"] = string.char(0xC2,0xA0)	-- "&nbsp;"	No Break Space
+	tblCodePage["°"] = string.char(0xC2,0xA1)		-- "&iexcl;"
+	tblCodePage["¢"] = string.char(0xC2,0xA2)		-- "&cent;"
+	tblCodePage["£"] = string.char(0xC2,0xA3)		-- "&pound;"
+	tblCodePage["§"] = string.char(0xC2,0xA4)		-- "&curren;"
+	tblCodePage["•"] = string.char(0xC2,0xA5)		-- "&yen;"
+	tblCodePage["¶"] = string.char(0xC2,0xA6)
+	tblCodePage["ß"] = string.char(0xC2,0xA7)
+	tblCodePage["®"] = string.char(0xC2,0xA8)
+	tblCodePage["©"] = string.char(0xC2,0xA9)
+	tblCodePage["™"] = string.char(0xC2,0xAA)
+	tblCodePage["´"] = string.char(0xC2,0xAB)
+	tblCodePage["¨"] = string.char(0xC2,0xAC)
+	tblCodePage["≠"] = string.char(0xC2,0xAD)		-- "&shy;"	Soft Hyphen
+	tblCodePage["Æ"] = string.char(0xC2,0xAE)
+	tblCodePage["Ø"] = string.char(0xC2,0xAF)
+	tblCodePage["∞"] = string.char(0xC2,0xB0)
+	tblCodePage["±"] = string.char(0xC2,0xB1)
+	tblCodePage["≤"] = string.char(0xC2,0xB2)
+	tblCodePage["≥"] = string.char(0xC2,0xB3)
+	tblCodePage["¥"] = string.char(0xC2,0xB4)
+	tblCodePage["µ"] = string.char(0xC2,0xB5)
+	tblCodePage["∂"] = string.char(0xC2,0xB6)
+	tblCodePage["∑"] = string.char(0xC2,0xB7)
+	tblCodePage["∏"] = string.char(0xC2,0xB8)
+	tblCodePage["π"] = string.char(0xC2,0xB9)
+	tblCodePage["∫"] = string.char(0xC2,0xBA)
+	tblCodePage["ª"] = string.char(0xC2,0xBB)
+	tblCodePage["º"] = string.char(0xC2,0xBC)
+	tblCodePage["Ω"] = string.char(0xC2,0xBD)
+	tblCodePage["æ"] = string.char(0xC2,0xBE)
+	tblCodePage["ø"] = string.char(0xC2,0xBF)
+	tblCodePage["¿"] = string.char(0xC3,0x80)
+	tblCodePage["¡"] = string.char(0xC3,0x81)
+	tblCodePage["¬"] = string.char(0xC3,0x82)
+	tblCodePage["√"] = string.char(0xC3,0x83)
+	tblCodePage["ƒ"] = string.char(0xC3,0x84)
+	tblCodePage["≈"] = string.char(0xC3,0x85)
+	tblCodePage["∆"] = string.char(0xC3,0x86)
+	tblCodePage["«"] = string.char(0xC3,0x87)
+	tblCodePage["»"] = string.char(0xC3,0x88)
+	tblCodePage["…"] = string.char(0xC3,0x89)
+	tblCodePage[" "] = string.char(0xC3,0x8A)
+	tblCodePage["À"] = string.char(0xC3,0x8B)
+	tblCodePage["Ã"] = string.char(0xC3,0x8C)
+	tblCodePage["Õ"] = string.char(0xC3,0x8D)
+	tblCodePage["Œ"] = string.char(0xC3,0x8E)
+	tblCodePage["œ"] = string.char(0xC3,0x8F)
+	tblCodePage["–"] = string.char(0xC3,0x90)
+	tblCodePage["—"] = string.char(0xC3,0x91)
+	tblCodePage["“"] = string.char(0xC3,0x92)
+	tblCodePage["”"] = string.char(0xC3,0x93)
+	tblCodePage["‘"] = string.char(0xC3,0x94)
+	tblCodePage["’"] = string.char(0xC3,0x95)
+	tblCodePage["÷"] = string.char(0xC3,0x96)
+	tblCodePage["◊"] = string.char(0xC3,0x97)
+	tblCodePage["ÿ"] = string.char(0xC3,0x98)
+	tblCodePage["Ÿ"] = string.char(0xC3,0x99)
+	tblCodePage["⁄"] = string.char(0xC3,0x9A)
+	tblCodePage["€"] = string.char(0xC3,0x9B)
+	tblCodePage["‹"] = string.char(0xC3,0x9C)
+	tblCodePage["›"] = string.char(0xC3,0x9D)
+	tblCodePage["ﬁ"] = string.char(0xC3,0x9E)
+	tblCodePage["ﬂ"] = string.char(0xC3,0x9F)
+	tblCodePage["‡"] = string.char(0xC3,0xA0)
+	tblCodePage["·"] = string.char(0xC3,0xA1)
+	tblCodePage["‚"] = string.char(0xC3,0xA2)
+	tblCodePage["„"] = string.char(0xC3,0xA3)
+	tblCodePage["‰"] = string.char(0xC3,0xA4)
+	tblCodePage["Â"] = string.char(0xC3,0xA5)
+	tblCodePage["Ê"] = string.char(0xC3,0xA6)
+	tblCodePage["Á"] = string.char(0xC3,0xA7)
+	tblCodePage["Ë"] = string.char(0xC3,0xA8)
+	tblCodePage["È"] = string.char(0xC3,0xA9)
+	tblCodePage["Í"] = string.char(0xC3,0xAA)
+	tblCodePage["Î"] = string.char(0xC3,0xAB)
+	tblCodePage["Ï"] = string.char(0xC3,0xAC)
+	tblCodePage["Ì"] = string.char(0xC3,0xAD)
+	tblCodePage["Ó"] = string.char(0xC3,0xAE)
+	tblCodePage["Ô"] = string.char(0xC3,0xAF)
+	tblCodePage[""] = string.char(0xC3,0xB0)
+	tblCodePage["Ò"] = string.char(0xC3,0xB1)
+	tblCodePage["Ú"] = string.char(0xC3,0xB2)
+	tblCodePage["Û"] = string.char(0xC3,0xB3)
+	tblCodePage["Ù"] = string.char(0xC3,0xB4)
+	tblCodePage["ı"] = string.char(0xC3,0xB5)
+	tblCodePage["ˆ"] = string.char(0xC3,0xB6)
+	tblCodePage["˜"] = string.char(0xC3,0xB7)
+	tblCodePage["¯"] = string.char(0xC3,0xB8)
+	tblCodePage["˘"] = string.char(0xC3,0xB9)
+	tblCodePage["˙"] = string.char(0xC3,0xBA)
+	tblCodePage["˚"] = string.char(0xC3,0xBB)
+	tblCodePage["¸"] = string.char(0xC3,0xBC)
+	tblCodePage["˝"] = string.char(0xC3,0xBD)
+	tblCodePage["˛"] = string.char(0xC3,0xBE)
+	tblCodePage["ˇ"] = string.char(0xC3,0xBF)
+
+-- Code Page 1250 Unicode characters "\128" to "\255" for UTF-8 scheme "[Ä-ˇ]" encodings: http://en.wikipedia.org/wiki/UTF-8
+
+	tblCodePage["1250"] = {}
+	tblCodePage["1250"]["\131"] = ""  -- Undefined
+	tblCodePage["1250"]["\136"] = ""  -- Undefined
+	tblCodePage["1250"]["å"] = string.char(0xC5,0x9A)
+	tblCodePage["1250"]["ç"] = string.char(0xC5,0xA4)
+	tblCodePage["1250"]["é"] = string.char(0xC5,0xBD)
+	tblCodePage["1250"]["è"] = string.char(0xC5,0xB9)
+	tblCodePage["1250"]["\152"] = ""  -- Undefined
+	tblCodePage["1250"]["ú"] = string.char(0xC5,0x9B)
+	tblCodePage["1250"]["ù"] = string.char(0xC5,0xA5)
+	tblCodePage["1250"]["û"] = string.char(0xC5,0xBE)
+	tblCodePage["1250"]["ü"] = string.char(0xC5,0xBA)
+	tblCodePage["1250"]["°"] = string.char(0xCB,0x87)
+	tblCodePage["1250"]["¢"] = string.char(0xCB,0x98)
+	tblCodePage["1250"]["£"] = string.char(0xC5,0x81)
+	tblCodePage["1250"]["•"] = string.char(0xC4,0x84)
+	tblCodePage["1250"]["™"] = string.char(0xC5,0x9E)
+	tblCodePage["1250"]["Ø"] = string.char(0xC5,0xBB)
+	tblCodePage["1250"]["≤"] = string.char(0xCB,0x9B)
+	tblCodePage["1250"]["≥"] = string.char(0xC5,0x82)
+	tblCodePage["1250"]["π"] = string.char(0xC4,0x85)
+	tblCodePage["1250"]["∫"] = string.char(0xC5,0x9F)
+	tblCodePage["1250"]["º"] = string.char(0xC5,0x7D)
+	tblCodePage["1250"]["Ω"] = string.char(0xCB,0x9D)
+	tblCodePage["1250"]["æ"] = string.char(0xC5,0x7E)
+	tblCodePage["1250"]["ø"] = string.char(0xC5,0xBC)
+-- needs more 1250 codes hereon...
+	tblCodePage["1250"]["∆"] = string.char(0xC4,0x86)
+
+	tblCodePage["1250"]["»"] = string.char(0xC4,0x8C)
+
+	tblCodePage["1250"]["Ê"] = string.char(0xC4,0x87)
+
+	tblCodePage["1250"]["Ë"] = string.char(0xC4,0x8D)
+
+
+-- Set XML/XHTML/HTML "[%c\"&'<>]" Markup encodings: http://en.wikipedia.org/wiki/XML and http://en.wikipedia.org/wiki/HTML
+local function setMarkupEncodings()
+	tblCodePage["\t"] = " "		-- HT	"\t" to "\r" are treated as white space in Markup Languages by default
+	tblCodePage["\n"] = br_Tag	-- LF	
+	tblCodePage["\v"] = br_Tag	-- VT	line break tag	"<br>" or "<br >" or "<br/>" or "<br />" is better
+	tblCodePage["\f"] = br_Tag	-- FF
+	tblCodePage["\r"] = br_Tag	-- CR
+	tblCodePage['"']  = "&quot;"
+	tblCodePage["&"]  = "&amp;"
+	tblCodePage["'"]  = "&apos;"
+	tblCodePage["<"]  = "&lt;"
+	tblCodePage[">"]  = "&gt;"
+end -- local function setMarkupEncodings
+
+-- Set URI/URL/URN "[%s%p]" encodings: http://en.wikipedia.org/wiki/URL and http://en.wikipedia.org/wiki/Percent-encoding
+local function setURIEncodings()
+	tblCodePage["\t"] = "+"		-- HT	space
+	tblCodePage["\n"] = "%0A" 	-- LF	newline
+	tblCodePage["\v"] = "%0A" 	-- VT	newline
+	tblCodePage["\f"] = "%0A" 	-- FF	newline
+	tblCodePage["\r"] = "%0D" 	-- CR	return
+	tblCodePage['"']  = "%22"
+	tblCodePage["&"]  = "%26"
+	tblCodePage["'"]  = "%27"
+	tblCodePage["<"]  = "%3C"
+	tblCodePage[">"]  = "%3E"
+end -- local function setURIEncodings
+
+-- Encode characters according to gsub pattern & lookup table --
+local function strEncode(strText,strPattern,tblPattern)
+	strText = (strText or ""):gsub(strPattern,tblPattern)
+	return strText
+end -- local function strEncode
+
+-- Encode CP characters into UTF8 codes --
+function StrCP_UTF(strText)
+	strText = strEncode(strText,"[\127-ˇ]",tblCodePage)
+	return strText
+end -- function StrCP_UTF
+
+function StrCP1252_UTF(strText)
+	return StrCP_UTF(strText)
+end -- function StrCP1252_UTF
+
+-- Encode CP characters into XML/XHTML/HTML/UTF8 codes --
+function StrCP_XML(strText)
+	setMarkupEncodings()
+	strText = (strText or ""):gsub(br_Lua,"\n")		-- Convert <br> & <br > & <br/> & <br /> to \n that becomes br_Tag
+	strText = strEncode(strText,"[%c\"&'<>\127-ˇ]",tblCodePage)
+	return strText
+end -- function StrCP_XML
+
+function StrCP1252_XML(strText)
+	return StrCP_XML(strText)
+end -- function StrCP1252_XML
+
+-- Encode Item Text characters into XML/HTML/UTF8 codes --
+function StrGetItem_XML(ptrItem,strTags)
+	return StrCP_XML(fhGetItemText(ptrItem,strTags))
+end -- function StrGetItem_XML
+
+-- Encode CP characters into URI codes --
+function StrCP_URI(strText)
+	setURIEncodings()
+	strText = (strText or ""):gsub(br_Lua,"\n")		-- Convert <br> & <br > & <br/> & <br /> to \n that becomes %0A
+	strText = strEncode(strText,"[%c%s%p\127-ˇ]",tblCodePage)
+	return strText
+end -- function StrCP_URI
+
+function StrCP1252_URI(strText)
+	return StrCP_URI(strText)
+end -- function StrCP1252_URI
+
+-- Encode UTF-8 bytes into single CP character -- Legacy from V1.0
+function StrUTF8_Encode(strText)
+	return StrUTF_CP(strText)
+end -- function StrUTF8_Encode
+
+-- Encode UTF-8 bytes into single CP character V2.0 upvalues --
+local strByteRange = "["..string.char(0xC0).."-"..string.char(0xFF).."]"
+local tblBytePoint = {0xC0,0xE0,0xF0,0xF8,0xFC}		-- Byte codes for 2-byte, 3-byte, 4-byte, 5-byte, 6-byte UTF-8
+local tblUTF8 = {}
+for strByte = string.byte("Ä"), string.byte("ˇ") do
+	local strChar = string.char(strByte)				-- Use CodePage to UTF-8 table to populate UTF-8 to CodePage table
+	local strCode = tblCodePage[strChar]
+	tblUTF8[strCode] = strChar
 end
-if bOK then
-    -- Swap 1 for true
-    for strType,Value in pairs(p.a) do
-        p.a[strType] = (Value == 1)
-    end
-    DoAllItems('text',p.a,Replace)
-    if #tblRecord == 0 then
-        fhMessageBox('No Items Replaced')
-    else
-        -- Output Result Set
-        strTitle = 'Search and Replace Results '
-        strSubTitle = 'Replacing '..strSearch..' with '..strReplace
-        fhOutputResultSetTitles(strTitle..strSubTitle,strTitle, strSubTitle.." Date: %#x")
-        fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
-        fhOutputResultSetColumn("Item", "item", tblItem, #tblRecord, 180, "align_left")
-        fhOutputResultSetColumn("Old Value", "text", tblReplaced, #tblRecord, 180, "align_left")
-    end
+
+-- Encode UTF-8 bytes into single CP character --
+function StrUTF_CP(strText)
+	strText = strText or ""
+	if strText:match(strByteRange) then					-- If text contains characters that need translating then
+		local intChar = 0									-- Input character index
+		local strChar = ""									-- Current character
+		local strCode = ""									-- UTF-8 multi-byte code
+		local tblLine = {}									-- Translated output line
+		repeat
+			intChar = intChar + 1							-- Step through each character in text
+			strChar = strText:sub(intChar,intChar)
+			if strChar:match(strByteRange) then			-- Convert UTF-8 bytes into CP character
+				strCode = strChar							-- First UTF-8 byte code, whose top bits say how many bytes to append
+				for intByte, strByte in ipairs(tblBytePoint) do
+					if string.byte(strChar) >= strByte then
+						intChar = intChar + 1				-- Append next UTF-8 byte code character
+						strCode = strCode..strText:sub(intChar,intChar)
+					else
+						break
+					end 
+				end
+				strChar = tblUTF8[strCode] or "ø"		-- Translate UTF-8 code into CP character
+			end
+			table.insert(tblLine,strChar)				-- Accumulate output char by char
+		until intChar >= #strText
+		strText = table.concat(tblLine)
+	end
+	return strText
+end -- function StrUTF_CP
+
+function StrUTF_CP1252(strText)
+	return StrUTF_CP(strText)
+end -- function StrUTF_CP1252
+
+-- Encode CP characters into ISO-8859-1 codes --
+function StrCP_ISO(strText)
+	-- Set ISO-8859-1 "[\127-ü]" encodings: http://en.wikipedia.org/wiki/ISO/IEC_8859-1
+	local tblCodePage = { }
+	tblCodePage["\127"] = ""  -- DEL
+	tblCodePage["Ä"] = "EUR"	
+	tblCodePage["\129"] = ""  -- Undefined
+	tblCodePage["Ç"] = "∏"
+	tblCodePage["É"]  = "f"
+	tblCodePage["Ñ"] = "∏∏"
+	tblCodePage["Ö"] = "..."
+	tblCodePage["Ü"] = "+"
+	tblCodePage["á"] = "±"
+	tblCodePage["à"]  = "^"
+	tblCodePage["â"] = "%"
+	tblCodePage["ä"] = "S"
+	tblCodePage["ã"] = "<"
+	tblCodePage["å"] = "OE"
+	tblCodePage["\141"] = ""  -- Undefined
+	tblCodePage["é"] = "Z"
+	tblCodePage["\143"] = ""  -- Undefined
+	tblCodePage["\144"] = ""  -- Undefined
+	tblCodePage["ë"] = "'"
+	tblCodePage["í"] = "'"
+	tblCodePage["ì"] = '"'
+	tblCodePage["î"] = '"'
+	tblCodePage["ï"] = "∫"
+	tblCodePage["ñ"] = "-"
+	tblCodePage["ó"] = "-"
+	tblCodePage["\152"] = "~" -- Small Tilde
+	tblCodePage["ô"] = "TM"
+	tblCodePage["ö"] = "s"
+	tblCodePage["õ"] = ">"
+	tblCodePage["ú"] = "oe"
+	tblCodePage["\157"] = ""  -- Undefined
+	tblCodePage["û"] = "z"
+	tblCodePage["ü"] = "Y"
+	strText = strEncode(strText,"[\127-ü]",tblCodePage)
+	return strText
+end -- local function StrCP_ISO
+
+function StrCP1252_ISO(strText)
+	return StrCP_ISO(strText)
+end -- local function StrCP1252_ISO
+
+-- Set markup language break tag --
+function SetBreakTag(br_New)
+	if not (br_New or ""):match(br_Lua) then			-- Ensure new break tag is "<br>" or "<br >" or "<br/>" or "<br />"
+		br_New = "<br />"
+	end
+	br_Tag = br_New
+end -- function SetBreakTag
+
+require "luacom"
+local function getRegKey(strKey)
+	local luaShell = luacom.CreateObject "WScript.Shell"
+	local strValue 
+	if pcall( function() strValue = luaShell:RegRead(strKey) end ) then
+		return strValue, false
+	else
+		return nil, true
+	end
+end -- local function getRegKey
+
+local strCodePage, isError = getRegKey("HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage\\ACP")
+if isError then
+	error("\nCode Page ACP Registry Key Not Found.\n")
+end
+
+if strCodePage == "1252" then
+	-- do nothing as this is default
+elseif tblCodePage[strCodePage] then
+	for strByte = string.byte("Ä"), string.byte("ˇ") do
+		local strChar = string.char(strByte)				-- Use CodePage to UTF-8 table to populate UTF-8 to CodePage table
+		tblCodePage[strChar] = tblCodePage[strCodePage][strChar] or tblCodePage[strChar]
+	end
 else
-    return
+	error("\nCode Page "..strCodePage.." is not supported\n")
 end
+
+return fh
+
+end -- local function encoder_v2
+
+--[[
+@Title:			+fh+general_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	A general functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function general_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "lfs"													-- To access LUA filing system
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+--	return pl.path.isfile(strFileName)
+---[=[
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFileExists
+
+-- Check if folder exists --
+function FlgFolderExists(strFolderName)
+--	return pl.path.isdir(strFolderName)
+---[=[
+	if lfs.attributes(strFolderName:gsub("\\$",""),"mode") == "directory" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFolderExists
+
+-- Check if folder writable --
+function FlgFolderWrite(strFolderName)
+	if FlgFolderExists(strFolderName) then
+		local fileHandle, strError = io.open(strFolderName.."\\xyz.xyz","w")
+		if fileHandle ~= nil then
+			fileHandle:close()
+			os.remove(strFolderName.."\\xyz.xyz")
+			return true
+		end
+	end
+	return false
+end -- function FlgFolderWrite
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if fileHandle == nil then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+	local fileHandle = OpenFile(strFileName,"r")
+	local strString = fileHandle:read("*all")
+	assert(fileHandle:close())
+	return strString
+end -- function StrLoadFromFile
+
+-- Return the Path, Filename, and extension as 3 values
+function SplitFilename(strFilename)
+	return strFilename:match("(.-)([^\\]-([^\\%.]+))$")
+end -- function SplitFilename
+
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+	if strDir:sub(-1) == "/" then
+		strDir = strDir:sub(1,-2)								-- Remove trailing "/"
+	end
+    
+	local function doYieldTree(strDir)
+--!		for strEntry in pl.path.dir(strDir) do
+		for strEntry in lfs.dir(strDir) do
+			if strEntry ~= "." and strEntry ~= ".." then
+				strEntry = strDir.."\\"..strEntry
+				local tblAttr, strError = lfs.attributes(strEntry)
+				if not tblAttr then tblAttr = { mode="attrfail", error=strError } end 
+				coroutine.yield(strEntry,tblAttr)
+				if tblAttr.mode == "directory" then
+					doYieldTree(strEntry)
+				end
+			end
+		end
+	end -- local function doYieldTree
+
+	return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+
+local function strErrorText(strError,strFileName,intRepeat)
+	return strError:gsub(strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")
+end -- local function strErrorText
+
+-- Delete file if it exists --
+function DeleteFile(strFileName,errFunction)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				if intRepeat > 1 and type(errFunction) == "function" then
+					errFunction(strErrorText(strError,strFileName,intRepeat))
+				end
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(strErrorText(strError,strFileName,intRepeat)) end
+		end
+	end
+end -- function DeleteFile
+
+-- Invoke FH Shell Execute API --
+function DoExecute(strExecutable,...)
+	local errFunction = fhMessageBox
+	if type(arg[#arg]) == 'function' then
+		errFunction = arg[#arg]
+		table.remove(arg)
+	end
+	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable,unpack(arg))
+	if not isOK then
+		errFunction(tostring(strErrorText).." ("..tostring(intErrorCode)..")")
+	end
+	return isOK
+end -- function DoExecute
+
+--[[
+@function:		BuildDataRef
+@description:	Get Full Data Reference for Pointer
+@parameters:		Item Pointer
+@returns:			Data Reference String, Record Id Integer, Record Type Tag String
+@requires:		None
+]]
+function BuildDataRef(ptrRef)
+
+	local strDataRef = ""										-- Data Reference with instance indices e.g. INDI.RESI[2].ADDR
+	local intRecId   = 0										-- Record Id for associated Record
+	local strRecTag  = ""										-- Record Tag of associated Record type i.e. INDI, FAM, NOTE, SOUR, etc
+
+	-- getDataRef() is called recursively per level of the Data Ref
+	-- ptrRef points to the upper Data Ref levels yet to be analysed
+	-- strRef compiles the lower Data Ref levels including instances
+
+	local function getDataRef(ptrRef,strRef)
+		local ptrTag = ptrRef:Clone()
+		local strTag = fhGetTag(ptrTag)						-- Current level Tag
+		ptrTag:MoveToParentItem(ptrTag)
+		if ptrTag:IsNotNull() then							-- Parent level exists
+			local intSib = 1
+			local ptrSib = ptrRef:Clone()					-- Pointer to siblings with same Tag
+			ptrSib:MovePrev("SAME_TAG")
+			while ptrSib:IsNotNull() do						-- Count previous siblings with same Tag
+				intSib = intSib + 1
+				ptrSib:MovePrev("SAME_TAG")
+			end
+			if intSib > 1 then 	strTag = strTag.."["..intSib.."]" end
+			getDataRef(ptrTag,"."..strTag..strRef)			-- Now analyse the parent level
+		else
+			strDataRef = strTag..strRef						-- Record level reached, so set return values
+			intRecId   = fhGetRecordId(ptrRef)
+			strRecTag  = strTag
+			if not fhIsValidDataRef(strDataRef) then print("BuildDataRef: "..strDataRef.." is Invalid") end
+		end
+	end -- local function getDataRef
+
+	if type(ptrRef) == "userdata" then getDataRef(ptrRef,"") end
+
+	return strDataRef, intRecId, strRecTag
+
+end -- function BuildDataRef
+
+--[[
+@function:		GetDataRefPtr
+@description:	Get Pointer for Full Data Reference
+@parameters:		Data Reference String, Record Id Integer, Record Type Tag String (optional)
+@returns:			Item Pointer which IsNull() if any parameters are invalid
+@requires:		None
+]]
+function GetDataRefPtr(strDataRef,intRecId,strRecTag)
+	strDataRef = strDataRef or ""
+	if not strRecTag then
+		strRecTag = strDataRef:gsub("^(%u+).*$","%1")	-- Extract Record Tag from Data Ref
+	end
+	local ptrRef = fhNewItemPtr()
+	ptrRef:MoveToRecordById(strRecTag,intRecId or 0)	-- Lookup the Record by Id
+	ptrRef:MoveTo(ptrRef,strDataRef)						-- Move to the Data Ref
+	return ptrRef
+end -- function GetDataRefPtr
+
+function TblDataRef(ptrRef)
+	local tblRef = {}
+	tblRef.DataRef, tblRef.RecId, tblRef.RecTag = BuildDataRef(ptrRef)
+	return tblRef
+end -- function TblDataRef
+
+function PtrDataRef(tblRef)
+	local tblRef = tblRef or {}								-- Ensure table and its fields exist
+	return GetDataRefPtr(tblRef.DataRef or "",tblRef.RecId or 0,tblRef.RecTag or "")
+end -- function PtrDataRef
+
+return fh
+
+end -- local function general_v1
+
+--[[
+@Module:			fh.iterate_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	An iterater functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function iterate_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+-- Iterator for all records of one chosen type --
+function Records(strType)
+	local ptrAll = fhNewItemPtr()							-- Pointer to all records in turn
+	local ptrRec = fhNewItemPtr()							-- Pointer to record returned to user
+	ptrAll:MoveToFirstRecord(strType)
+	return function ()
+		ptrRec:MoveTo(ptrAll)
+		ptrAll:MoveNext()
+		if ptrRec:IsNotNull() then return ptrRec end
+	end
+end -- function Records
+
+-- Iterator for all the record types --
+function RecordTypes()
+	local intNext = 0											-- Next record type number
+	local intLast = fhGetRecordTypeCount()					-- Last record type number
+	return function()
+		intNext = intNext + 1
+		if intNext <= intLast then
+			return fhGetRecordTypeTag(intNext)				-- Return record type tag
+		end
+	end
+end -- function RecordTypes
+
+-- Iterator for all items in all records of chosen types --
+function Items(...)
+	local intType = 1											-- Integer record type number
+	local tblType = {}											-- Table of record type tags
+	local ptrNext = fhNewItemPtr()							-- Pointer to next item in turn
+	local ptrItem = fhNewItemPtr()							-- Pointer to item returned to user
+
+	if #arg == 0 then
+		for intType = 1, fhGetRecordTypeCount() do		-- No parameters so use all record types
+			tblType[intType] = fhGetRecordTypeTag(intType)
+		end
+	else
+		tblType = arg											-- Got parameters so use them instead
+	end
+--	print(tblType[intType],intType)
+	ptrNext:MoveToFirstRecord(tblType[intType])			-- Get first record of first type
+
+	return function()
+		repeat
+			while ptrNext:IsNotNull() do						-- Loop through all items
+				ptrItem:MoveTo(ptrNext)
+				ptrNext:MoveNextSpecial()
+				if ptrItem:IsNotNull() then return ptrItem end
+			end
+			intType = intType + 1								-- Loop through each record type
+			if intType <= #tblType then
+				ptrNext:MoveToFirstRecord(tblType[intType])
+			end
+		until intType > #tblType
+	end
+end -- function Items
+
+-- Iterator for all facts of an individual --
+function Facts(ptrIndi)
+	local ptrItem = fhNewItemPtr()							-- Pointer to each item at level 1
+	local ptrFact = fhNewItemPtr()							-- Pointer to each fact returned to user
+	ptrItem:MoveToFirstChildItem(ptrIndi)
+	return function ()
+		while ptrItem:IsNotNull() do
+			ptrFact:MoveTo(ptrItem)
+			ptrItem:MoveNext()
+			if fhIsFact(ptrFact) then return ptrFact end
+		end
+	end
+end -- function Facts
+
+return fh
+
+end -- local function iterate_v1
+
+--[[
+@Module:			fh.progbar_v1
+@Author:			Mike Tate
+@LastUpdated:	26 Feb 2014
+@Version:			1.2
+@Description:	Progress Bar library module.
+@V1.0:				Initial version.
+]]
+
+local function progbar_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "iuplua"												-- To access GUI window builder
+
+local tblBars = {}												-- Table for optional external attributes
+local strBack = "255 255 255"								-- Background colour default is white
+local strBody = "0 0 0"										-- Body text colour default is black
+local strFont = nil												-- Font dialogue default is current font
+local strStop = "255 0 0"										-- Stop button colour default is red
+local intPosX = iup.CENTER									-- Show window default position is central
+local intPosY = iup.CENTER
+local intMax, intVal, intPercent, intStart, intDelta, intScale, strClock, isBarStop
+local lblText, barGauge, lblDelta, btnStop, dlgGauge
+
+local function doFocus()										-- Bring the Progress Bar window into Focus
+	dlgGauge.BringFront="YES"									-- If used too often, inhibits other windows scroll bars, etc
+end -- local function doFocus
+
+local function doUpdate()										-- Update the Progress Gauge and the Delta % with clock
+	barGauge.Value = intVal
+	lblDelta.Title = string.format("%4d %%      %s ",intPercent,strClock)
+end -- local function doUpdate
+
+local function doReset()										-- Reset all dialogue variables and Update display
+	intVal		= 0													-- Current value of Progress Bar
+	intPercent= 0.01											-- Percentage of progress
+	intStart	= os.time()										-- Start time of progress
+	intDelta	= 0													-- Delta time of progress
+	intScale	= math.ceil( intMax / 1000 )					-- Scale of percentage per second of progress (initial guess is corrected in Step function)
+	strClock	= "00 : 00 : 00"								-- Clock delta time display
+	isBarStop	= false											-- Stop button pressed signal
+	doUpdate()
+	doFocus()
+end -- local function doReset
+
+function Start(strTitle,intMaximum)							-- Create & start Progress Bar window
+	if not dlgGauge then
+		strTitle	= strTitle or ""							-- Dialogue and button title
+		intMax		= intMaximum or 100							-- Maximun range of Progress Bar, default is 100
+		local strSize = tostring( math.max( 100, string.len(" Stop "..strTitle) * 8 ) ).."x30"			-- Adjust Stop button size to Title
+		lblText	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Progress Message" }
+		barGauge	= iup.progressbar { RasterSize="400x30", Value=0, Max=intMax, Tip="Progress Bar" }
+		lblDelta	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Percentage and Elapsed Time" }
+		btnStop	= iup.button	{ Title=" Stop "..strTitle, RasterSize=strSize, FgColor=strStop, Tip="Stop Progress Button", action=function() isBarStop = true end }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
+		dlgGauge	= iup.dialog	{ Title=strTitle.." Progress ", Font=strFont, FgColor=strBody, Background=strBack, DialogFrame="YES",	-- Remove Windows minimize/maximize menu
+							iup.vbox{ Alignment="ACENTER", Gap="10", Margin="10x10",
+								lblText,
+								barGauge,
+								lblDelta,
+								btnStop,
+							},
+							move_cb	= function(self,x,y) tblBars.X = x tblBars.Y = y end,
+							close_cb	= btnStop.action,		-- Windows Close button = Stop button
+						}
+		if type(tblBars.GUI) == "table"
+		and type(tblBars.GUI.ShowDialogue) == "function" then
+			dlgGauge.move_cb = nil								-- Use GUI library to show & move window
+			tblBars.GUI.ShowDialogue("Bars",dlgGauge,btnStop,"showxy")
+		else
+			dlgGauge:showxy(intPosX,intPosY)				-- Show the Progress Bar window
+		end
+		doReset()													-- Reset the Progress Bar display
+	end
+end -- function Start
+
+function Message(strText)										-- Show the Progress Bar message
+	if dlgGauge then lblText.Title = strText end
+end -- function Message
+
+function Step(intStep)											-- Step the Progress Bar forward
+	if dlgGauge then
+		intVal = intVal + ( intStep or 1 )					-- Default step is 1
+		local intNew = math.ceil( intVal / intMax * 100 * intScale ) / intScale
+		if intPercent ~= intNew then							-- Update progress once per percent or per second, whichever is smaller
+			intPercent = math.max( 0.1, intNew )			-- Ensure percentage is greater than zero
+			if intVal > intMax then intVal = intMax intPercent = 100 end		-- Ensure values do not exceed maximum
+			intNew = os.difftime(os.time(),intStart)
+			if intDelta < intNew then							-- Update clock of elapsed time
+				intDelta = intNew
+				intScale = math.ceil( intDelta / intPercent )	-- Scale of seconds per percentage step
+				local intHour = math.floor( intDelta / 3600 )
+				local intMins = math.floor( intDelta / 60 - intHour * 60 )
+				local intSecs = intDelta - intMins * 60 - intHour * 3600
+				strClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+			end
+			doUpdate()											-- Update the Progress Bar display
+		end
+		iup.LoopStep()
+	end
+end -- function Step
+
+function Focus()												-- Bring the Progress Bar window to front
+	if dlgGauge then doFocus() end
+end -- function Focus
+
+function Reset()												-- Reset the Progress Bar display
+	if dlgGauge then doReset() end
+end -- function Reset
+
+function Stop()													-- Check if Stop button pressed
+	iup.LoopStep()
+	return isBarStop
+end -- function Stop
+
+function Close()												-- Close the Progress Bar window
+	isBarStop = false
+	if dlgGauge then dlgGauge:destroy() dlgGauge = nil end
+end -- function Close
+
+function Setup(tblSetup)										-- Setup optional table of external attributes
+	if tblSetup then
+		tblBars = tblSetup
+		strBack = tblBars.Back or strBack					-- Background colour
+		strBody = tblBars.Body or strBody					-- Body text colour
+		strFont = tblBars.Font or strFont					-- Font dialogue
+		strStop = tblBars.Stop or strStop					-- Stop button colour
+		intPosX = tblBars.X or intPosX						-- Window position
+		intPosY = tblBars.Y or intPosY
+	end
+end -- function Setup
+
+return fh
+
+end -- local function progbar_v1
+
+--[[
+@Title:			+fh+iup_gui_v2
+@Author:			Mike Tate
+@Version:			2.9
+@LastUpdated:	13 Apr 2014
+@Description:	Graphical User Interface Library Module
+@V2.0:				Second version with Plugin Data scope, new FontDialogue, RefreshDialogue, AssignAttributes, httpRequest handler, keep "dialog" mode.
+@V1.0:				Initial version.
+]]
+
+local function iup_gui_v2(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}																		-- Local environment table
+package.seeall(fh)																	-- Enable all globals
+module(...,package.seeall)														-- Create matching module name
+setfenv(1,fh)																		-- All public names are added to local fh table
+
+require "iuplua"																	-- To access GUI window builder
+require "iupluacontrols"															-- To access GUI window controls
+require "lfs"																		-- To access LUA filing system
+require "iupluaole"																	-- To access OLE subsystem
+require "luacom"																	-- To access COM subsystem
+
+local general = general_v1														-- To access FH general module
+local stringx = stringx_v2														-- To access FH stringx module but cannot import
+
+function ReportVersion()
+	local strMessage = "This is +fh+iup_gui_v2"
+	print(strMessage)
+	return strMessage
+end
+
+-- Shared Interface Attributes & Functions --
+
+Plugin		= fhGetContextInfo("CI_PLUGIN_NAME")								-- Plugin Name
+Version	= " "																		-- Plugin Version
+History	= Version																	-- Version History
+
+Red			= "255 0 0"																-- Color attributes (must exclude leading zeros & spaces to allow value comparisons)
+Maroon		= "128 0 0"
+Amber		= "250 160 0"
+Orange		= "255 165 0"
+Yellow		= "255 255 0"
+Olive		= "128 128 0"
+Lime		= "0 255 0"
+Green		= "0 128 0"
+Cyan		= "0 255 255"
+Teal		= "0 128 128"
+Blue		= "0 0 255"
+Navy		= "0 0 128"
+Magenta	= "255 0 255"
+Purple		= "128 0 128"
+Black		= "0 0 0"
+Gray		= "128 128 128"
+Silver		= "192 192 192"
+Smoke		= "240 240 240"
+White		= "255 255 255"
+Risk		= Red																		-- Risk colour for hazardous controls such as Close/Delete buttons
+Warn		= Magenta																	-- Warn colour for caution controls and warnings
+Safe		= Green																	-- Safe colour for active controls such as most buttons
+Info		= Black																	-- Info colour for text controls such as labels/tabs
+Head		= Black																	-- Head colour for headings
+Body		= Black																	-- Body colour for body text
+Back		= White																	-- Background colour for all windows
+
+Gap			= "8"																		-- Layout attributes Gap was "10"
+Border		= "8x8"																	-- 	was BigMargin="10x10"
+Margin		= "1x1"																	--	was MinMargin
+Balloon	= "NO"																		-- Tooltip balloon mode
+
+FontSet	=	0																		-- Legacy GUI font set assigned by FontAssignment but used globally
+FontHead	= ""
+FontBody	= ""
+
+local GUI = { }																		-- Sub-table for GUI Dialogue attributes to allow any "Name"
+
+--[[
+GUI.Name					table of dialogue attributes, where Name is Font, Help, Main, Memo, Bars, etc
+GUI.Name.CoordX			x co-ordinate	( Loaded & Saved by default )
+GUI.Name.CoordY			y co-ordinate	( Loaded & Saved by default )
+GUI.Name.Dialog			dialogue handle
+GUI.Name.Focus			focus button handle
+GUI.Name.Frame			dialogframe mode, "normal" = dialogframe="NO" else "YES", "showxy" = showxy(), "popup" or "keep" = popup(), default is "normal & showxy"
+GUI.Name.Height			height
+GUI.Name.Raster			rastersize		( Loaded & Saved by default )
+GUI.Name.Width			width
+GUI.Name.Back			ProgressBar background colour
+GUI.Name.Body			ProgressBar body text colour
+GUI.Name.Font			ProgressBar font style
+GUI.Name.Stop			ProgressBar Stop button colour
+GUI.Name.GUI				Module table usable by other modules e.g. progbar.Setup
+							Help dialogue Window attributes :-
+GUI.Help.GetHelp 		Parent dialogue GetHelp button
+GUI.Help.RootURL 		Wiki Help & Advice root URL
+GUI.Help.TblAttr		Table of button attributes
+GUI.Help[n]				Help dialogue nth button :-
+GUI.Help[n].Name		Name for title attribute
+GUI.Help[n].Tip 		Tooltip for tip attribute
+GUI.Help[n].URL 		Page URL to append to root URL 
+GUI.Help[n].Page		Page order for intTabPosn
+--]]
+
+-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+local tblScrn = stringx.splitnumbers(iup.GetGlobal("VIRTUALSCREEN"))	-- Used by CustomDialogue() and CheckWindowPosition() and ShowDialogue() below
+local intMaxW = tblScrn[3]
+local intMaxH = tblScrn[4]
+
+local function tblOfNames(...)													-- Get table of dialogue Names including "Font","Help","Main" by default
+	local tblNames = {"Font","Help","Main"}
+	for intName, strName in ipairs(arg) do
+		if type(strName) == "string"
+		and strName ~= "Font"
+		and strName ~= "Help"
+		and strName ~= "Main" then
+			table.insert(tblNames,strName)
+		end
+	end
+	return tblNames
+end -- local function tblOfNames
+
+local function tblNameFor(strName)												-- Get table of parameters for chosen dialogue Name
+	strName = tostring(strName)
+	if not GUI[strName] then														-- Need new table with default minimum & raster size, and X & Y co-ordinates
+		GUI[strName] = { }
+		local tblName = GUI[strName]
+		tblName.Raster = "x"
+		tblName.CoordX = iup.CENTER
+		tblName.CoordY = iup.CENTER
+	end
+	return GUI[strName]
+end -- local function tblNameFor
+
+local function intDimension(intMin,intVal,intMax)							-- Return a number bounded by intMin and intMax
+	if not intVal then return 0 end												-- Except if no value then return 0
+	intVal = tonumber(intVal) or (intMin+intMax)/2
+	return math.max(intMin,math.min(intVal,intMax))
+end -- local function intDimension
+
+function CustomDialogue(strName,strRas,intX,intY)							-- GUI custom window raster size, and X & Y co-ordinates
+	-- strRas  nil = old size, "x" or "0x0" = min size, "999x999" = new size
+	-- intX/Y  nil = central, "99" = co-ordinate position
+	local tblName = tblNameFor(strName)
+	local tblSize = {}
+	local intWide = 0
+	local intHigh = 0
+	strRas = strRas or tblName.Raster
+	if strRas then																	-- Ensure raster size is between minimum and screen size
+		tblSize = stringx.splitnumbers(strRas)
+		intWide = intDimension(intWide,tblSize[1],intMaxW)
+		intHigh = intDimension(intHigh,tblSize[2],intMaxH)
+		strRas = tostring(intWide.."x"..intHigh)
+	end
+	if intX then intX = intDimension(0,intX,intMaxW-intWide) end			-- Ensure X & Y co-ordinates position window on screen
+	if intY then intY = intDimension(0,intY,intMaxH-intHigh) end
+	tblName.Raster  = strRas	or "x"
+	tblName.CoordX  = tonumber(intX) or iup.CENTER
+	tblName.CoordY  = tonumber(intY) or iup.CENTER
+end -- function CustomDialogue
+
+function DefaultDialogue(...)													-- GUI default window minimum & raster size, and X & Y co-ordinates
+	for intName, strName in ipairs(tblOfNames(...)) do
+		CustomDialogue(strName)
+	end
+end -- function DefaultDialogue
+
+function DialogueAttributes(strName)											-- Provide named Dialogue Attributes
+	local tblName = tblNameFor(strName)											-- tblName.Dialog = dialog handle, so any other attributes could be retrieved
+	local tblSize = stringx.splitnumbers(tblName.Raster or "x")			-- Split Raster Size into width=tblSize[1] and height=tblSize[2]
+	tblName.Width  = tblSize[1]
+	tblName.Height = tblSize[2]
+	tblName.Back = Back																-- Following only needed for NewProgressBar
+	tblName.Body = Body
+	tblName.Font = FontBody
+	tblName.Stop = Risk
+	tblName.GUI  = fh																-- Module table
+	return tblName
+end -- function DialogueAttributes
+
+local strDefaultScope = "Project"												-- Default scope for Load/Save data is per Project/User/Machine as set by PluginDataScope()
+
+local tblLoadProj = {}
+local tblLoadUser = {}
+local tblLoadMach = {}
+
+local function doLoadData(strParam,strDefault,strScope)					-- Load sticky data for Plugin Data scope
+	strScope = tostring(strScope or strDefaultScope):lower()
+	local tblLoadData = tblLoadProj
+	if     strScope:match("user") then tblLoadData = tblLoadUser
+	elseif strScope:match("mach") then tblLoadData = tblLoadMach
+	end
+	return tblLoadData[strParam] or strDefault
+end -- local function doLoadData
+
+function LoadLocal(strParam,strDefault,strScope)							-- Load Local Parameter for this PC
+	return doLoadData(ComputerName.."-"..strParam,strDefault,strScope)
+end -- function LoadLocal
+
+function LoadGlobal(strParam,strDefault,strScope)							-- Load Global Parameter for all PC
+	return doLoadData(strParam,strDefault,strScope)
+end -- function LoadGlobal
+
+function LoadDialogue(...)														-- Load Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		tblName.Raster = tostring(LoadLocal(strName.."S",tblName.Raster))  -- Legacy of "S" becomes "R"
+		tblName.Raster = tostring(LoadLocal(strName.."R",tblName.Raster))
+		tblName.CoordX = tonumber(LoadLocal(strName.."X",tblName.CoordX))
+		tblName.CoordY = tonumber(LoadLocal(strName.."Y",tblName.CoordY))
+		CheckWindowPosition(tblName)
+	end
+end -- function LoadDialogue
+
+function LoadSettings(...)														-- Load Sticky Settings from File
+	for strFileName, tblLoadData in pairs ({ ProjectFile=tblLoadProj, PerUserFile=tblLoadUser, MachineFile=tblLoadMach }) do
+		strFileName = fh[strFileName]
+		if general.FlgFileExists(strFileName) then							-- Load Settings File in table lines with key & val fields
+			local tblField = {}
+			for strLine in io.lines(strFileName) do
+				if strLine == "return {"											-- Unless entire Sticky Data table was saved
+				and type(table.load) == "function" then
+					local tblLoad, strErr = table.load(strFileName)			-- Load Settings File table
+					for i,j in pairs (tblLoad) do
+						tblLoadData[i] = tblLoad[i]
+					end
+					break
+				end
+				tblField = stringx.split(strLine,"=")
+				tblLoadData[tblField[1]] = tblField[2]
+			end
+		end
+	end
+	Safe    = tostring(LoadGlobal("SafeColor",Safe))
+	Warn    = tostring(LoadGlobal("WarnColor",Warn))
+	Risk    = tostring(LoadGlobal("RiskColor",Risk))
+	Head    = tostring(LoadGlobal("HeadColor",Head))
+	Body    = tostring(LoadGlobal("BodyColor",Body))
+	FontHead= tostring(LoadGlobal("FontHead",FontHead))
+	FontBody= tostring(LoadGlobal("FontBody",FontBody))
+	FontSet = tonumber(LoadGlobal("Fonts",FontSet))							-- Legacy only
+	FontSet = tonumber(LoadGlobal("FontSet",FontSet))						-- Legacy only
+	History = tostring(LoadGlobal("History",History))
+	LoadDialogue(...)
+	if FontSet > 0 then FontAssignment(FontSet) end							-- Legacy only
+end -- function LoadSettings
+
+local tblSaveProj = {}
+local tblSaveUser = {}
+local tblSaveMach = {}
+
+local function doSaveData(strParam,anyValue,strScope)						-- Save sticky data for Plugin Data scope
+	strScope = tostring(strScope or strDefaultScope):lower()
+	local tblSaveData = tblSaveProj
+	if     strScope:match("user") then tblSaveData = tblSaveUser
+	elseif strScope:match("mach") then tblSaveData = tblSaveMach
+	end
+	tblSaveData[strParam] = anyValue
+end -- local function doSaveData
+
+function SaveLocal(strParam,anyValue,strScope)								-- Save Local Parameter for this PC
+	doSaveData(ComputerName.."-"..strParam,anyValue,strScope)
+end -- function SaveLocal
+
+function SaveGlobal(strParam,anyValue,strScope)								-- Save Global Parameter for all PC
+	doSaveData(strParam,anyValue,strScope)
+end -- function SaveGlobal
+
+function SaveDialogue(...)														-- Save Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		SaveLocal(strName.."R",tblName.Raster)
+		SaveLocal(strName.."X",tblName.CoordX)
+		SaveLocal(strName.."Y",tblName.CoordY)
+	end
+end -- function SaveDialogue
+
+function SaveSettings(...)														-- Save Sticky Settings to File
+	SaveDialogue(...)
+	SaveGlobal("SafeColor",Safe)
+	SaveGlobal("WarnColor",Warn)
+	SaveGlobal("RiskColor",Risk)
+	SaveGlobal("HeadColor",Head)
+	SaveGlobal("BodyColor",Body)
+	SaveGlobal("FontHead",FontHead)
+	SaveGlobal("FontBody",FontBody)
+	SaveGlobal("History",History)
+	for strFileName, tblSaveData in pairs ({ ProjectFile=tblSaveProj, PerUserFile=tblSaveUser, MachineFile=tblSaveMach }) do
+		for i,j in pairs (tblSaveData) do										-- Check if table has any entries
+			strFileName = fh[strFileName]
+			if type(table.save) == "function" then								-- Save entire Settings File table per Project/User/Machine
+				table.save(tblSaveData,strFileName)
+			else
+				local fileHandle = general.OpenFile(strFileName,"w")		-- Else save Settings File lines with key & val fields
+				for strKey,strVal in pairs(tblSaveData) do
+					fileHandle:write(strKey.."="..strVal.."\n")
+				end
+				fileHandle:close()
+			end
+			break
+		end
+	end
+end -- function SaveSettings
+
+function CheckWindowPosition(tblName)											-- Ensure dialogue window coordinates are on Screen
+	if tonumber(tblName.CoordX) == nil
+	or tonumber(tblName.CoordX) > intMaxW then
+		tblName.CoordX = iup.CENTER
+	end
+	if tonumber(tblName.CoordY) == nil
+	or tonumber(tblName.CoordY) > intMaxH then
+		tblName.CoordY = iup.CENTER
+	end
+end -- function CheckWindowPosition
+
+function IsNormalWindow(iupDialog)												-- Check dialogue window is not Maximised or Minimised
+	-- tblPosn[1] = origin x, tblPosn[2] = origin y, tblPosn[3] = width, tblPosn[4] = height
+	local tblPosn = stringx.splitnumbers(iupDialog.screenposition)
+	local intPosX = tblPosn[1]
+	local intPosY = tblPosn[2]
+	if intPosX < 0 and intPosY < 0 then											-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
+		return false																	-- then is Maximised or Minimised
+	end
+	return true
+end -- function IsNormalWindow
+
+function ShowDialogue(strName,iupDialog,btnFocus,strFrame)				-- Set standard frame attributes and display dialogue window
+	local tblName = tblNameFor(strName)
+	iupDialog = iupDialog or tblName.Dialog									-- Retrieve previous parameters if needed
+	btnFocus  = btnFocus  or tblName.Focus
+	strFrame  = strFrame  or tblName.Frame
+	strFrame  = strFrame  or "show norm"										-- Default frame mode is dialog:showxy(X,Y) with DialogFrame="NO" ("normal" to vary size, otherwise fixed size)
+	strFrame  = strFrame:lower()													-- Other modes are "show", "popup" & "keep" with DialogFrame="YES", or with "normal" for DialogFrame="NO" ("show" for active windows, "popup"/"keep" for modal windows)
+	if strFrame:gsub("%s-%a-map%a*[%s%p]*","") == "" then					-- May be prefixed with "map" mode to just map dialogue initially, also may be suffixed with "dialog" to inhibit iup.MainLoop() to allow progress messages
+		strFrame = "map show norm"												-- If only "map" mode then default to "map show norm"
+	end
+	if type(iupDialog) == "userdata" then
+		tblName.Dialog = iupDialog
+		tblName.Focus  = btnFocus													-- Preserve parameters
+		tblName.Frame  = strFrame
+		iupDialog.Background = Back												-- Background colour
+		iupDialog.Shrink = "YES"													-- Sometimes needed to shrink controls to raster size
+		if type(btnFocus) == "userdata" then									-- Set button as focus for Esc and Enter keys
+			iupDialog.StartFocus   = iupDialog.StartFocus   or btnFocus
+			iupDialog.DefaultEsc   = iupDialog.DefaultEsc   or btnFocus
+			iupDialog.DefaultEnter = iupDialog.DefaultEnter or btnFocus
+		end
+		iupDialog.MaxSize = intMaxW.."x"..intMaxH								-- Maximum size is screen size
+		iupDialog.MinSize = "x"													-- Minimum size (default "x" becomes nil)
+		iupDialog.RasterSize = tblName.Raster or "x"							-- Raster size  (default "x" becomes nil)
+		if strFrame:match("norm") then											-- DialogFrame mode is "NO" by default for variable size window
+			if strFrame:match("pop") or strFrame:match("keep") then
+				iupDialog.MinBox = "NO"											-- For "popup" and "keep" hide Minimize and Maximize icons
+				iupDialog.MaxBox = "NO"
+			else 
+				strFrame = strFrame.." show"										-- If not "popup" nor "keep" then use "showxy" mode
+			end
+		else
+			iupDialog.DialogFrame = "YES"										-- Define DialogFrame mode for fixed size window
+		end
+		iupDialog.close_cb  = iupDialog.close_cb  or function() return iup.CLOSE end	-- Define default window X close, move, and resize actions
+		iupDialog.move_cb   = iupDialog.move_cb   or function(self,x,y) if IsNormalWindow(self) then tblName.CoordX=x tblName.CoordY=y end end
+		iupDialog.resize_cb = iupDialog.resize_cb or function(self)     if IsNormalWindow(self) then tblName.Raster=self.RasterSize end end
+		if strFrame:match("map") then											-- Only dialogue mapping is required
+			iupDialog:map()
+--!			tblName.Frame = strFrame:gsub("map","")							-- Remove "map" from frame mode ready for subsequent call
+			tblName.Frame = strFrame:gsub("%s-%a-map%a*[%s%p]*","")		-- Remove "map" from frame mode ready for subsequent call
+			return
+		end
+		RefreshDialogue(strName)													-- Refresh to set Natural Size as Minimum Size
+		if iup.MainLoopLevel() == 0												-- Called from outside Main GUI, so must use showxy() and not popup()
+		or strFrame:match("dialog")
+		or strFrame:match("sho") then											-- Use showxy() to dispay dialogue window for "showxy" or "dialog" mode
+			iupDialog:showxy(tblName.CoordX,tblName.CoordY)
+			if History ~= Version then											-- Initially show new Version History Help
+				if type(HelpDialogue) == "function" then
+					History = Version
+					HelpDialogue(Version)											-- But only after Help dialogue exists
+					iupDialog.BringFront = "YES"
+				end
+			end
+			if not ( strName == "Help" or strFrame:match("dialog") )		-- Inhibit MainLoop if Help dialogue or "dialog" mode
+			and iup.MainLoopLevel() == 0 then iup.MainLoop() end
+		else
+			iupDialog:popup(tblName.CoordX,tblName.CoordY)					-- Use popup() to display dialogue window for "popup" or "keep" modes
+		end
+		if not strFrame:match("dialog") and strFrame:match("pop") then
+			tblName.Dialog = nil													-- When popup closed, clear key parameters, but not for "keep" mode
+			tblName.Raster = nil
+			tblName.CoordX = nil -- iup.CENTER
+			tblName.CoordY = nil -- iup.CENTER
+		end
+	end
+end -- function ShowDialogue
+
+function DestroyDialogue(strName)												-- Destroy existing dialogue
+	local tblName = tblNameFor(strName)
+	if tblName then
+		local iupDialog = tblName.Dialog
+		if type(iupDialog) == "userdata" then
+			iupDialog:destroy()
+		end
+	end
+end -- function DestroyDialogue
+
+local function strDialogueArgs(strArgA,strArgB,comp)						-- Compare two argument pairs and return matching pair
+	local tblArgA = stringx.splitnumbers(strArgA)
+	local tblArgB = stringx.splitnumbers(strArgB)
+	local strArgX = tostring(comp(tblArgA[1] or 100,tblArgB[1] or 100))
+	local strArgY = tostring(comp(tblArgA[2] or 100,tblArgB[2] or 100))
+	return strArgX.."x"..strArgY
+end -- local function strDialogueArgs
+
+function RefreshDialogue(strName)												-- Refresh dialogue window size after Font change, etc
+	local tblName = tblNameFor(strName)
+	local iupDialog = tblName.Dialog											-- Retrieve the dialogue handle
+	if type(iupDialog) == "userdata" then
+		iupDialog.Size = iup.NULL
+		iup.Refresh(iupDialog)														-- Refresh window to Natural Size and set as Minimum Size
+		if not iupDialog.RasterSize then
+			iupDialog:map()
+			iup.Refresh(iupDialog)
+		end
+		iupDialog.MinSize = strDialogueArgs(iupDialog.MaxSize,iupDialog.RasterSize,math.min)	-- Set Minimum Size to smaller of Maximm Size or Natural Size
+		iupDialog.RasterSize = strDialogueArgs(tblName.Raster,iupDialog.RasterSize,math.max)	-- Set Current Size to larger of Current Size or Natural Size
+		iup.Refresh(iupDialog)
+		tblName.Raster = iupDialog.RasterSize
+		if iupDialog.Visible == "YES" then										-- Ensure visible dialogue origin is on screen
+			tblName.CoordX = math.max(tblName.CoordX,10)
+			tblName.CoordY = math.max(tblName.CoordY,10)						-- Set both coordinates to larger of current value or 10 pixels
+			if iupDialog.Modal == "NO" then
+				iupDialog.ZOrder = "BOTTOM"										-- Ensure dialogue is subservient to any popup
+				iupDialog:showxy(tblName.CoordX,tblName.CoordY)				-- Use showxy() to reposition main window
+			else
+				iupDialog:popup(tblName.CoordX,tblName.CoordY)				-- Use popup() to reposition modal window
+			end
+		else
+			iupDialog.BringFront="YES"
+		end
+	end
+end -- function RefreshDialogue
+
+function AssignAttributes(tblControls)											-- Assign the attributes of all controls supplied
+	local anyFunction = nil
+	for iupName, tblAttr in pairs ( tblControls or {} ) do
+		if type(iupName) == "userdata" and type(tblAttr) == "table" then-- Loop through each iup control
+			local intSkip = 0														-- Skip counter for attributes same for all controls
+			for intAttr, anyName in ipairs ( tblControls[1] or {} ) do	-- Loop through each iup attribute
+				local strName = nil
+				local strAttr = nil
+				local strType = type(anyName)
+				if strType == "string" then										-- Attribute is different for each control in tblControls
+					strName = anyName
+					strAttr = tblAttr[intAttr-intSkip]
+				elseif strType == "table" then									-- Attribute is same for all controls as per tblControls[1] 
+					intSkip = intSkip + 1
+					strName = anyName[1]
+					strAttr = anyName[2]
+				elseif strType == "function" then
+					intSkip = intSkip + 1
+					anyFunction = anyName
+					break
+				end
+				if type(strName) == "string" and ( type(strAttr) == "string" or type(strAttr) == "function" ) then
+					local anyRawGet = rawget(fh,strAttr)						-- Use rawget() to stop require("pl.strict") complaining
+					if type(anyRawGet) == "string" then
+						strAttr = anyRawGet											-- Use internal module attribute such as Head or FontBody
+					end
+					iupName[strName] = strAttr									-- Assign attribute to control
+				end
+			end
+		end
+	end
+	if anyFunction then anyFunction() end										-- Perform any control assignment function
+end -- function AssignAttributes
+
+-- Font Dialogue Attributes and Functions --
+
+FontBody = iup.GetGlobal("DEFAULTFONT")										-- Set default font for Body and Head text
+FontHead = FontBody:gsub(", B?o?l?d?",", Bold ")
+
+---[=[
+local intFontPlain  = 1															-- Font Face & Style values for legacy FontSet setting
+local intFontBold   = 2
+local intArialPlain = 3
+local intArialBold  = 4
+local intTahomaPlain= 5
+local intTahomaBold = 6
+local strFontFace = FontBody:gsub(",.*","")
+local tblFontSet = {}																-- Lookup table for FontHead and FontBody
+tblFontSet[intFontPlain]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..",      -16", }
+tblFontSet[intFontBold]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..", Bold -15", }
+tblFontSet[intArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
+tblFontSet[intArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
+tblFontSet[intTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
+tblFontSet[intTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
+
+function FontAssignment(intFontSet)												-- Assign Font Face & Style GUI values for legacy FontSet setting
+	if 	intFontSet then
+		intFontSet = math.max(intFontSet,1)
+		intFontSet = math.min(intFontSet,#tblFontSet)
+		FontHead = tblFontSet[intFontSet]["Head"]								-- Legacy Font for all GUI dialog header text
+		FontBody = tblFontSet[intFontSet]["Body"]								-- Legacy Font for all GUI dialog body text
+	end
+end -- function FontAssignment
+--]=]
+
+function FontDialogue(tblAttr,strName)											-- GUI Font Face & Style Dialogue
+	tblAttr = tblAttr or {}
+	strName = strName or "Main"
+	local isFontChosen = false
+	local btnFontHead = iup.button { Title="Choose Headings Font and default Colour" }
+	local btnFontBody = iup.button { Title="Choose Body text Font and default Colour" }
+	local btnCol_Safe = iup.button { Title=" Safe Colour " }
+	local btnCol_Warn = iup.button { Title=" Warning Colour " }
+	local btnCol_Risk = iup.button { Title=" Risky Colour " }
+	local btnDefault  = iup.button { Title=" Default Fonts " }
+	local btnMinimum  = iup.button { Title=" Minimum Size " }
+	local btnDestroy  = iup.button { Title=" Close Dialogue " }
+	local frmSetFonts = iup.frame  { Title=" Set Window Fonts & Colours ",
+								iup.vbox { Alignment="ACENTER", Margin=Margin, Homogeneous="YES",
+									btnFontHead,
+									btnFontBody,
+									iup.hbox { btnCol_Safe, btnCol_Warn, btnCol_Risk, Homogeneous="YES" },
+									iup.hbox { btnDefault , btnMinimum , btnDestroy , Homogeneous="YES" },
+								} -- iup.vbox end
+							} -- iup.frame end
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local dialogFont  = iup.dialog { Title=" Set Window Fonts & Colours ", Gap=Gap, Margin=Border, frmSetFonts }
+
+	local tblButtons = { }
+
+	local function setDialogues()												-- Refresh the Main and Help dialogues
+		local tblHelp = tblNameFor("Help")
+		if type(tblHelp.Dialog) == "userdata" then							-- Help dialogue exists
+			AssignAttributes(tblHelp.TblAttr)									-- Assign the Help dialogue attributes
+			RefreshDialogue("Help")												-- Refresh the Help window size & position
+		end
+		AssignAttributes(tblAttr)													-- Assign parent dialogue attributes
+		RefreshDialogue(strName)													-- Refresh parent window size & position and bring infront of Help window
+		RefreshDialogue("Font")													-- Refresh Font window size & position and bring infront of parent window
+	end -- local function setDialogues
+
+	local function getFont(strColor)											-- Set font button function
+		local strTitle = " Choose font style & default colour for "..strColor:gsub("Head","Heading").." text "
+		local strValue = "Font"..strColor										-- The font codes below are not recognised by iupFontDlg and result in empty font face!
+		local strFont  = rawget(fh,strValue):gsub(" Black,",","):gsub(" Light, Bold",","):gsub(" Extra Bold,",","):gsub(" Semibold,",",")
+		local iupFontDlg = iup.fontdlg { Title=strTitle, Color=rawget(fh,strColor), Value=strFont }
+		iupFontDlg:popup()															-- Popup predefined font dialogue
+		if iupFontDlg.Status == "1" then
+			if iupFontDlg.Value:match("^,") then								-- Font face missing so revert to original font
+				iupFontDlg.Value = rawget(fh,strValue)
+			end
+			fh[strColor] = iupFontDlg.Color										-- Set Head or Body color attribute
+			fh[strValue] = iupFontDlg.Value										-- Set FontHead or FontBody font style
+			AssignAttributes(tblButtons)											-- Assign the button & frame attributes
+			setDialogues()
+			isFontChosen = true
+		end
+	end -- local function getFont
+
+	local function getColor(strColor)											-- Set colour button function
+		local strTitle = " Choose colour for "..strColor:gsub("Warn","Warning"):gsub("Risk","Risky").." button & message text "
+		local iupColorDlg = iup.colordlg { Title=strTitle, Value=rawget(fh,strColor), ShowColorTable="YES" }
+		iupColorDlg.DialogFrame="YES"
+		iupColorDlg:popup()															-- Popup predefined color dialogue fixed size window
+		if iupColorDlg.Status == "1" then
+			fh[strColor] = iupColorDlg.Value									-- Set Safe or Warn or Risk color attribute
+			AssignAttributes(tblButtons)											-- Assign the button & frame attributes
+			setDialogues()
+			isFontChosen = true
+		end
+	end -- local function getColor
+
+	local function setDefault()													-- Action for Default Fonts button
+		Safe = Green
+		Warn = Magenta
+		Risk = Red																	-- Set default colours
+		Body = Black
+		Head = Black
+		FontBody = iup.GetGlobal("DEFAULTFONT")								-- Set default fonts for Body and Head text
+		FontHead = FontBody:gsub(", B?o?l?d?",", Bold")
+		AssignAttributes(tblButtons)												-- Assign the button & frame attributes
+		setDialogues()
+		isFontChosen = true
+	end -- local function setDefault
+
+	local function setMinimum()													-- Action for Minimum Size button
+		local tblName = tblNameFor(strName)
+		local iupDialog = tblName.Dialog										-- Retrieve the parent dialogue handle
+		if type(iupDialog) == "userdata" then
+			tblName.Raster = "10x10"												-- Refresh parent window to Minimum Size & adjust position
+			RefreshDialogue(strName)
+		end
+		local tblFont = tblNameFor("Font")
+		tblFont.Raster = "10x10"													-- Refresh Font window to Minimum Size & adjust position
+		RefreshDialogue("Font")
+	end -- local function setMinimum
+
+	tblButtons  =  {  {  "Font" , "FgColor" , "Tip" , "action" , {"TipBalloon";"Balloon"} , {"Expand";"YES"} },
+		[btnFontHead] = { "FontHead", "Head", "Choose the Heading text Font Face, Style, Size, Effects, and default Colour", function() getFont("Head") end },
+		[btnFontBody] = { "FontBody", "Body", "Choose the Body text Font Face, Style, Size, Effects, and default Colour"   , function() getFont("Body") end },
+		[btnCol_Safe] = { "FontBody", "Safe", "Choose the colour for Safe operations"   , function() getColor("Safe") end },
+		[btnCol_Warn] = { "FontBody", "Warn", "Choose the colour for Warning operations", function() getColor("Warn") end },
+		[btnCol_Risk] = { "FontBody", "Risk", "Choose the colour for Risky operations"  , function() getColor("Risk") end },
+		[btnDefault ] = { "FontBody", "Safe", "Restore default Fonts and Colours", function() setDefault() end },
+		[btnMinimum ] = { "FontBody", "Safe", "Reduce window to its minimum size", function() setMinimum() end },
+		[btnDestroy ] = { "FontBody", "Risk", "Close this dialogue ", function() return iup.CLOSE end },
+		[frmSetFonts] = { "FontHead", "Head" },
+		} 
+
+	AssignAttributes(tblButtons)													-- Assign the button & frame attributes
+	ShowDialogue("Font",dialogFont,btnDestroy,"keep normal")				-- Popup the Set Window Fonts dialogue: "keep normal"  : vary size & posn, and remember size & posn
+--	ShowDialogue("Font",dialogFont,btnDestroy,"popup normal")				-- Popup the Set Window Fonts dialogue: "popup normal" : vary size & posn, but redisplayed centred
+--	ShowDialogue("Font",dialogFont,btnDestroy,"keep")						-- Popup the Set Window Fonts dialogue: "keep" : fixed size, vary posn, and only remember posn
+--	ShowDialogue("Font",dialogFont,btnDestroy,"popup")						-- Popup the Set Window Fonts dialogue: "popup": fixed size, vary posn, but redisplayed centred
+	dialogFont:destroy()
+	return isFontChosen
+
+end -- function FontDialogue
+
+-- Help Dialogue Attributes and Functions
+
+HelpDialogue = ""																	-- HelpDialogue must be declared for ShowDialogue
+
+local strHelpButtonActive = nil  -- defaults to "YES"						-- Help button active attribute mode used only in NewHelpDialogue
+
+function NewHelpDialogue(btnGetHelp,strRootURL)								-- Prototype for GUI Help Dialogue, with parent Help button, and web page root/namespace URL
+	local tblHelp = tblNameFor("Help")
+	local oleControl, btnDestroy, hboxHelp, dialogHelp, tblAttr			-- Dialogue component upvalues
+	if type(btnGetHelp) == "userdata" then
+		btnGetHelp.Active = strHelpButtonActive
+		if btnGetHelp.Active == "NO" then										-- Help button inactive, so Help dialogue exists, so just update parent button
+			tblHelp.GetHelp = btnGetHelp											-- Allows successive parent GUI to share one Help dialogue
+			return
+		end
+	end
+	tblHelp.GetHelp = btnGetHelp
+	strRootURL = strRootURL or Plugin:gsub(" ","_"):lower()				-- Default to Plugin name as Wiki namespace
+	if strRootURL:match("^[%w_]+$") then										-- Append Wiki namespace to Wiki root URL
+		strRootURL = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:"..strRootURL..":"
+	end
+	tblHelp.RootURL = strRootURL
+	local intURL = 1																-- Index to Version History help page URL
+	local tblURL = { }																-- List of help page URL
+	local tblAttr = { }																-- Attribute table primarily for FontDialogue()
+	tblHelp.TblAttr = tblAttr
+
+	local function doCommonAction()												-- Common action when creating/destroying Help dialogue
+		local strMode = "NO"
+		if tblHelp.Dialog then
+			tblHelp.Dialog = nil													-- Clear dialog handle
+			strMode = nil															-- Defaults to "YES" but more efficient to test
+		else
+			tblAttr = { {"Font","FgColor"} }									-- Reset attribute table primarily for FontDialogue()
+			tblHelp.TblAttr = tblAttr
+		end 
+		if type(tblHelp.GetHelp) == "userdata" then							-- Set parent dialogue Help button active mode
+			tblHelp.GetHelp.Active = strMode
+		end
+		strHelpButtonActive = strMode
+	end -- local function doCommonAction										-- Save global Help button active mode
+
+	function HelpDialogue(anyPage)												-- GUI Help Dialogue for chosen web page
+		--[=[
+			Parameter anyPage can be one of several values:
+			1. Page number from 0 to index tblURL, often equal to intTabPosn.
+			2. Version to display Version History page for version chosen.
+			3. String with " "="_" and lowercase substring of a page name in tblURL.
+		--]=]
+
+		if not tblHelp.Dialog then
+			doCommonAction()
+			-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
+			oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+			oleControl:CreateLuaCOM()
+			btnDestroy = iup.button { Title="Close Window", Tip="Close this Help and Advice window", TipBalloon=Balloon, Expand="HORIZONTAL", Size="x10", FgColor=Risk, action=function() dialogHelp:destroy() doCommonAction() end }
+			hboxHelp = iup.hbox { margin=Margin, homogeneous="NO" }
+			-- Create each GUI button with title, tooltip, color, action, etc, and table of web page URL
+			for intButton, tblButton in ipairs(tblHelp) do
+				local intPage = tblButton.Page or intButton
+				local strURL  = tblButton.URL
+				if strURL:match("ver.-hist") then intURL = intPage end
+				tblURL[intPage] = strURL
+				local btnName = iup.button { Title=tblButton.Name, Tip=tblButton.Tip, TipBalloon=Balloon, Expand=btnDestroy.Expand, Size=btnDestroy.Size, FgColor=Safe, action=function() oleControl.com:Navigate(tblHelp.RootURL..strURL) end }
+				iup.Append(hboxHelp,btnName)
+				tblAttr[btnName] = { "FontBody", "Safe" }
+			end
+			iup.Append(hboxHelp,btnDestroy)
+			tblAttr[btnDestroy] = { "FontBody", "Risk" }
+			dialogHelp = iup.dialog { Title=Plugin.." Help & Advice", Font=FontBody,
+								iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Border, ExpandChildren="YES",
+									oleControl,
+									hboxHelp,
+								},
+								close_cb = function() doCommonAction() end,
+							}
+			ShowDialogue("Help",dialogHelp,btnDestroy)						-- Show Help dialogue window and set tblHelp.Dialog = dialogHelp
+		end
+		anyPage = anyPage or 0
+		if type(anyPage) == "number" then										-- Select page by Tab = Button = Help page index
+			anyPage = math.max(1,math.min(#tblURL,anyPage+1))
+			anyPage = tblURL[anyPage] or ""
+		elseif anyPage == Version then											-- Select the Version History features section
+			anyPage = anyPage:gsub("[%s%p]","")
+			anyPage = anyPage:gsub("^(%d)","V%1")
+			anyPage = tblURL[intURL].."#features_of_"..anyPage
+		elseif type(anyPage) == "string" then									-- Select page by matching name text
+			local strPage = anyPage:gsub(" ","_"):lower()
+			anyPage = tblURL[1] or ""												-- Default to first web page
+			for intURL = 1, #tblURL do
+				local strURL = tblURL[intURL]
+				if strURL:match(strPage) then
+					anyPage = strURL
+					break
+				end
+			end
+		else
+			anyPage = tblURL[1] or ""												-- Default to first web page
+		end
+		oleControl.com:Navigate(tblHelp.RootURL..anyPage)					-- Navigate to chosen web page
+	end -- function HelpDialogue
+
+end -- function NewHelpDialogue
+
+function AddHelpButton(strName,strTip,strURL,intPage)						-- Add button to GUI Help Dialogue
+	local tblHelp = tblNameFor("Help")
+	if tblHelp and not strHelpButtonActive then
+		for intHelp, tblHelp in ipairs(tblHelp) do							-- Check button does not already exist
+			if tblHelp.Name == strName then return end
+		end
+		if tonumber(intPage) then intPage = intPage + 1 end					-- Optional external intPage number matches intTabPosn
+		table.insert( tblHelp, { Name=strName or "?", Tip=strTip or "?", URL=strURL or "", Page=intPage } )
+	end
+end -- function AddHelpButton
+
+local function anyMemoControl(anyName,fgColor)								-- Compose any control Title and FgColor
+	local strName = tostring(anyName)											-- anyName may be a string, and fgColor is default FgColor
+	local tipText = nil
+	if type(anyName) == "table" then											-- anyName may be a table = { Title string , FgColor string , ToolTip string (optional) }
+		strName = anyName[1]
+		fgColor = anyName[2]:match("%d* %d* %d*") or fgColor
+		tipText = anyName[3]
+	end
+	return strName, fgColor, tipText
+end -- local function anyMemoControl
+
+local function anyMemoDialogue(strHead,anyHead,strMemo,anyMemo,...)		-- Display framed memo dialogue with buttons
+	local intButt = 0																-- Returned value if "X Close" button is used
+	local tblButt = { [0]="X Close" }											-- Button names lookup table
+	local strHead, fgcHead, tipHead = anyMemoControl(anyHead or "",strHead)
+	local strMemo, fgcMemo, tipMemo = anyMemoControl(anyMemo or "",strMemo)
+	-- Create the GUI labels and buttons
+	local lblMemo = iup.label { Title=strMemo, FgColor=fgcMemo, Tip=tipMemo, TipBalloon=Balloon, Alignment="ACENTER", Padding=Margin, Expand="YES", WordWrap="YES" }
+	local lblLine = iup.label { Separator="HORIZONTAL" }
+	local iupHbox = iup.hbox  { Homogeneous="YES" }
+	local btnButt = iup.button { }
+	local strMode = "popup"
+	if arg[1] == "Keep Dialogue" then											-- Keep dialogue open for a progress message
+		strMode = "keep dialogue"
+		lblLine = iup.label { }
+	else
+		if #arg == 0 then arg[1] = "OK" end 									-- If no buttons listed then default to an "OK" button
+		for intArg, anyButt in ipairs(arg) do
+			local strButt, fgcButt, tipButt = anyMemoControl(anyButt,Safe)
+			tblButt[intArg] = strButt
+			btnButt = iup.button { Title=strButt, FgColor=fgcButt, Tip=tipButt, TipBalloon=Balloon, Expand="NO", MinSize="80", Padding=Margin, action=function() intButt=intArg return iup.CLOSE end }
+			iup.Append( iupHbox, btnButt )
+		end
+	end
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local iupMemo = iup.dialog { Title=Plugin..Version..strHead,
+							iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Margin,
+								iup.frame { Title=strHead, FgColor=fgcHead, Font=FontHead,
+									iup.vbox { Alignment="ACENTER", Font=FontBody, lblMemo, lblLine, iupHbox },
+								},
+							},
+						}
+	ShowDialogue("Memo",iupMemo,btnButt,strMode)								-- Show popup Memo dialogue window with righthand button in focus (if any)
+	if strMode == "keep dialogue" then 	return lblMemo end					-- Return label control so message can be changed
+	iupMemo:destroy()
+	return intButt, tblButt[intButt]											-- Return button number & title that was pressed
+end -- local function anyMemoDialogue
+
+function MemoDialogue(anyMemo,...)												-- Multi-Button GUI like iup.Alarm and fhMessageBox, with "Memo" in frame
+	return anyMemoDialogue(Head,"Memo",Body,anyMemo,...)
+end -- function MemoDialogue
+
+function WarnDialogue(anyHead,anyMemo,...)									-- Multi-Button GUI like iup.Alarm and fhMessageBox, with heading in frame
+	return anyMemoDialogue(Warn,anyHead,Warn,anyMemo,...)
+end -- function WarnDialogue
+
+local function httpRequest(strRequest)											-- Luacom http request protected by pcall() below
+	local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+	http:Open("GET",strRequest,false)
+	http:Send()
+	return http.Responsebody
+end -- local function httpRequest
+
+function VersionInStore(anyPlugin)												-- Obtain the Version in Plugin Store by Name or Id
+	local strType = "name="
+	if type(anyPlugin) == "number"
+	or tonumber(anyPlugin) then strType = "id=" end
+	if anyPlugin then
+		local strFile = MachinePath.."\\VersionInStoreInternetError.dat"
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..anyPlugin
+		local isOK, strReturn = pcall(httpRequest,strRequest)
+		if not isOK then															-- Problem with Internet access
+			local intTime = os.time() - 36000									-- Time in seconds 10 hours ago
+			local tblAttr, strError = lfs.attributes(strFile)				-- Obtain file attributes
+			if not tblAttr or tblAttr.modification < intTime then			-- File does not exist or was modified long ago 
+				fhMessageBox(strReturn.."\n The Internet appears to be inaccessible. ")
+			end
+			general.SaveStringToFile(strFile,strFile)							-- Update file modified time
+			return "0"
+		end
+		general.DeleteFile(strFile)												-- Delete file if Internet is OK
+		local strVersion = "0"
+		if strReturn ~= nil then
+			strVersion = strReturn:match("([%d%.]*),%d*")					-- Version digits & dots then comma and Id digits 
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function VersionInStore
+
+local function intVersion(strVersion)											-- Convert version string to comparable integer
+	local intVersion = 0
+	local tblVersion = stringx.split(strVersion,".")
+	for i=1,5 do
+		intVersion = intVersion * 1000 + tonumber(tblVersion[i] or 0)
+	end
+	return intVersion
+end -- local function intVersion
+
+function CheckVersionInStore()													-- Check if later Version available in Plugin Store
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = VersionInStore(strPlugin:gsub(" %- .*",""))
+	local strOldVer = Version
+	if intVersion(strNewVer) > intVersion(strOldVer:match("%D*([%d%.]*)")) then
+		MemoDialogue("Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.")
+	end
+end -- function CheckVersionInStore
+
+function PluginDataScope(strScope)												-- Set default Plugin Data scope to per-Project, or per-User, or per-Machine
+	strScope = tostring(strScope):lower()
+	if strScope:match("mach") then												-- Per-Machine
+		strDefaultScope = "Machine"
+	elseif strScope:match("user") then											-- Per-User
+		strDefaultScope = "User"
+	end																					-- Per-Project is default
+end -- function PluginDataScope
+
+local function getPluginDataFileName(strScope)								-- Get plugin data filename for chosen scope
+	local isOK, strDataFile = pcall(fhGetPluginDataFileName,strScope)
+	if not isOK then strDataFile = fhGetPluginDataFileName() end			-- Before V5.0.8 parameter is disallowed and default = CURRENT_PROJECT
+	return strDataFile
+end -- local function getPluginDataFileName
+
+local function getDataFiles(strScope)											-- Compose the Plugin Data file & path & root names
+	local strDataFile = getPluginDataFileName(strScope)						-- Allow plugins with variant filenames to use same plugin data files
+	strDataFile = strDataFile:gsub("\\"..Plugin:gsub(" ","_"):lower(),"\\"..Plugin)
+	strDataFile = strDataFile:gsub("\\"..Plugin..".+%.[D,d][A,a][T,t]$","\\"..Plugin..".dat")
+	if strDataFile == "" and strScope == "CURRENT_PROJECT" then			-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
+		strDataFile = fhGetContextInfo("CI_GEDCOM_FILE")
+		strDataFile = strDataFile:gsub("%.[G,g][E,e][D,d]",".fh_data")
+		lfs.mkdir(strDataFile)
+		strDataFile = strDataFile.."\\Plugin Data"
+		lfs.mkdir(strDataFile)
+		strDataFile = strDataFile.."\\"..Plugin..".dat"
+	end
+	local strDataPath = strDataFile:gsub("\\"..Plugin.."%.[D,d][A,a][T,t]$","")	-- Plugin data folder path name
+	local strDataRoot = strDataPath.."\\"..Plugin										-- Plugin data file root name
+	return strDataFile, strDataPath, strDataRoot
+end -- local function getDataFiles
+
+function Initialise(strVersion,strPlugin)											-- Initialise the GUI module with optional Version & Plugin name
+
+	local strAppData = fhGetContextInfo("CI_APP_DATA_FOLDER")
+
+	Plugin = fhGetContextInfo("CI_PLUGIN_NAME")									-- Plugin Name from file
+	Version = strVersion or " "														-- Plugin Version
+	if Version == " " then
+		local strTitle = "\n@Title is missing"
+		local strAuthor = "\n@Author is missing"
+		local strVersion = "\n@Version is missing"
+		local strPlugin = strAppData.."\\Plugins\\"..Plugin..".fh_lua"
+		for strLine in io.lines(strPlugin) do										-- Read each line from the Plugin file
+			strPlugin = strLine:match("^@Title:%s*(.*)")
+			if strPlugin then
+				strPlugin = strPlugin:gsub("&&","&")
+				if Plugin:match("^"..strPlugin:gsub("(%W)","%%%1")) then
+					Plugin = strPlugin													-- Prefer Title to Filename if it matches
+					strTitle = nil
+				else
+					strTitle = "\n@Title differs from Filename"					-- Report abnormality
+				end
+			end
+			if strLine:match("^@Author:%s*(.*)") then								-- Check @Author exists
+				strAuthor = nil
+			end 
+			Version = strLine:gsub("^@Version:%D*([%d%.]*)%D*"," %1 ")
+			if Version ~= strLine then												-- Obtain the @Version from Plugin file
+				strVersion = nil
+				break
+			end
+		end
+		if strTitle or strAuthor or strVersion then								-- Report any header abnormalities
+			fhMessageBox("\nScript Header: "..Plugin..(strTitle or "")..(strAuthor or "")..(strVersion or ""))
+		end
+	end
+	History = Version																	-- Version History
+	Plugin  = strPlugin or Plugin													-- Plugin Name from argument or default from file
+
+	CustomDialogue("Help","1020x730")												-- Custom "Help" dialogue sizes
+
+	DefaultDialogue()																	-- Default "Font","Help","Main" dialogues
+
+	MachineFile,MachinePath,MachineRoot = getDataFiles("LOCAL_MACHINE")		-- Plugin data names per machine
+	PerUserFile,PerUserPath,PerUserRoot = getDataFiles("CURRENT_USER")		-- Plugin data names per user
+	ProjectFile,ProjectPath,ProjectRoot = getDataFiles("CURRENT_PROJECT")	-- Plugin data names per project
+
+	PublicPath = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")					-- Public data folder path name
+	if PublicPath == "" then PublicPath = ProjectPath end
+
+	CalicoPie = strAppData:gsub("\\Calico Pie\\.*","\\Calico Pie")			-- Program Data Calico Pie path name
+
+	ComputerName = os.getenv("COMPUTERNAME")										-- Local PC Computer Name
+
+end -- function Initialise
+
+local iupVersion = iup.GetGlobal("VERSION")
+
+Initialise()																				-- Initialise module with default values
+
+return fh
+
+end -- local function iup_gui_v2
+
+stringx_v2 = stringx_v2("stringx")
+tablex_v1  = tablex_v1 ("tablex")
+encoder_v2 = encoder_v2("encoder")
+general_v1 = general_v1("general")
+iterate_v1 = iterate_v1("iterate")
+progbar_v1 = progbar_v1("progbar")
+iup_gui_v2 = iup_gui_v2("iup_gui")
+
+-- All above should eventually become library modules as loaded below --
+
+--]==]
+
+--[==[
+local fhLoadRequire = require("fhLoadRequire").fhLoadRequire				-- Interim fhLoadRequire() API
+
+if not fhLoadRequire("pl","pl.init") then return end						-- Load required Penlight modules
+require("pl.import_into")()
+require("pl.strict")																-- Strict check for undeclared globals
+
+if not fhLoadRequire("fh.library_v2") then return end 						-- Load required FH v2 modules
+require("fh.modules_v2")()
+--]==]
+stringx_v2.import()																	-- To access FH string extension v2 module
+tablex_v1.import()																	-- To access FH table extension v1 module
+local encoder = encoder_v2														-- To access FH encoder of text v2 module
+local general = general_v1														-- To access FH general useful v1 module
+local iterate = iterate_v1														-- To access FH iterate items v1 module
+local progbar = progbar_v1														-- To access FH progress bar v1 module including "iuplua"
+local iup_gui = iup_gui_v2														-- To access FH GUI builder v2 module including "iuplua", "lfs", "fh.general_v1" & "fh.loadreq_v1", "fh.stringx_v2", etc
+
+-- Preset Global Data Definitions --
+function PresetGlobalData()
+	iup_gui.Gap = "2"
+	iup_gui.Balloon = "YES"
+	TblOption = {}																		-- Table of GUI options
+	TblOption.Set = {}																	-- Non-toggle option settings are in Set sub-table
+	TblOption.Lst = {}																	-- All dropdown list settings are in Lst sub-table
+	TblOption.Tgl = {}																	-- All toggle ON/OFF settings are in Tgl sub-table
+	TblRecord   = {}																	-- Result Set tables
+	TblDataRef  = {}
+	TblOldValue = {}
+	TblNewValue = {}
+end -- function PresetGlobalData
+
+-- Reset Sticky Settings to Default Values --
+function ResetDefaultSettings()
+	iup_gui.CustomDialogue("Main","0x0")											-- Custom "Main" dialogue minimum size & centralisation
+	iup_gui.CustomDialogue("Font","0x0")											-- Custom "Font" dialogue minimum size & centralisation
+	iup_gui.CustomDialogue("Help","1000x700")										-- Custom "Help" dialogue default size and centralisation
+	iup_gui.DefaultDialogue("Bars","Memo")											-- GUI window rastersize and X & Y co-ordinates for "Main","Font","Help","Bars","Memo" dialogues
+	iup_gui.History		= " "															-- Version History reset for initial Help
+	IntTabPosn = 0																		-- Tab position undefined
+																							-- GUI Modes are mixed case, Classes are lower case, Tags are upper case
+	TblOption.Set.Item	=	0															-- Item count of database size
+	TblOption.Set.Date	=	""															-- Date of last Item update
+	TblOption.Set.Seek	=	""															-- Search text string empty
+	TblOption.Set.Swap	=	""															-- Replace text string empty
+	for strName, anyValue in pairs ( TblOption.Lst ) do
+		TblOption.Lst[strName] =	""													-- Reset all GUI dropdown lists associated with toggles
+	end
+	for strName, anyValue in pairs ( TblOption.Tgl ) do
+		TblOption.Tgl[strName] =	"ON"												-- Enable all GUI toggle options except as below
+	end
+	TblOption.Tgl.Conf			=	"ON"												-- V2.1 Ensure Confirmation toggle is ticked
+	TblOption.Tgl["SOUR.TITL"]=	"ON"	-- "OFF"									-- V2.1 Parent Child Tag for Source Titles	-- V1.7
+	TblOption.Tgl.age			=	"ON"	-- "OFF"									-- V2.1 Class age is just the Age fields		-- V1.7
+	TblOption.Tgl.Age			=	"OFF"												-- V2.1 Age field error checks
+	TblOption.Tgl.date			=	"OFF"												-- V1.7 Class date is all the Date fields
+	TblOption.Tgl.Date			=	"OFF"												-- V1.7 Date field warnings
+end -- function ResetDefaultSettings
+
+-- Load Sticky Settings from File --
+function LoadSettings()
+	iup_gui.LoadSettings("Bars")														-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+	TblOption = iup_gui.LoadGlobal("Option",TblOption)
+	if not TblOption.Set then TblOption.Set = {} end							-- Cope with legacy settings
+	if not TblOption.Lst then TblOption.Lst = {} end
+	TblOption.Tgl.Conf			= TblOption.Tgl.Conf or "ON"						-- V2.1 Ensure Confirmation toggle is ticked
+	TblOption.Tgl["SOUR.TITL"]= TblOption.Tgl["SOUR.TITL"] or "ON"			-- V1.7 Parent Child Tag for Source Titles
+	TblOption.Tgl.age			= TblOption.Tgl.age  or "ON"						-- V1.7 Class age is just the Age fields
+	TblOption.Tgl.Age			= TblOption.Tgl.Age  or "OFF"					-- V2.1 Age field error checks
+	TblOption.Tgl.date			= TblOption.Tgl.date or "OFF"					-- V1.7 Class date is all the Date fields
+	TblOption.Tgl.Date			= TblOption.Tgl.Date or "OFF"					-- V1.7 Date field warnings
+	SaveSettings()																		-- Save sticky data settings
+end -- function LoadSettings
+
+-- Save Sticky Settings to File --
+function SaveSettings()
+	local datToday = fhNewDate(2000)
+	datToday:SetSimpleDate(fhCallBuiltInFunction("Today"))						-- Obtain date today
+	local strToday = datToday:GetDisplayText("ABBREV")
+	if TblOption.Set.Date ~= strToday then											-- Different date so recalculate database size
+		TblOption.Set.Date = strToday
+		local intItem = 0
+		for ptrItem in iterate.Items() do
+			intItem = intItem + 1														-- Count number of database items
+		end
+		TblOption.Set.Item = intItem
+	end
+	iup_gui.SaveGlobal("Option",TblOption)
+	iup_gui.SaveSettings()																-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+end -- function SaveSettings
+
+-- Make New Help Dialogue from Prototype --
+function MakeHelpDialogue(btnGetHelp)
+	iup_gui.NewHelpDialogue(btnGetHelp)												-- Supply control Help button with tab & alphabetically ordered page names
+	iup_gui.AddHelpButton("Introduction"		, "Introduction for Help and Advice"	, "search_and_replace"	)
+	iup_gui.AddHelpButton("Major Options"		, "Search Mode and Basic Filters"		, "basic_options"	)
+	iup_gui.AddHelpButton("Extra Filters"		, "Short/Long Text/Distinctive Fields"	, "extra_filters"	)
+	iup_gui.AddHelpButton("Confirmation"		, "Confirmation popup Help and Advice"	, "popupconf"		)
+	iup_gui.AddHelpButton("Result Set"			, "Result Set list Help and Advice"		, "result_set"		)
+	iup_gui.AddHelpButton("Usage Examples"		, "Usage examples Help and Advice"		, "usage_examples"	)
+	iup_gui.AddHelpButton("Version History"	, "Version History of Features"			, "version_history"	)
+end -- function MakeHelpDialogue
+
+function StrAgeWarning(ptrItem,strNewAge)
+	if #strNewAge > 0 and TblOption.Set.Mode == "Replace" then				-- No age error checks unless Age Item exists in Replace mode
+		local strOldAge = fhGetValueAsText(ptrItem)
+		if TblOption.Tgl.Age then
+			fhSetValueAsText(ptrItem,strNewAge)										-- Check for invalid Age returning blank
+			local strWarning = fhGetValueAsText(ptrItem)
+			fhSetValueAsText(ptrItem,strOldAge)										-- Restore the original Age value
+			if strWarning == "" then
+				return " ! ! BEWARE ! !     Replacement age is invalid. \n The field will be DELETED if 'Replace' is confirmed. ",strNewAge
+			else
+				return nil,strWarning													-- Otherwise, return nil warning with corrected Age text
+			end
+		end
+	end
+	return nil,strNewAge									  							-- For OK values or no warning return nil, and original text
+end -- function StrAgeWarning
+
+function StrDateWarning(ptrItem,strNewVal)
+	if #strNewVal > 0 and TblOption.Set.Mode == "Replace" then				-- No date warnings unless Date Item exists in Replace mode
+		local oldDate = fhGetValueAsDate(ptrItem)
+		local newDate = fhNewDate(1999)							  					-- For "date" value type use Date Object
+		local isOK = newDate:SetValueAsText(strNewVal,false)
+		if isOK then
+			if TblOption.Tgl.Date then
+				fhSetValueAsDate(ptrItem,newDate)									-- Check for invalid Date warnings
+				local strWarning = fhCallBuiltInFunction("GetDataWarning",ptrItem,1)
+				fhSetValueAsDate(ptrItem,oldDate)									-- Restore the original Date value
+				if strWarning ~= "" then
+					return " ! ! BEWARE ! !     Replacement date is inconsistent. \n "..strWarning.." \n It will be set anyway if 'Replace' is confirmed. "
+				end
+			end
+		else
+			return " ! ! BEWARE ! !     Replacement date is invalid. \n It will be set as a Date Phrase if 'Replace' is confirmed. "
+		end
+	end
+	return nil									  										-- For OK values or no warning return nil
+end -- function StrDateWarning
+
+-- Search & Replace Prompt GUI --
+function SearchReplacePrompt(ptrItem,strOldVal,strNewVal,strWarning)
+	-- ptrItem:		Pointer to data item
+	-- strOldVal:	Old value of data item
+	-- strNewVal:	New value for data item
+	-- strWarning:	Warning message for Age/Date value
+
+	local function intLineCount(strText,maxLines)
+		--[[
+		@Function:	intLineCount
+		@Description:Works out approximate number of lines to display a text string in a GUI text box.
+		@Parameters:
+		 strText:		String to process mandatory
+		 maxLines:	Maximum height for text box, defaults to 9 lines if not provided
+		]]
+		maxLines = maxLines or 9
+		local intLines = 1
+		for strLine in string.gmatch(strText,"(.-)\n") do
+			intLines = intLines + 1
+		end
+		return math.min(intLines,maxLines)
+	end -- function intLineCount
+
+	local function strItemDetails(ptrItem)
+		-- Returns Record Tag and [Id] plus full Data Ref, and descriptive text for each Tag level
+		local tblDetails = {}
+		local ptrTemp = ptrItem:Clone()
+		local strDataRef, intRecId, strRecTag = general.BuildDataRef(ptrItem)
+		TblOption.Set.Data = strDataRef												-- Save the Data Ref for Result Set
+		table.insert(tblDetails,strRecTag.."  Record Id: ["..intRecId.."]  Data Ref: "..strDataRef)
+		while ptrTemp:IsNotNull() do
+			local strUDF = ""
+			if fhIsUDF(ptrTemp) then													-- V2.0 adds UDF indication
+				strWarning = " ! ! BEWARE ! !     Unrecognised Data Field (UDF)"
+				strUDF = "    {*UDF!}"
+			end
+			table.insert(tblDetails,2,fhGetDisplayText(ptrTemp)..strUDF)
+			ptrTemp:MoveToParentItem(ptrTemp)
+		end
+ 		return table.concat(tblDetails,"\n")
+	end -- local function strItemDetails
+
+	local function iupMultiLineText(strVal,strRead)								-- Return iup.text multiline control
+		return iup.text {	Value=strVal, ReadOnly=strRead, VisibleLines=intLineCount(strVal,6),
+								MultiLine="YES", AutoHide="YES", Formatting="YES", AddFormatTag=iup.user { Bulk="YES", CleanOut="YES", } }
+	end -- local function iupMultiLineText
+
+	local strButton = "Cancel"														-- Default to value for X Close window button
+
+	local function iupButtonControl(strTitle)										-- Return iup.button control
+		return iup.button { Title=strTitle, MinSize="100x40", action=function(self) strButton=self.Title return iup.CLOSE end }
+	end -- local function iupButtonControl
+
+	local strMode = TblOption.Set.Mode												-- Mode is either "Replace" or "Report" text
+
+	local lblDataRef = iup.label  { Title="Data Reference : " }
+	local txtDataRef = iupMultiLineText( strItemDetails(ptrItem), "YES" )
+	local lblCurrent = iup.label  { Title="Current Value : " }
+	local txtCurrent = iupMultiLineText( strOldVal, "YES" )
+	local lblReplace = iup.label  { Title="Replacement Value : " }
+	local txtReplace = iupMultiLineText( strNewVal, "NO" )
+	local lblWarning = iup.label  { Title=strWarning }
+	local tglConfirm = iup.toggle { Title="Confirm every item found" }
+	local btnPerform = iupButtonControl( strMode )
+	local btnSkipOne = iupButtonControl( "Skip" )
+	local btnDestroy = iupButtonControl( "Cancel" )
+
+	if strMode ~= "Replace" then														-- Hide the Replacement Value controls
+		lblReplace.Visible  = "NO"
+		lblReplace.Floating = "YES"
+		txtReplace.Visible  = "NO"
+		txtReplace.Floating = "YES"
+	end
+	if not strWarning then																-- Disable the Warning label control
+		lblWarning.Active = "NO"
+	end
+	if TblOption.Tgl.Conf then														-- Set initial Confirmation toggle value
+		tglConfirm.Value = "ON"
+	else
+		tglConfirm.Value = "OFF"
+	end
+
+	local tblConfirm = { ON = "Confirmation prompt for each item found", OFF = strMode.." all matching text unconditionally" }
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs ( {
+		-- Control	=	1~FgColor		, 2~Font				, 3~Expand		, 4~Tip							, 5~action
+		[lblDataRef]	= { iup_gui.Head, iup_gui.FontHead	, "NO" 			, "Data reference details"	},
+		[txtDataRef]	= { iup_gui.Body, iup_gui.FontBody	, "HORIZONTAL"	, "Data reference details"	},
+		[lblCurrent]	= { iup_gui.Head, iup_gui.FontHead	, "NO" 			, "Current text string"		},
+		[txtCurrent]	= { iup_gui.Body, iup_gui.FontBody	, "HORIZONTAL"	, "Current text string"		},
+		[lblReplace]	= { iup_gui.Head, iup_gui.FontHead	, "NO" 			, "Replacement text string that can be edited"	},
+		[txtReplace]	= { iup_gui.Safe, iup_gui.FontBody	, "HORIZONTAL"	, "Replacement text string that can be edited"	},
+		[lblWarning]	= { iup_gui.Risk, iup_gui.FontBody	, "YES"			, "Data warning message"		},
+		[tglConfirm]	= { iup_gui.Safe, iup_gui.FontBody	, "YES"			, tblConfirm[tglConfirm.Value], function() tglConfirm.Tip = tblConfirm[tglConfirm.Value] end },
+		[btnPerform]	= { iup_gui.Safe, iup_gui.FontBody	, "HORIZONTAL"	, strMode.." the data item"	},
+		[btnSkipOne]	= { iup_gui.Safe, iup_gui.FontBody	, "HORIZONTAL"	, "Skip this data item"		},
+		[btnDestroy]	= { iup_gui.Risk, iup_gui.FontBody	, "HORIZONTAL"	, "Cancel rest of search"		},
+		} ) do
+		iupName.FgColor	= tblAttr[1]
+		iupName.Font 	= tblAttr[2]
+		iupName.Expand	= tblAttr[3]
+		iupName.Tip		= tblAttr[4]
+		iupName.TipBalloon = iup_gui.Balloon
+		if tblAttr[5] then iupName.action = tblAttr[5] end
+	end
+
+	local boxDataRef	= iup.vbox	{ lblDataRef, txtDataRef, }
+	local boxCurrent	= iup.vbox	{ lblCurrent, txtCurrent, }
+	local boxReplace	= iup.vbox	{ lblReplace, txtReplace, }
+	local boxControls	= iup.vbox	{ lblWarning, iup.hbox { tglConfirm, btnPerform, btnSkipOne, btnDestroy, Margin="3x3", Alignment="ABOTTOM", } }
+	local boxDialogue	= iup.vbox	{ boxDataRef, boxCurrent, boxReplace, boxControls, }
+
+	local dlgPerform	= iup.dialog	{ Title=iup_gui.Plugin..iup_gui.Version, Gap=iup_gui.Gap, Margin="3x3", boxDialogue, }
+
+	local strDataClass = fhGetDataClass(ptrItem)
+
+	function txtReplace:action(intChar,strText)									-- Replacement Value is being changed
+		if strDataClass ~= "longtext" and string.char(intChar) == "\n" then
+			return iup.IGNORE															-- Prevent short text items exceeding one line
+		end
+	end -- function txtReplace:action
+
+	function txtReplace:valuechanged_cb()											-- Replacement Value has been changed
+		if strDataClass == "age" then												-- Let spaces be added to allow yrs/mns/dys to be entered
+			if strNewVal:gsub("%s","") == txtReplace.Value:gsub("%s","") then return end
+			local strTxtVal = txtReplace.Value
+			strWarning,strNewVal = StrAgeWarning(ptrItem,strTxtVal)			-- Regenerate any Age Warnings and corrected Value
+			if strTxtVal ~= strNewVal then
+				local intCaretPos = txtReplace.CaretPos							-- Maintain editing caret position and update Value
+				txtReplace.Value = strNewVal
+				txtReplace.CaretPos = intCaretPos
+			end
+		elseif strDataClass == "date" then
+			strWarning = StrDateWarning(ptrItem,txtReplace.Value)				-- Regenerate any Date Warnings
+		end
+		lblWarning.Title = strWarning
+		if strWarning then
+			lblWarning.Active = "YES"
+		else
+			lblWarning.Active = "NO"
+		end
+	end -- function txtReplace:valuechanged_cb
+
+	iup_gui.ShowDialogue("User",dlgPerform,btnPerform,"Normal Keep")		-- Popup dialogue that remembers its attributes & refreshes its size
+
+	strNewVal = txtReplace.Value														-- Retrieve new Replacement text and Confirmation toggle values
+	TblOption.Tgl.Conf = ( tglConfirm.Value == "ON" )
+	dlgPerform:destroy()
+	return strButton, strNewVal 
+end -- function SearchReplacePrompt
+
+-- Perform Text Search and Optional Replace --
+function DoSeekMatch(ptrItem,strDataClass)
+
+	local strOldVal = fhGetValueAsText(ptrItem)
+	local strNewVal = ""
+	local strSeek = TblOption.Set.Seek
+	local strSwap = TblOption.Set.Swap
+
+	local function doManageString(strOldVal,strNewVal)							-- V1.7 new function
+		if TblOption.Set.Mode == "Replace" then
+			if strDataClass == "date" then
+				local newDate = fhNewDate(1999)
+				if strNewVal == "" then
+					newDate:SetNull()													-- Null Date Object for empty string
+				else
+					newDate:SetValueAsText(strNewVal,true)							-- Allow Date Phrase for Date Object
+				end
+				fhSetValueAsDate(ptrItem,newDate)
+			else
+				fhSetValueAsText(ptrItem,strNewVal)									-- For text values use Text object
+			end
+			fhUpdateDisplay()
+		end
+		local ptrRecord = fhNewItemPtr()											-- Save result set entries
+		ptrRecord:MoveToRecordItem(ptrItem)
+		table.insert(TblRecord,ptrRecord:Clone())
+		table.insert(TblDataRef,TblOption.Set.Data)
+		table.insert(TblOldValue,strOldVal)
+		table.insert(TblNewValue,ptrItem:Clone())
+	end -- local function doManageString
+
+	if strDataClass == "date" then													-- V1.7 new conditional statement for Date field
+		strOldVal = fhGetDisplayText(ptrItem):gsub("Date: ",""):gsub("Entry ","")
+	end
+	if TblOption.Tgl.Word then														-- V2.1 revised to cater for successive repetitions of the seek word -- 1 Jan 2014
+		strNewVal = ("\02"..strOldVal.."\02"):gsub("([%s%p])","%1\02")		-- Insert leading & trailing STX="\02" so first & last words match, and add STX="\02" to each white space/punctuation character so repeated words match
+		strNewVal = strNewVal:gsub(strSeek,strSwap):gsub("\02","")			-- Replace words and remove all inserted STX="\02" characters
+	else
+		strNewVal = strOldVal:gsub(strSeek,strSwap)								-- Replace any other cases
+	end
+	if strOldVal ~= strNewVal then
+		strNewVal = strNewVal:gsub("\01","")										-- V2.0 Eliminate any SOH="\01" characters added by doPerformAction() to force a change
+		local strWarning = nil
+		if strDataClass == "age" then												-- Obtain any Warning for Age field, with corrected text value
+			strWarning,strNewVal = StrAgeWarning(ptrItem,strNewVal)
+		elseif strDataClass == "date" then											-- Obtain any Warning for Date field
+			strWarning = StrDateWarning(ptrItem,strNewVal)
+		end
+		if TblOption.Tgl.Conf or strWarning then									-- Confirmation required or Warning to report
+			local strButton = nil
+			strButton, strNewVal = SearchReplacePrompt(ptrItem,strOldVal,strNewVal,strWarning)
+			if strButton == TblOption.Set.Mode then
+				doManageString(strOldVal,strNewVal)									-- V1.7 call new function
+			elseif strButton ~= "Skip" then
+				return false																-- Process cancelled
+			end
+		else
+			TblOption.Set.Data = general.BuildDataRef(ptrItem)
+			doManageString(strOldVal,strNewVal)										-- V1.7 call new function
+		end
+	end
+	return true
+end -- function DoSeekMatch
+
+-- Search All Data Items --
+function DoAllItems()
+	local isContinue = true
+	local tblTgl = TblOption.Tgl														-- Keyword array of Mode & Class & Tag boolean toggles
+	local intItem = tonumber(TblOption.Set.Item)									-- Number of items in database
+	local tblUser = iup_gui.DialogueAttributes("Main")
+	tblUser.X = tblUser.CoordX+100													-- Popup Progress Bar in same place as Main dialogue
+	tblUser.Y = tblUser.CoordY+150
+	progbar.Setup( tblUser )
+	if intItem > 5000 then
+		progbar.Start("Searching",intItem)											-- Start Progress Bar if enough items in database
+	end
+	local intItem = 0
+	for strType in iterate.RecordTypes() do										-- Loop through all record types
+		progbar.Message("Searching "..strType.." Records")
+		for ptrItem in iterate.Items(strType) do									-- Loop through all data items
+			local strChild = fhGetTag(ptrItem)										-- Obtain child item Tag
+			local strParent = ""
+			local ptrParent = fhNewItemPtr()										-- Obtain parent item
+			ptrParent:MoveToParentItem(ptrItem) 
+			if fhIsFact(ptrParent) then												-- Parent is any Fact Tag
+				strParent = "ÖFact."
+			elseif fhGetDisplayText(ptrParent):match("^LDS %l%l") then		-- Parent is any LDS Ordinance
+				strParent = "ÖLDS."
+			else
+				strParent = fhGetTag(ptrParent).."."								-- Otherwise use parent item Tag
+				ptrParent:MoveToParentItem(ptrParent)								-- Prefix "Ö" to distinguish from Parent=Record
+				if ptrParent:IsNotNull() then strParent = "Ö"..strParent end
+			end
+			local strParentChild = strParent..strChild							-- Parent.Child Tags
+			if fhIsAttribute(ptrItem) then strChild = "Attr" end				-- Special case for all Attributes
+			local strDataClass = fhGetDataClass(ptrItem)
+			local strValueType = fhGetValueType(ptrItem)
+			if  ( strValueType == "text" or strValueType == "date" )			-- Only text & date fields are supported
+			and (		tblTgl[strChild]												-- Child item Tag or V2.0 "Attr" ?
+				 or 	tblTgl[strParentChild]											-- V2.0 & V2.1 Parent.Child item Tags ?
+				 or (	tblTgl[strDataClass] and										-- V2.0 Class match and
+						tblTgl[strChild] == nil and									-- Child and Parent.Child without any toggle option ?
+						tblTgl[strParentChild] == nil )														
+				 ) then
+				isContinue = DoSeekMatch(ptrItem,strDataClass)					-- Try string value match for matching data item type
+			end
+			if not isContinue then break end
+			if progbar.Stop() then break end
+			intItem = intItem + 1
+			if intItem > 99 then														-- 1 Jan 2014
+				progbar.Step(100)
+				intItem = 0
+			end
+		end
+	end
+	progbar.Close()
+end -- function DoAllItems
+
+-- Main GUI Dialogue --
+function GUI_MainDialogue()
+
+	--[[
+		TblOption.Set has these entries for global option settings :
+			Item	Item count of database size for search progress bar
+			Date	Date of last Item update to avoid recalculation run-time
+			Seek	Search text string
+			Swap	Replace text string
+			Mode	"Replace" = Search & Replace or "Report" = Search ONLY		(not sticky)
+			Data	Data reference for currently matched item						(not sticky)
+		TblOption.Tgl and TblOption.Lst and other tables below may have these entries for "ON"/"OFF" toggles or combo drop list Tags :
+		Mixed case entries are Mode settings :
+			Conf	Confirm Text Replacements
+			Text	Plain Text Mode v. LUA Pattern Text Mode
+			Case	Case Insensitive v. Case Sensitive
+			Word	Whole Words v. Part Words
+			Attr	Attribute Values enabled/disabled	-- V2.0
+			Age 	Age Error checks enabled/disabled	-- V2.1
+			Date	Date Warnings enabled/disabled		-- V1.7
+		Lower case entries are single Data Class names such as "text", "name", "place" and "longtext"
+		Upper case entries are single Gedcom Tag names such as "NICK", "FORM", "_PLAC" and "_EMAIL"
+		Upper case entries separated by a dot are Record parent & child Tag names such as "SOUR.TITL"
+		Upper case entries prefixed by ellipsis "Ö" are non-Record parent & child such as "ÖDATA.TEXT"
+		These latter are used where similar Gedcom Tag names need to be differentiated :
+			INDI.NAME "name" (Individual Name) versus REPO.NAME & SUBM.NAME "text" (Repository/Submitter record Name c.f. Source/Media record Title)
+			INDI.TITL "text" (Title Attribute) versus SOUR.TITL "longtext" & SOUR.ABBR "text" & OBJE.TITL "text" (Source/Media record Title)
+			NOTE.TEXT (Note record Text) versus SOUR.TEXT & ÖDATA.TEXT (Text From Source) all "longtext"
+		Special variants are ÖFact.NOTE & ÖFact.DATE for any Fact parent tags, and ÖLDS.NOTE & ÖLDS.DATE for any LDS Ordinance parent tags.
+	--]]
+
+	local tblSet = TblOption.Set														-- Local shortcuts to global option tables
+	local tblTgl = TblOption.Tgl
+	local tblLst = TblOption.Lst
+	local tblBasic = { }																-- GUI basic filter toggle iup controls
+	local tblExtra = { }																-- GUI extra filter toggle iup controls
+	local tblCombo = { }																-- GUI combo filter drop list iup controls
+
+	local tblRelated = {																-- Related GUI settings dependancies
+		text 			= { "word", "word2", "wordlist", },							-- FORM is "word", ROLE is "word2", remainder are "text", except NAME/"name" & PLAC/"place" below 
+		name 			= { "NPFX", "NSFX", "NICK", "GIVN", "_USED", "SURN", "SPFX", },
+		PLAC 			= { "place", "_PLAC", },
+		RFN  			= { "RIN"  , },
+		FORM 			= { "_FILE", },													-- FORM is "word"
+		PHON 			= { "_WEB" , "_EMAIL", },
+		ADR1 			= { "ADR2" , "CITY", "STAE", "POST", "CTRY", },
+		TEMP 			= { "AFN"  , "FAMF",  },										-- INDI.CONL.TEMP & SUBN.TEMP & INDI.AFN & SUBN.FAMF
+		NOTE2			= { "_NOTE", },
+		["SOUR.TEXT"]= { "ÖDATA.TEXT", },
+		["SOUR.TITL"]= { "SOUR.ABBR", "OBJE.TITL", "REPO.NAME", "SUBM.NAME", },
+	}
+
+	local tblFilters = { }																-- GUI basic, extra & combo filter attributes	-- V2.1
+
+	tblFilters["BasicShort"] = { 													-- Basic Filter Short Text toggles	-- V2.1
+		-- 1~Name		, 2~Title for toggle											, 3~Tip for toggle
+		{ "name"		, "Individual Names, Prefix, Suffix, Given, etc"		, "All Individual Primary and Alternate Name (NAME) fields including: \n (NPFX) Name Prefix, \n (NSFX) Name Suffix, \n (NICK) Nickname, \n (GIVN) Given Name, \n (_USED) Given Name Used, \n (SURN) Surname, \n (SPFX) Surname Prefix" },
+		{ "PLAC"		, "Fact Place fields"											, "Fact Place and To/From (PLAC/_PLAC) fields only"									},
+		{ "PAGE"		, "Where Within Source fields"								, "Where Within Source (PAGE) fields for Citations only"							},
+		{ "text"		, "All other Text fields"										, "All other Short Text and Long Text fields"										},
+		{ "date"		, "Date fields"													, "Fact, Citation Entry, Multimedia, and LDS Date (DATE/_DATE) fields"			}, -- Fact DATE, Citation DATA.DATE, Multimedia OBJE._DATE, LDS Ordination BAPL/CONL/ENDL/SLGC/SLGS.DATE fields
+	}
+
+	tblFilters["BasicLong"] = { 														-- Basic Filter Long Text toggles	-- V2.1
+		-- 1~Name		, 2~Title for toggle											, 3~Tip for toggle
+		{ "NOTE2"		, "Note fields"													, "All the Note and Link/Note (NOTE/_NOTE) fields"									},
+		{ "ADDR"		, "Fact Address fields"										, "Fact Address (ADDR) fields only"														},
+		{ "SOUR.TEXT", "Text From Source fields"									, "Text From Source (TEXT) fields for Citations and Sources"						},
+		{ "iup.vbox" },
+		{ "boxButtons" },
+	}
+
+	tblFilters["ShortText"] = { 														-- Extra Filter Short Text toggles & combo drop lists
+		-- 1~Name		, 2~Title for toggle											, 3~Tip for toggle																			, 4~Tip for drop list					, 5~1st Item for drop list	, 6~2nd Item for drop list	, 7~3rd Item for drop list	, etc
+		{ "name"		, "Individual Names, Prefix, Suffix, Given, etc"		, "All Individual Primary and Alternate Name (NAME) fields including: \n (NPFX) Name Prefix, \n (NSFX) Name Suffix, \n (NICK) Nickname, \n (GIVN) Given Name, \n (_USED) Given Name Used, \n (SURN) Surname, \n (SPFX) Surname Prefix" },
+		{ "PLAC"		, "Fact Place fields"											, "Fact Place and To/From (PLAC/_PLAC) fields only"									},
+		{ "PAGE"		, "Where Within Source fields"								, "Where Within Source (PAGE) fields for Citations only"							},
+		{ "Attr"		, "Fact Attribute values"										, "Any value for Fact Attributes"														, "Select an Attribute fact"			, " All the Attribute facts" },
+		{ "CAUS"		, "Fact Cause fields"											, "Fact Cause (CAUS) fields only"														},
+		{ "AGNC"		, "Fact && Source Responsible Agency fields"				, "Fact and Source Responsible Agency (AGNC) fields"								},
+		{ "_TYPE"		, "Source record Type fields"								, "Source record Type (_TYPE) fields only"											},
+		{ "TYPE"		, "Type fields for Facts && Custom Id"						, "Facts Type and Custom Id Type (TYPE) fields"										},
+		{ "REFN"		, "Custom Id fields"											, "Custom Id (REFN) fields only"														},
+		{ "RFN"		, "Permanent && Automated Record Number fields"			, "Permanent and Automated Record Number (RFN/RIN) fields only"					},
+		{ "FORM"		, "Multimedia Format && Linked File fields"				, "Multimedia Format (FORM) and Linked File (_FILE) fields only"				},
+		{ "_KEYS"		, "Multimedia Keyword fields"								, "Multimedia Keyword (_KEYS) fields only"											},
+		{ "PHON"		, "Phone && Email && Website fields"						, "All the Phone (PHON) and Email (_EMAIL) and Website (_WEB) fields"			},
+		{ "ADR1"		, "Address Line1/2, City, State, Postcode && Country"	, "All address Line1 (ADR1), Line2 (ADR2), City (CITY), \n State (STAE), Postcode (POST) and Country (CTRY) fields" },
+		{ "TEMP"		, "LDS Temple && File Number && Filename fields"		, "LDS Temple Codes (TEMP) and Ancestral File Number (AFN) and Family Filename (FAMF) fields" },
+		{ "text"		, "All other one line Short Text fields"					, "All other one line Short Text fields including: \n (\"UDF\") Uncategorised Data Fields, \n (_SENT) Fact Customised Sentences, \n (ROLE) Citation Event Type Roles, \n (RELA) Association Relationships, \n (LANG) Submitter Record Languages, \n (CALN) Source Repository Identifications" },
+		--[[	Uncategorised Data Fields (UDF),
+				Fact Customised Sentences (Fact._SENT),
+				Citation Event Type Roles (Fact.SOUR.EVEN.ROLE word2),
+				Association Relationships (INDI.ASSO.RELA),
+				Submitter Record Language (SUBM.LANG),
+				Source Repository Identifications (SOUR.REPO.CALN),
+		--]]
+	}
+
+	tblFilters["LongText"] = { 														-- Extra Filter Long Text toggles & combo drop lists
+		-- 1~Name		, 2~Title for toggle											, 3~Tip for toggle																			, 4~Tip for drop list					, 5~1st Item for drop list	, 6~2nd Item for drop list	, 7~3rd Item for drop list	, 8~4th Item for drop list , etc
+		{ "NOTE2"		, "Note fields"													, "All the Note and Link/Note (NOTE/_NOTE) fields"									, "Select a Note field type"			, "All the Note fields"		, "Fact Notes (ÖFact.NOTE)"	, "Individual (INDI.NOTE)"	, "Family (FAM.NOTE)" , "Citation (ÖSOUR.NOTE)" , "Source (SOUR.NOTE)" , "Repository (REPO.NOTE)" , "Multimedia (OBJE._NOTE)" , "Link/Notes (OBJE.NOTE)" , "LDS Ordination (ÖLDS.NOTE)" },
+		{ "ADDR"		, "Fact Address fields"										, "Fact Address (ADDR) fields only"														},
+		{ "SOUR.TEXT", "Text From Source fields"									, "Text From Source (TEXT) fields for Citations and Sources"						, "Select Citations or Sources"		, "Both the field types"		, "Citation (ÖDATA.TEXT)"		, "Source (SOUR.TEXT)"			},
+		{ "AUTH"		, "Author for Source fields"									, "Author (AUTH) fields for Sources only"												},
+		{ "PUBL"		, "Publication Info for Source fields"						, "Publication Info (PUBL) fields for Sources only"									},
+		{ "SOUR2"		, "Source Note fields"											, "Source Note (SOUR) fields only"														},
+		{ "NOTE.TEXT", "Note record Text fields"									, "Note record Text (TEXT) fields only"												},
+	}
+
+	tblFilters["Distinct"] = {														-- Extra Filter Distinct toggles & combo drop lists
+		-- 1~Name		, 2~Title for toggle											, 3~Tip for toggle																			, 4~Tip for drop list					, 5~1st Item for drop list	, 6~2nd Item for drop list	, 7~3rd Item for drop list	, 8~4th Item for drop list , etc
+		{ "SOUR.TITL", "Record Titles/Names"										, "Source, Multimedia, Repository, Submitter Title (ABBR/TITL/NAME) fields"	, "Select Record title/name type"	, "All the Record types"		, "Source Title (SOUR.TITL)"	, "Source Short (SOUR.ABBR)"	, "Repository (REPO.NAME)" , "Multimedia (OBJE.TITL)" , "Submitter (SUBM.NAME)" }, -- Source Short Title SOUR.ABBR, Source Title SOUR.TITL, Repository Name REPO.NAME, Multimedia Title OBJE.TITL, Submitter Name SUBM.NAME fields
+		{ "age"		, "Fact Age fields"												, "Fact Age (AGE) fields only"															},
+		{ "radAge_Mode" },
+		{ "date"		, "Date fields"													, "Fact, Citation Entry, Multimedia, and LDS Date (DATE/_DATE) fields"			, "Select a Date field type"			, "All the Date fields"		, "Fact Dates (ÖFact.DATE)"	, "Citation Entry (ÖDATA.DATE)" , "Multimedia (OBJE._DATE)" , "LDS Ordination (ÖLDS.DATE)" }, -- Fact DATE, Citation DATA.DATE, Multimedia OBJE._DATE, LDS Ordination BAPL/CONL/ENDL/SLGC/SLGS.DATE fields
+		{ "radDateMode" },
+	}
+
+	local function strComboTag(strTag)												-- Combo drop list tag structure to ensure conformity, and structure must also be used in '2nd/3rd/4th... Item for drop list' above
+		if strTag then return " ("..strTag..")" end								-- Used by doPopulateCombo() to set tag, and setComboListTags() to match tag
+		return " %((.*)%)$"																-- Used by saveOptions() to extract & save tag
+	end -- local function strComboTag
+
+	local function doPopulateCombo(tblItem)										-- Populate all combo drop list controls with items -- V2.1
+		local strName = tblItem[1]
+		local iupList = tblCombo[strName]											-- Obtain the iup.list control via its name
+		iupList.AutoRedraw = "NO"
+		iupList.Sort = "NO" 
+		for intTag = 1, #tblItem-4 do												-- Populate the combo drop list without Sort, as table items set order
+			iupList[intTag] = tblItem[intTag+4]
+		end
+		if strName == "Attr" then														-- Populate the Attribute combo drop list with Sort, as items are indeterminate
+			local tblTag = { RESI=true }
+			local intTag = 1
+			local strTag = ""
+			iupList.Sort = "YES" 
+			for intRec, strRec in ipairs ({"INDI","FAM"}) do					-- Find all Individual and Family Attributes for combo drop list
+				for ptrRec in iterate.Records(strRec) do
+		 			for ptrFact in iterate.Facts(ptrRec) do
+						if fhIsAttribute(ptrFact) then								-- Attribute fact found
+							strTag = fhGetTag(ptrFact)
+							if not tblTag[strTag] then								-- Omit any Attribute already found and Residence (RESI) Attribute
+								intTag = intTag + 1
+								tblTag[strTag] = true
+								iupList[intTag] = fhCallBuiltInFunction("FactName",ptrFact)..strComboTag(strRec.."."..strTag)
+							end
+						end
+					end
+				end
+			end
+		end
+		iupList.AutoRedraw = "YES"
+	end -- local function doPopulateCombo
+
+	local function setComboValues()													-- Set values for combo drop list tags, called by btnDefault:action, and before iup_gui.ShowDialogue  -- V2.1
+		for strName, iupList in pairs ( tblCombo ) do
+			local strTag = tblLst[strName] or ""
+			iupList.Value = 1															-- Default to 1st entry
+			if strTag ~= "" then
+				for intList = 2, iupList.Count do									-- Search combo drop list items for matching tag
+					if iupList[intList]:matches(strComboTag(strTag)) then
+						iupList.Value = intList										-- Select chosen entry
+						break
+					end
+				end
+			end
+		end
+	end -- local function setComboValues
+
+	local function iupToggle(tblItem,tblTab)										-- Return toggle handle created from a filter table item above
+		local strName = tblItem[1]
+		local strValue = tblTgl[strName] or "ON"
+		local iupToggle = iup.toggle { Value=strValue, Title=tblItem[2], Tip=tblItem[3], TipBalloon=iup_gui.Balloon, Expand="YES", action=function(self) self.Tip = self.Tip end }	-- Refresh XP Tooltip
+		iupToggle.TipDelay = 6000 + ( #tblItem[3] * 20 )						-- Display larger tooltips for longer
+		tblTab[strName] = iupToggle													-- Save toggle handle in tblBasic or tblExtra
+		return iupToggle
+	end -- local function iupToggle
+
+	local function iupList(tblItem)													-- Return combo drop list handle created from a filter table item above
+		local strName = tblItem[1]
+		local iupList = iup.list { DropDown="YES", VisibleColumns="9", Visible_Items="20", Tip=tblItem[4], TipBalloon=iup_gui.Balloon, Expand="YES", action=function(self) self.Tip = self.Tip end }	-- Refresh XP Tooltip
+		tblCombo[strName] = iupList
+		doPopulateCombo(tblItem)														-- Populate combo drop list with names & tags
+		return iupList
+	end -- local function iupList
+
+	local function doAppend(boxHandle,strEntry,...)								-- Append controls to GUI box using a filter attributes entry above
+		local intArg = 1
+		local tblTab = tblExtra
+		if strEntry:match("Basic") then												-- Choose tblBasic or tblExtra to save toggle handles
+				tblTab = tblBasic
+		end
+		for intItem, tblItem in ipairs ( tblFilters[strEntry] ) do
+			local iupItem = nil
+			if tblItem[4] then															-- Append toggle and combo drop list -- V2.1
+				iupItem = iup.hbox { iupToggle(tblItem,tblTab), iupList(tblItem), Homogeneous="YES", Gap="1", Margin="2x0" }
+			elseif tblItem[2] then
+				iupItem = iup.hbox { iupToggle(tblItem,tblTab), Margin="2x0" }-- Append just a toggle
+			else
+				if arg[intArg] then
+					iupItem = arg[intArg]												-- Append another control if supplied
+					intArg = intArg + 1
+				end
+			end
+			if iupItem then iup.Append(boxHandle,iupItem) end
+			local strName = tblItem[1]
+			if tblBasic[strName] and													-- Adjust the Basic Filters to 3 State toggles
+			( strName == "text" or tblItem[4] ) then								-- for "text" toggle or if associated Extra Filter has combo drop list
+				local iupToggle = tblBasic[strName]
+				iupToggle["3State"] = "YES"											-- User can only set "ON"=1 or "OFF"=0 but Extra Filters tab can set "NOTDEF"=-1
+				iupToggle.action = function(self,intState) if intState < 0 then self.Value = "OFF" end self.Tip = self.Tip end	-- Refresh XP Tooltip
+			end
+		end
+	end -- local function doAppend
+
+	local function iupValue(strValue,tglA,tglB)									-- Return toggle handle depending on toggle value
+		if strValue == "OFF" then
+			return tglB
+		else
+			return tglA
+		end
+	end -- local function iupValue
+
+	local function iupRadio(strValue,tglA,tglB)									-- Return radio handle created from two toggles
+		return iup.radio { iup.hbox	{ tglA, tglB, Homogeneous="YES", }, Value=iupValue(strValue,tglA,tglB) }
+	end -- local function iupRadio
+
+	local function setAllToggles(strEntry,strMode)								-- Set all Short/Long Text toggle options "ON"/"OFF"
+		for intItem, tblItem in ipairs ( tblFilters[strEntry] ) do
+			tblExtra[tblItem[1]].Value = strMode
+			if strMode == "ON" and tblCombo[tblItem[1]] then					-- If toggle is ticked and combo drop list exists,
+				tblCombo[tblItem[1]].Value = 1										-- then reset combo drop list to default 1st entry
+			end
+		end
+	end -- local function setAllToggles
+
+	local function iupText(strVal)													-- Return multiline text handle
+		return iup.text { Value=strVal, MultiLine="YES", AutoHide="YES", Formatting="YES", AddFormatTag=iup.user { Bulk="YES", CleanOut="YES" } }
+	end -- local function iupText
+
+	-- Create GUI controls
+	local lblSeekText 	= iup.label	{ Title="Search  : " }
+	local txtSeekText 	= iupText		( tblSet.Seek )		txtSeekText.action=function(self) self.Tip = lblSeekText.Tip end	-- Refresh XP Tooltips
+	local lblSwapText	= iup.label	{ Title="Replace : " }
+	local txtSwapText	= iupText		( tblSet.Swap )		txtSwapText.action=function(self) self.Tip = lblSwapText.Tip end	-- Refresh XP Tooltips
+
+	local tglTextPlain	= iup.toggle	{ Title="Plain Text Mode" }
+	local tglTextPatt	= iup.toggle	{ Title="LUA Pattern Mode" }
+	local radTextMode	= iupRadio	( tblTgl.Text, tglTextPlain, tglTextPatt )
+	local tglCaseInse	= iup.toggle	{ Title="Case Insensitive"	, action=function(self) self.Tip = self.Tip end }	-- Refresh XP Tooltips
+	local tglCaseSens	= iup.toggle	{ Title="Case Sensistive"		, action=function(self) self.Tip = self.Tip end }
+	local radCaseMode	= iupRadio	( tblTgl.Case, tglCaseInse, tglCaseSens )
+	local tglWordWhole	= iup.toggle	{ Title="Whole Words"			, action=function(self) self.Tip = self.Tip end }
+	local tglWordPart	= iup.toggle	{ Title="Part Words"			, action=function(self) self.Tip = self.Tip end }
+	local radWordMode	= iupRadio	( tblTgl.Word, tglWordWhole, tglWordPart )
+	local tglConfirm	= iup.toggle	{ Title="Confirm the action for every item found", Value=tblTgl.Conf or "ON" }
+
+	local boxOptLeft	= iup.hbox	{ iup.vbox { lblSeekText, lblSwapText }, iup.vbox { txtSeekText, txtSwapText } }
+	local boxOptRight	= iup.vbox	{ radTextMode, radCaseMode, radWordMode, iup.hbox { tglConfirm, Margin="6x0" }, Margin="6x0" }
+	local boxOptions	= iup.hbox	{ boxOptLeft, boxOptRight, Homogeneous="YES", Margin="0x2" }
+	local frmOptions	= iup.frame	{ Title=" Search Mode ", boxOptions }
+
+	local boxBasicShort	= iup.vbox	{ iup.hbox { Homogeneous="YES" } }			doAppend( boxBasicShort, "BasicShort" )
+	local btnBasicRepl 	= iup.button	{ Title=" Search && Replace" }
+	local btnBasicSeek 	= iup.button	{ Title="   Search ONLY   " }
+	local boxBasicBtn	= iup.hbox	{ btnBasicRepl, btnBasicSeek, Homogeneous="YES", Margin="0x2" }
+	local boxBasicLong	= iup.vbox	{ iup.hbox { Homogeneous="YES" } }			doAppend( boxBasicLong, "BasicLong", iup.vbox { Margin="2x12" }, boxBasicBtn )
+	local frmBasicFilt	= iup.frame	{ Title=" Basic Filters ", iup.hbox { boxBasicShort, boxBasicLong, Homogeneous="YES" } }
+
+	local btnShortInc	= iup.button	{ Title="Include All Short Text" }
+	local btnShortExc	= iup.button	{ Title="Exclude All Short Text" }
+	local boxShortText	= iup.vbox	{ iup.hbox { btnShortInc, btnShortExc, Homogeneous="YES" } }
+	local frmShortText	= iup.frame	{ Title=" Short Text Fields ", boxShortText }		doAppend( boxShortText, "ShortText" )
+
+	local btnLongInc	= iup.button	{ Title="Include All Long Text" }
+	local btnLongExc	= iup.button	{ Title="Exclude All Long Text" }
+	local boxLongText	= iup.vbox	{ iup.hbox { btnLongInc, btnLongExc, Homogeneous="YES" } }
+	local frmLongText	= iup.frame	{ Title=" Long Text Fields ", boxLongText }			doAppend( boxLongText, "LongText" )
+
+	local tglAge_Inc	= iup.toggle	{ Title="Age Warnings"			, action=function(self) self.Tip = self.Tip end, TipBalloonTitle="BEWARE!", TipBalloonTitleIcon="2" }
+	local tglAge_Exc	= iup.toggle	{ Title="No Age Warnings"		, action=function(self) self.Tip = self.Tip end }	-- Refresh XP Tooltips
+	local radAge_Mode	= iupRadio	( tblTgl.Age, tglAge_Inc, tglAge_Exc )
+	local tglDateInc	= iup.toggle	{ Title="Date Warnings"		, action=function(self) self.Tip = self.Tip end, TipBalloonTitle="BEWARE!", TipBalloonTitleIcon="2" }
+	local tglDateExc	= iup.toggle	{ Title="No Date Warnings"	, action=function(self) self.Tip = self.Tip end }	-- Refresh XP Tooltips
+	local radDateMode	= iupRadio	( tblTgl.Date, tglDateInc, tglDateExc )
+	local boxDistinct	= iup.vbox	{ }
+	local frmDistinct	= iup.frame	{ Title=" Distinctive Fields ", boxDistinct }		doAppend( boxDistinct, "Distinct", radAge_Mode, radDateMode )
+
+	local btnExtraRepl 	= iup.button	{ Title=" Search && Replace" }
+	local btnExtraSeek 	= iup.button	{ Title="   Search ONLY   " }
+	local boxExtraBtn	= iup.hbox	{ btnExtraRepl, btnExtraSeek, Homogeneous="YES", Margin="0x2" }
+
+	local btnDefault	= iup.button	{ Title="Restore Defaults" }
+	local btnSetFont	= iup.button	{ Title="Set Window Fonts" }
+	local btnGetHelp	= iup.button	{ Title="   Help && Advice" }
+	local btnDestroy	= iup.button	{ Title="Close Plugin" }
+	local boxButtons	= iup.hbox	{ btnDefault, btnSetFont, btnGetHelp, btnDestroy, Homogeneous="YES", Margin="16x0" }
+
+	local boxMajor = iup.vbox { frmOptions, frmBasicFilt }
+
+	local boxExtra = iup.hbox { frmShortText, iup.vbox { frmLongText, frmDistinct, boxExtraBtn }, Homogeneous="YES" }
+
+	-- Create the Tab controls layout
+	local tabControl = iup.tabs { Padding="8x4",
+								boxMajor, TabTitle0=" Major Options ",
+								boxExtra, TabTitle1=" Extra Filters ", 
+							}
+	local dialogMain	= iup.dialog	{ Title=iup_gui.Plugin..iup_gui.Version, Gap="1", Margin="2x0", iup.vbox { tabControl, boxButtons } }
+
+	local tblConfirm	= { ON = "Confirmation prompt for every item found", OFF = "Process all matching text unconditionally" }
+
+	local function setTabMode(intTab)												-- Transfer toggles according to chosen tab
+		intTab = intTab or IntTabPosn												-- Default to current tab
+		if intTab < 2 then
+			local strTextValue = nil
+			for strName, anyValue in pairs ( tblExtra ) do						-- Transfer the Extra Filters to the Basic Filters
+				local strExtraValue = tblExtra[strName].Value					-- Extra Filter is "ON" or "OFF"
+				if  strExtraValue == "ON"
+				and tblCombo[strName]
+				and tblCombo[strName].Value > "1" then								-- Extra Filter is "ON" and combo drop list selects subset
+					strExtraValue = "NOTDEF"											-- So Extra Filter is "NOTDEF"
+				end
+				if tblBasic[strName] and strName ~= "text" then					-- Set each Basic Filter equal to Extra Filter (except "All other Text fields")
+					tblBasic[strName].Value = strExtraValue
+				else
+					strTextValue = strTextValue or strExtraValue					-- If other Extra Filters all "ON" or all "OFF" then use that value
+					if strExtraValue ~= strTextValue then
+						strTextValue = "NOTDEF"										-- Otherwise, with a mixture, use "NOTDEF" value
+					end
+				end
+			end
+			tblBasic["text"].Value = strTextValue									-- Set the Basic "All other Text fields" to this value
+		elseif intTab == 2 then
+			for strName, anyValue in pairs ( tblExtra ) do						-- Transfer the Basic Filters to the Extra Filters
+				local strBasicValue = tblBasic["text"].Value						-- Default for Extra Filters uses Basic "All other Text fields"
+				if tblBasic[strName] then
+					strBasicValue = tblBasic[strName].Value						-- But matching Extra Filter uses Basic Filter
+				end
+				if strBasicValue ~= "NOTDEF" then									-- Unless the Basic Filter is "NOTDEF"
+					tblExtra[strName].Value = strBasicValue
+					if tblCombo[strName] and strBasicValue == "ON" then			-- Filter is "ON" so reset combo drop list to 1st entry
+						tblCombo[strName].Value = 1
+					end
+				end
+			end
+		end
+	end -- local function setTabMode
+
+	local function setTextMode()														-- Set Text Case & Word Modes called from tglTextPlain:action, btnDefault:action, and before iup_gui.ShowDialogue
+		tglTextPlain.Tip = tglTextPlain.Tip
+		tglTextPatt.Tip  = tglTextPatt.Tip											-- Refresh XP Tooltips
+		if tglTextPlain.Value == "ON" then
+			radCaseMode.Active = "YES"												-- Plain Text Mode enables Case & Word modes
+			radWordMode.Active = "YES"
+			lblSeekText.Tip = "Plain text string to search for"
+			txtSeekText.Tip = lblSeekText.Tip
+			lblSwapText.Tip = "Plain text string to substitute"
+			txtSwapText.Tip = lblSwapText.Tip
+		else
+			radCaseMode.Active = "NO"													-- LUA Pattern Mode disables Case & Word modes
+			radWordMode.Active = "NO"
+			lblSeekText.Tip = "LUA pattern string to search for"
+			txtSeekText.Tip = lblSeekText.Tip
+			lblSwapText.Tip = "LUA pattern string to substitute"
+			txtSwapText.Tip = lblSwapText.Tip
+		end
+	end -- local function setTextMode
+
+	local function setWarnMode()														-- Set Age & Date Warning Mode called from tblExtra.age:action, tblExtra.date:action, btnDefault:action, and before iup_gui.ShowDialogue
+		tblExtra.age.Tip  = tblExtra.age.Tip
+		tblExtra.date.Tip = tblExtra.date.Tip										-- Refresh XP Tooltips
+		if tblExtra.age.Value == "ON" then
+			radAge_Mode.Active = "YES"												-- Age Fields included enables Warning mode
+		else
+			radAge_Mode.Active = "NO"													-- Age Fields excluded disables Warning mode
+		end
+		if tblExtra.date.Value == "ON" then
+			radDateMode.Active = "YES"												-- Date Fields included enables Warning mode
+		else
+			radDateMode.Active = "NO"													-- Date Fields excluded disables Warning mode
+		end
+	end -- local function setWarnMode
+
+	local function setControls()														-- Reset GUI control values
+		txtSeekText.Value = tblSet.Seek
+		txtSwapText.Value = tblSet.Swap
+		txtSeekText.AddFormatTag = iup.user { Bulk="YES", CleanOut="YES", FgColor=iup_gui.Safe } -- Special Multiline Formatted Text case!!!
+		txtSwapText.AddFormatTag = iup.user { Bulk="YES", CleanOut="YES", FgColor=iup_gui.Safe } 
+		tglConfirm.Value  = tblTgl.Conf
+		tglConfirm.Tip    = tblConfirm[tglConfirm.Value]
+		radTextMode.Value = iupValue(tblTgl.Text,tglTextPlain,tglTextPatt)
+		radCaseMode.Value = iupValue(tblTgl.Case,tglCaseInse ,tglCaseSens)
+		radWordMode.Value = iupValue(tblTgl.Word,tglWordWhole,tglWordPart)
+		radAge_Mode.Value = iupValue(tblTgl.Age ,tglAge_Inc  ,tglAge_Exc )
+		radDateMode.Value = iupValue(tblTgl.Date,tglDateInc  ,tglDateExc )
+		for strName, iupValue in pairs ( tblExtra ) do
+			tblExtra[strName].Value = tblTgl[strName] or "ON"
+		end
+		dialogMain:map()																-- Needed to ensure Attributes combo drop list is sorted before setComboValues
+		setComboValues()																-- Set values for matching combo drop list tags -- V2.1
+		setTabMode()																		-- Set toggles for current tab, must come after setComboValues()
+		setTextMode()																	-- Set Text Case & Word Modes depending on Plain Text/LUA Pattern mode
+		setWarnMode()																	-- Set Date & Age Warning mode depending on Date & Age toggle settings
+	end -- local function setControls
+
+	-- Assign GUI control attributes	-- V2.1
+	local tblControls = { { "Font", "FgColor", "Expand", "Tip", {"TipBalloon";"Balloon"}, { "help_cb";function() iup_gui.HelpDialogue(IntTabPosn) end }, "action", setControls },
+		[tabControl ]   = { "FontHead", "Head", "YES"		, "Select 'Major Options' or 'Extra Filters'" },
+		[boxOptions ]   = { "FontBody", "Safe", "YES" },
+		[frmOptions ]   = { "FontHead", "Head", "YES" },
+		[boxBasicShort] = { "FontBody", "Safe", "YES" },
+		[boxBasicLong]  = { "FontBody", "Safe", "YES" },
+		[frmBasicFilt]  = { "FontHead", "Head", "YES" },
+		[boxShortText]  = { "FontBody", "Safe", "YES" },
+		[frmShortText]  = { "FontHead", "Head", "YES" },
+		[boxLongText]   = { "FontBody", "Safe", "YES" },
+		[frmLongText]   = { "FontHead", "Head", "YES" },
+		[boxDistinct]   = { "FontBody", "Safe", "YES" },
+		[frmDistinct]   = { "FontHead", "Head", "YES" },
+
+		[lblSeekText]   = { "FontBody", "Body", "VERTICAL"	, "Plain text string to search for" },
+		[txtSeekText]   = { "FontBody", "Safe", "YES"		, "Plain text string to search for" },
+		[lblSwapText]   = { "FontBody", "Body", "VERTICAL"	, "Plain text string to substitute" },
+		[txtSwapText]   = { "FontBody", "Safe", "YES"		, "Plain text string to substitute"	 },
+		[tglTextPlain]  = { "FontBody", "Safe", "YES"		, "Plain text strings" },
+		[tglTextPatt]   = { "FontBody", "Safe", "YES"		, "LUA pattern strings\nSee 'Help and Advice' for details" },
+		[tglCaseInse]   = { "FontBody", "Safe", "YES"		, "Case insensitive text search" },
+		[tglCaseSens]   = { "FontBody", "Safe", "YES"		, "Case sensitive text search" },
+		[tglWordWhole]  = { "FontBody", "Safe", "YES"		, "Whole words are delimited by either\nspace, tab, newline, punctuation, or field edge" },
+		[tglWordPart]   = { "FontBody", "Safe", "YES"		, "Part words may be any text" },
+		[tglConfirm ]   = { "FontBody", "Safe", "YES"		, tblConfirm[tglConfirm.Value]					, function() tglConfirm.Tip = tblConfirm[tglConfirm.Value] end },
+
+		[btnBasicRepl]  = { "FontHead", "Safe", "YES"		, "Start the Search and Replace process" },
+		[btnBasicSeek]  = { "FontHead", "Safe", "YES"		, "Start the Search only process" },
+
+		[btnShortInc]   = { "FontBody", "Safe", "YES"		, "Include all one line Short Text fields"	, function() setAllToggles("ShortText","ON")  end },
+		[btnShortExc]   = { "FontBody", "Risk", "YES"		, "Exclude all one line Short Text fields"	, function() setAllToggles("ShortText","OFF") end },
+		[btnLongInc ]   = { "FontBody", "Safe", "YES"		, "Include all multi-line Long Text fields"	, function() setAllToggles("LongText","ON")  end },
+		[btnLongExc ]   = { "FontBody", "Risk", "YES"		, "Exclude all multi-line Long Text fields"	, function() setAllToggles("LongText","OFF") end },
+		[tglAge_Inc ]   = { "FontBody", "Risk", "YES"		, "This affects the record 'Updated' date\neven if the Age fields are skipped ! !" },
+		[tglAge_Exc ]   = { "FontBody", "Safe", "YES"		, "Age Warnings disabled" },
+		[tglDateInc ]   = { "FontBody", "Risk", "YES"		, "This affects the record 'Updated' date\neven if the Date fields are skipped ! !" },
+		[tglDateExc ]   = { "FontBody", "Safe", "YES"		, "Date Warnings disabled" },
+
+		[btnExtraRepl]  = { "FontHead", "Safe", "YES"		, "Start the Search and Replace process" },
+		[btnExtraSeek]  = { "FontHead", "Safe", "YES"		, "Start the Search only process" },
+
+		[btnDefault ]   = { "FontBody", "Safe","HORIZONTAL"	, "Restore default Settings for Options and Window positions and sizes" },
+		[btnSetFont ]   = { "FontBody", "Safe","HORIZONTAL"	, "Choose user interface window font style" },
+		[btnGetHelp ]   = { "FontBody", "Safe","HORIZONTAL"	, "Obtain online Help and Advice from the FHUG Knowledge Base" },
+		[btnDestroy ]   = { "FontBody", "Risk","HORIZONTAL"	, "Close the Plugin" },
+		}
+
+	iup_gui.AssignAttributes(tblControls)											-- Assign GUI control attributes	-- V2.1
+
+	MakeHelpDialogue(btnGetHelp)														-- Create the Help dialogue buttons
+
+	local function saveOptions()														-- Save all GUI settings
+		if IntTabPosn < 2 then
+			setTabMode(2)																-- Transfer Basic Filters to Extra Filters if necessary
+			setWarnMode()
+		end
+		for strName, anyValue in pairs ( tblTgl ) do
+			if not tblExtra[strName] then
+				tblTgl[strName] = nil													-- Clear the non-GUI Class and Tag toggles
+			end
+		end
+		for strName, anyValue in pairs ( tblExtra ) do
+			tblTgl[strName] = tblExtra[strName].Value								-- Save all the GUI Class and Tag and "Attr" toggle filters
+		end
+		for strName, anyValue in pairs ( tblCombo ) do
+			local strText = tblCombo[strName][tblCombo[strName].Value]
+			tblLst[strName] = strText:match(strComboTag()) or "" 				-- Save all the GUI combo drop list tag filters
+		end
+		tblSet.Seek = txtSeekText.Value												-- Save text strings
+		tblSet.Swap = txtSwapText.Value
+		tblSet.Mode = nil																-- Mode and Data Ref are not saved
+		tblSet.Data = nil
+		tblTgl.Conf = tglConfirm.Value												-- Save all mode toggles
+		tblTgl.Text = tglTextPlain.Value
+		tblTgl.Case = tglCaseInse.Value
+		tblTgl.Word = tglWordWhole.Value
+		tblTgl.Age  = tglAge_Inc.Value
+		tblTgl.Date = tglDateInc.Value
+		SaveSettings()																	-- Save sticky data settings
+	end -- local function saveOptions
+
+	function tglTextPlain:action(intState)											-- Action for Plain Text Mode v LUA Pattern Mode radio toggle
+		setTextMode()
+	end -- function tglTextPlain:action
+
+	function tblExtra.age:action(intState)											-- Action for Age fields toggle
+		setWarnMode()
+	end -- function tblExtra.age:action
+
+	function tblExtra.date:action(intState)										-- Action for Date fields toggle
+		setWarnMode()
+	end -- function tblExtra.date:action
+
+	local function doPerformAction()												-- Perform action for both Search & Replace and Search ONLY button
+		if tblSet.Seek:match("\n") or tblSet.Swap:match("\n") then			-- Check newline characters are only used with Long Text fields -- V2.1
+			local strToggle = "OFF"
+			for intItem, tblItem in ipairs ( tblFilters["ShortText"] ) do
+				if tblTgl[tblItem[1]] == "ON" then									-- Must check before true/false adjustment below as main toggle may get disabled
+					strToggle = "ON"													-- Short Text option selected
+					break
+				end
+			end
+			if strToggle == "ON"														-- Short Text or Record Title or Age or Date selected?
+			or tblTgl["SOUR.TITL"] == "ON"											-- Source Title is Long Text, but others are Short Text, and Source Title unlikely to have newlines
+			or tblTgl.age == "ON"
+			or tblTgl.date == "ON" then
+				iup_gui.MemoDialogue("\n  Newline characters in Search &&/or Replace text  \n  are reserved exclusively for Long Text Fields,  \n  such as Note, Fact Address, Text From Source.  \n")
+				return false
+			end
+		end
+		for strName, strValue in pairs ( tblTgl ) do								-- TblOptions can be altered as SaveSettings() is not now called except via saveOptions()
+			tblTgl[strName] = ( strValue == "ON" )									-- Swap "ON" to true, and "OFF" to false, in all toggle options
+		end
+		for strSource, tblTarget in pairs ( tblRelated ) do
+			for _, strTarget in ipairs ( tblTarget ) do							-- Settings for related target Classes & Tags from source options
+				tblTgl[strTarget] = tblTgl[strSource]
+			end
+		end
+		for strName, anyValue in pairs ( tblCombo ) do							-- Adjust true/false settings for related combo drop list tags
+			if tblTgl[strName] and tblLst[strName] ~= "" then					-- Matching extra toggle option is ticked and combo drop list names a tag
+				local strTag = tblLst[strName]:replace(".NOTE",".NOTE2")
+				tblTgl[strName] = ( strName == strTag )
+				for _, strTarget in ipairs ( tblRelated[strName] or {} ) do
+					tblTgl[strTarget] = ( strTarget == strTag )
+				end
+				tblTgl[strTag] = true
+			end
+		end
+		if tblTgl.Text then																-- Plain Text mode -- 1 Jan 2014
+			tblTgl.Text = " Plain Text "
+			if tblSet.Seek:match("^[%s%p]+$") then									-- V2.1 Exclude seek for white space &/or punctuation from Whole Word search
+				tblTgl.Word = false
+			end
+			local strDelimit = ""
+			if tblTgl.Word then															-- Whole Word mode -- 1 Jan 2014
+				strDelimit = "([%s%p\02])"
+				tblSet.Seek = tblSet.Seek:gsub("([%s%p])","%1\02"):plain()	-- Replace whole words delimited by white space or punctuation or STX="\02" characters
+				tblSet.Swap = "%1"..tblSet.Swap:plain().."%2"
+			else
+				tblSet.Seek = tblSet.Seek:plain()									-- Hide any LUA pattern magic characters
+				tblSet.Swap = tblSet.Swap:plain()
+			end
+			if tblTgl.Case then															-- Case Insensitive mode after Whole Word mode, otherwise [ & ] are changed by %p -- 1 Jan 2014
+				tblSet.Seek = tblSet.Seek:gsub("%a",function(c) return "["..c:lower()..c:upper().."]" end)
+			end
+			tblSet.Seek = strDelimit..tblSet.Seek..strDelimit					-- Add delimiters after Case Insensitive mode, otherwise s & p become [sS] & [pP] -- 1 Jan 2014
+		else
+			tblTgl.Text = " LUA Pattern "											-- LUA Pattern search mode
+			tblTgl.Case = false															-- Must disable Case Insensitive and Whole Word searches
+			tblTgl.Word = false
+		end
+		if tblSet.Seek == "" then
+			tblSet.Seek = "^$"															-- Empty search string must use empty LUA pattern -- V2.0
+			tblTgl.Word = false															-- and disable Whole Word search mode
+		end
+		if tblSet.Swap == "" then														-- Change to any char < "\07" as it cannot be enterd by user even via Alt+001
+			tblSet.Swap = "\01" 														-- Use SOH="\01" character so DoSeekMatch() always detects a change -- V2.0
+		end
+		local tblUser = iup_gui.DialogueAttributes("Main")						-- Customise the Replace dialogue to use Main dialogue size & position
+		iup_gui.CustomDialogue("User",tblUser.Raster,tblUser.CoordX,tblUser.CoordY)
+		DoAllItems()																		-- Perform the Search and optional Replace process
+		return true
+	end -- local function doPerformAction
+
+	local function doSearchReplace()												-- Search & Replace action
+		saveOptions()
+		local strSeek = tblSet.Seek
+		local strSwap = tblSet.Swap
+		tblSet.Mode = "Replace"
+		if doPerformAction() then
+			if #TblRecord == 0 then
+				iup_gui.MemoDialogue("\n  No matching data items have been replaced.  \n")
+			else																			-- Output Result Set for replacements
+				local strTitle = "Search and Replace Results "
+				local strSubTitle = "Replacing"..tblTgl.Text..strSeek.." with "..strSwap
+				fhOutputResultSetTitles(strTitle..strSubTitle, strTitle, strSubTitle.."    Date: %#x")
+				fhOutputResultSetColumn("Record Name", "item", TblRecord  , #TblRecord, 180, "align_left")
+				fhOutputResultSetColumn("Data Ref"   , "text", TblDataRef , #TblRecord, 090, "align_left")
+				fhOutputResultSetColumn("Old Value"  , "text", TblOldValue, #TblRecord, 180, "align_left")
+				fhOutputResultSetColumn("New Value"  , "item", TblNewValue, #TblRecord, 180, "align_left")
+				return iup.CLOSE 
+			end
+		end
+	end -- local function doSearchReplace
+
+	function btnBasicRepl:action()													-- Action for Basic Search & Replace button	-- V2.1
+		return doSearchReplace()
+	end -- function btnBasicRepl:action
+
+	function btnExtraRepl:action()													-- Action for Extra Search & Replace button
+		return doSearchReplace()
+	end -- function btnExtraRepl:action
+
+	local function doSearchOnly()													-- Search Only action
+		saveOptions()
+		local strSeek = tblSet.Seek
+		tblSet.Swap = "\03" 															-- Use ETX="\03" character so DoSeekMatch() always detects a change -- 1 Jan 2014
+		tblSet.Mode = "Report"
+		if doPerformAction() then
+			if #TblRecord == 0 then
+				iup_gui.MemoDialogue("\n  No matching data items have been reported.  \n")
+			else																			-- Output Result Set for reported text
+				local strTitle = "Search Results "
+				local strSubTitle = "Searching for"..tblTgl.Text..strSeek
+				fhOutputResultSetTitles(strTitle..strSubTitle, strTitle, strSubTitle.."    Date: %#x")
+				fhOutputResultSetColumn("Record Name", "item", TblRecord  , #TblRecord, 180, "align_left")
+				fhOutputResultSetColumn("Data Ref"   , "text", TblDataRef , #TblRecord, 090, "align_left")
+				fhOutputResultSetColumn("Data Value" , "item", TblNewValue, #TblRecord, 180, "align_left")
+				return iup.CLOSE 
+			end
+		end
+	end -- local function doSearchOnly
+
+	function btnBasicSeek:action()													-- Action for Basic Search ONLY button	-- V2.1
+		return doSearchOnly()
+	end -- function btnBasicSeek:action
+
+	function btnExtraSeek:action()													-- Action for Extra Search ONLY button
+		return doSearchOnly()
+	end -- function btnExtraSeek:action
+
+	function btnDefault:action()														-- Action for Restore Defaults button
+		ResetDefaultSettings()
+		iup_gui.ShowDialogue("Help")
+		setControls()																	-- Reset controls & redisplay Main dialogue
+		iup_gui.ShowDialogue("Main")
+		SaveSettings()																	-- Save sticky data settings
+	end -- function btnDefault:action
+
+	function btnSetFont:action()														-- Action for Set Window Font button	-- V2.1
+		btnSetFont.Active = "NO"
+		saveOptions()
+		iup_gui.FontDialogue(tblControls)
+		SaveSettings()																	-- Save sticky data settings
+		btnSetFont.Active = "YES"
+	end -- function btnFontSet:action
+
+	function btnGetHelp:action()														-- Action for Help & Advice button
+		iup_gui.HelpDialogue(IntTabPosn)
+	end -- function btnGetHelp:action
+
+	function btnDestroy:action()														-- Action for Close Plugin button
+		saveOptions()
+		return iup.CLOSE 
+	end -- function btnDestroy:action
+
+	function tabControl:tabchangepos_cb(intNew,intOld)							-- Call back when Main tab position is changed  
+		IntTabPosn = intNew + 1
+		setTabMode()																		-- Set toggles for current tab
+		setWarnMode()
+--		saveOptions()																	-- Could save IntTabPosn sticky setting ?
+	end -- function tabControl:tabchangepos_cb
+
+	iup_gui.ShowDialogue("Main",dialogMain,btnDestroy)
+
+end -- function GUI_MainDialogue
+
+-- Main Code Section Starts Here --
+
+	fhInitialise(5,0,0,"save_recommended")
+
+	PresetGlobalData()																	-- Preset global data definitions
+
+	ResetDefaultSettings()																-- Preset default sticky settings
+
+	LoadSettings()																		-- Load sticky data settings
+
+	iup_gui.CheckVersionInStore()													-- Notify if later Version
+
+	GUI_MainDialogue()																	-- Invoke graphical user interface

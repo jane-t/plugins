@@ -1,0 +1,25 @@
+htmltemplate = 
+[[<!DOCTYPE>
+    <HTML>
+    <HEAD>
+    <TITLE> The HTML Clipboard</TITLE>
+    <BASE HREF="http://sample/specs">
+    </HEAD>
+    <BODY>
+    <UL>
+    <!--StartFragment -->
+    <LI> The Fragment </LI>
+    <LI> The Fragment </LI>
+    <LI> The Fragment </LI>
+    <LI> The Fragment </LI>
+    <!--EndFragment -->
+    </UL>
+    </BODY>
+    </HTML>]]
+require "iup"
+clipboard = iup:clipboard()
+clipboard.addformat = 'HTML Format'
+clipboard.format = 'HTML Format'
+clipboard.formatdatasize = htmltemplate:len()+1
+clipboard.formatdata = htmltemplate
+

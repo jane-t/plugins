@@ -1,0 +1,33 @@
+--[[
+@Title: aa Test Version Checking
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: March 2014 
+@Description: Test the version number conversion routine.  The routine pads version numbers so they can be compared to each other.
+]]
+
+function main()
+    local a= {'1.910', '1.9',
+        '1.3',
+        '1.8.4',
+        '2.5'
+    }
+    for _,v in ipairs(a) do
+        print(v,cvtVer(v))
+    end
+end
+
+function cvtVer(s)
+    local ver,factor,max = 0,10000,3
+    local t = {}
+    for word in s:gmatch("%w+") do
+        table.insert(t,tonumber(word))
+    end
+    for j = 1,max do
+        t[j] = t[j] or 0
+        ver = ver + (t[j] * factor^(max-j))
+    end
+    return ver
+end
+--------------------------- main
+main()

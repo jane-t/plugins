@@ -1,0 +1,47 @@
+local res,sTitle,sTags, sMemo
+local color = {error = '255 200 200',red = '255 0 0'}
+print(iup.VersionNumber())
+-------------------------------------------------------- Define Text Fields
+local inp_title = iup.text{name='title',expand='HORIZONTAL' }
+local inp_tags  = iup.text{name='tags',  expand='HORIZONTAL' }
+local inp_memo  = iup.text{name='memo',  expand='HORIZONTAL', multiline = 'YES',visiblelines = 10}
+inp_tags.value = 'sample,tag,values'
+local lab_message = iup.label{title=' ',fgcolor=color.red, expand='HORIZONTAL'}
+-------------------------------------------------------- Reset Error Markers
+function inp_title:action() self.bgcolor = DLGBGCOLOR lab_message.title = '' end
+-------------------------------------------------------- Define Buttons
+local btn_ok = iup.button{name='ok', title='OK'}
+function btn_ok:action()
+    res=self.name
+    if inp_title.value =='' then
+       inp_title.bgcolor = color.error
+       lab_message.title = 'Please Enter Title'
+    else
+    return iup.CLOSE
+    end
+end
+local btn_cancel = iup.button{name='cancel', title='Cancel', action = function (self) res=self.name return iup.CLOSE end}
+local btn_help = iup.button {name='help', title='Help', action = function (self) iup.Message('Help','Help Goes Here') end}
+-------------------------------------------------------- Define Dialog
+dlg = iup.dialog{ 
+            iup.vbox{ 
+                     iup.hbox{iup.label{title='Title',size='20'},inp_title},
+                     iup.hbox{iup.label{title='Tags',size='20'}, inp_tags},
+                     iup.label{title='Memo'},inp_memo,lab_message,
+                     iup.hbox{btn_ok,btn_cancel,btn_help;padding='10',gap='5'}
+                     ;padding='5',gap='5',nmargin='20x20'
+                     },
+             title='Sample',padding='10',gap='5', size='320',
+             close_cb=function() res='closed' return iup.CLOSE end}
+-------------------------------------------------------- Show Dialog
+dlg:show()      -- Show the dialog
+iup.MainLoop()  -- Process the dialog
+print(res)      -- Print the pressed button
+if res == 'ok' then
+  sTitle = inp_title.value
+  sTags  = inp_tags.value
+  sMemo  = inp_memo.value
+  print(inp_title.value,inp_tags.value,inp_memo.value)      -- Print the entered fields
+end
+dlg:destroy()   -- Clean up the dialog, note all dialog controls are destroyed as well
+print(sTitle,sTags,sMemo)

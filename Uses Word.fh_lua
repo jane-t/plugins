@@ -1,0 +1,757 @@
+--[[
+@Title: Uses Word
+@Author: Calico Pie Limited
+@Version: 1
+@LastUpdated: 11th Oct 2012
+@Description: Example of a script that updates a Word template document
+]]
+fhInitialise(5,0,8)
+require "luacom"
+require "lfs"
+
+-- global variables --
+bKinFound = false
+
+--------------------------------------------------
+-- mainfunction
+--------------------------------------------------
+function mainfunction()
+	local oWord
+	local oDocs
+	local oDoc
+	local oRange
+	local oTemp
+	local sTemplate
+	local sTemplateShortName
+	local sDocShortName
+	local sPublicFolder
+	local sNewDocName
+	local iIndex
+	local iLen
+	local bContinue
+	local bShowMsg
+	local iCount
+	local sSearchLabel
+	local tIndRec
+	local pIndRec
+	local pKeyDeathDate
+	local pFamRec
+	local pAssoc
+
+	fhOverridePreference('SURNAMES_UPPERCASE', true, false) -- sets this OFF temporarily
+
+	if fhGetContextInfo('CI_APP_MODE') ~= 'Project Mode' then
+		fhMessageBox('This plugin can only be run in Project mode')
+		return
+	end
+
+	tIndRec = fhPromptUserForRecordSel('INDI',1)
+
+	if #tIndRec ~= 1 then
+		return
+	end
+	pIndRec = tIndRec[1]
+	if pIndRec == nil or pIndRec:IsNull() then
+		return
+	end
+
+	sTemplateShortName = 'Word Template.doc'
+	sDocShortName = 'Word Report.doc'
+	sTemplate = fhGetPluginDataFileName('LOCAL_MACHINE', true)
+	sTemplate = sTemplate .. '\\' .. sTemplateShortName
+
+	sPublicFolder = fhGetContextInfo('CI_PROJECT_PUBLIC_FOLDER')
+	-- if the folder doesn't exist create it
+	if lfs.attributes(sPublicFolder,"mode") ~= "directory" then
+		lfs.mkdir(sPublicFolder)
+		end
+
+	sNewDocName = sPublicFolder .. '\\' .. sDocShortName
+	oWord = luacom.GetObject("Word.Application")
+	if oWord == nil then
+		oWord = luacom.CreateObject("Word.Application")
+	end
+	
+	-- first make sure that we do not have either document already open...
+	oDocs = oWord.Documents
+	
+	bContinue = true
+	bShowMsg = true
+	while bContinue == true do
+		bContinue = false -- assume for now
+		iIndex = 1
+		iCount = oDocs.Count
+		while iIndex <= iCount do
+			oTemp = oDocs:Item(iIndex)
+			iIndex = iIndex + 1
+			if oTemp ~= nil and oTemp.Name == sTemplateShortName or oTemp.Name == sDocShortName then
+				if bShowMsg == true then
+					bShowMsg = false
+					local sRet = fhMessageBox('You have one or more copies of the Word report document currently open in MS Word. These will be closed without saving.', 'MB_OKCANCEL')
+					if sRet == 'Cancel' then
+						return
+					end
+				else
+					oTemp:Close(0) -- 0 = wdDoNotSaveChanges
+				end
+				bContinue = true -- loop round again
+				break
+			end
+		end -- end while
+	end -- end while
+
+	oTemp = nil
+	oDoc = oDocs:Open(sTemplate)
+	oDoc:SaveAs(sNewDocName)
+
+	oWord.Visible = true
+	oWord.NormalTemplate.Saved = true
+	oWord.DisplayAlerts = false
+	oWord:Activate()
+	oDoc:Activate()
+
+	SetCodeValue(oDoc, '{{NAME_OF_SELECTED_PERSON}}', fhGetDisplayText(pIndRec) .. ' ')
+	SetCodeValue(oDoc, '{{TODAY}}', os.date('%d %B %Y'))
+
+	local strSearchText = '{{SOME_CODE_MARKER}}'
+	oRange = oDoc.Content
+	oRange.Find:ClearFormatting()
+	if oRange.Find:Execute(strSearchText) then
+		oRange:Delete()
+	else
+		DisplayError(100, 'Missing Label ' .. strSearchText)
+		return
+	end
+
+	-- We are told to assume that there is only ever at most one family-as-child
+	pAssoc = fhGetItemPtr(pIndRec, '~.FAMC')
+	pFamRec = fhGetValueAsLink(pAssoc)
+	local pFather = fhGetValueAsLink(fhGetItemPtr(pFamRec, '~.HUSB'))
+	local pMother = fhGetValueAsLink(fhGetItemPtr(pFamRec, '~.WIFE'))
+
+	-- Add the IMMEDIATE FAMILY section
+	oRange = CreateFamilySectionTable_Immediate(oRange, pIndRec, pFamRec, pFather, pMother, pKeyDeathDate)
+
+	strSearchText = '{{PUT_STUFF_HERE}}'
+	oRange = oDoc.Content
+	oRange.Find:ClearFormatting()
+	if oRange.Find:Execute(strSearchText) then
+		oRange:Delete()
+	else
+		DisplayError(100, 'Missing Label ' .. strSearchText)
+		return
+	end
+
+	oDoc.Fields:Update()
+
+	oDoc:SaveAs(sNewDocName)
+	oWord.NormalTemplate.Saved = True
+
+	fhMessageBox("Report has been generated")
+end
+
+--------------------------------------------------
+-- UpdateContentsSection
+--------------------------------------------------
+function UpdateContentsSection(oDoc, pIndRec, bMale)
+	local strSearchText = '{{PUT_STUFF_HERE}}'
+	local oRange = oDoc.Content
+	local sPaternalLC = 	bMale and 'paternal' or 'maternal'		-- Lua equiv to "a ? b : c" in C++
+
+	oRange.Find:ClearFormatting()
+	if oRange.Find:Execute(strSearchText) then
+		oRange:Collapse(1)  				-- 1 = wdCollapseStart
+		oRange:InsertParagraphAfter()
+		oRange:Collapse(0)  				-- 0 = wdCollapseEnd
+		oRange.Text = 'The ' .. sPaternalLC .. ' family (' .. fhGetItemText(pIndRec, '~.NAME:SURNAME') .. ')'
+	else
+		DisplayError(100, 'Missing Label ' .. strSearchText)
+		return
+	end
+end
+
+--------------------------------------------------
+-- CreateFamilySectionTable_Immediate
+--------------------------------------------------
+function CreateFamilySectionTable_Immediate(oRange, pIndRec, pFamRec, pFather, pMother, pKeyDeathDate)
+	local oTable
+	local oCell
+	local oRow
+	local eRet
+	local bFemale, sHeUc, sHeLc, sHis = GetSex(pIndRec)
+	oRange:InsertBreak() 		-- page break
+	oRange:Collapse(0) 			-- wdCollapseEnd (=0). Insertion point now after page-break but before strSearchText
+
+	oRange:InsertAfter('The Immediate Family')
+	oRange:InsertParagraphAfter()
+	oRange.Style = -2  			-- 		-2 == wdStyleHeading1
+	oRange:Collapse(0) 			-- wdCollapseEnd (=0)
+	oRange:InsertParagraphAfter()
+	oRange.Style = -1  			-- 		-1 == wdStyleNormal
+	oRange:Collapse(0) 			-- wdCollapseEnd (=0)
+
+	oTable = oRange.Tables:Add(oRange,1,4) -- create table with 1 row, 4 columns
+	SetFamilySectionTableProperties(oTable)
+
+	-- oRange = oTable:Cell(2,2).Range
+	-- oRange.Font.Color = 255 -- wdColorRed'
+	-- oRange.Font.Bold = 700
+
+	-- Add the Deceased and his life events (which will include his spouses)
+	AddLifeEventRowsAndIssue(oTable, pIndRec, pKeyDeathDate, true)
+
+	-- Add the Deceased's parents
+	local sParentDesc = 'The Intestate\'s birth certificate records ' .. sHis .. ' parents as ' ..
+		fhGetDisplayText(pFather) .. ' and ' .. fhGetDisplayText(pMother) .. 
+		'.  They married and died as follows:'
+	oRow = oTable.Rows:Add()
+	oRow.Cells:Item(2).Range.Underline = 0           -- 0 = wdUnderlineNone
+	AddMarriedCouple(oTable, pFamRec, pFather, pMother, sParentDesc, 'parents', pKeyDeathDate)
+
+	-- Add the Deceased's siblings (full-blood)
+	local eRet = HasDescs_Fam_ApartFrom(pFamRec, pIndRec)		-- i.e. EXCLUDING pIndRec
+	if eRet == 'yes' then
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Text = 'Issue as follows:'
+		AddIssueRows_Fam(oTable, pFamRec, pIndRec, false, false, pKeyDeathDate)
+	else
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Text = 'No whole blood siblings found.'
+	end
+
+	-- Add the Deceased's half-siblings (half-blood)...
+	-- ... on his father's side
+	if pFather:IsNotNull() then
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Underline = 0           -- 0 = wdUnderlineNone
+		eRet = HasFams_Ind_ApartFrom(pFather, pFamRec)		-- i.e. EXCLUDING pFamRec
+		if eRet == 'yes' then
+			oRow = oTable.Rows:Add()
+			oRow.Cells:Item(2).Range.Text = 'The Deceased\'s father was also married as follows:'
+		else
+			oRow = oTable.Rows:Add()
+			oRow.Cells:Item(2).Range.Text = 'Research indicates that the Deceased\'s father was married ' ..
+			'on the one occasion only and is not known to have had issue by any other relationship'
+		end
+	end
+
+	-- ... and on his mother's side
+	if pMother:IsNotNull() then
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Underline = 0           -- 0 = wdUnderlineNone
+		eRet = HasFams_Ind_ApartFrom(pMother, pFamRec)		-- i.e. EXCLUDING pFamRec
+		if eRet == 'yes' then
+			oRow = oTable.Rows:Add()
+			oRow.Cells:Item(2).Range.Text = 'The Deceased\'s mother was also married as follows:'
+		else
+			oRow = oTable.Rows:Add()
+			oRow.Cells:Item(2).Range.Text = 'Research indicates that the Deceased\'s mother was married ' ..
+			'on the one occasion only and is not known to have had issue by any other relationship'
+		end
+	end
+
+	-- the first two rows are a dummies; so delete them now...
+	oTable.Rows.First:Delete()
+	oTable.Rows.First:Delete()
+
+	oRange = oTable.Range
+	oRange:Collapse(0) 			-- wdCollapseEnd (=0)
+
+	return oRange
+end
+
+--------------------------------------------------
+-- SetFamilySectionTableProperties
+--------------------------------------------------
+function SetFamilySectionTableProperties(oTable)
+	local iRowCount = oTable.Rows.Count
+--[[
+	oTable.PreferredWith = 486 -- in points (1pt=1/72"; 486pts = 6.75")
+	oTable.Rows.LeftIndent = -21.6 -- in points (1pt=1/72"; -21.6pts = -0.3")
+	oTable.Columns:Item(1):SetWidth(67.68) -- in points (1pt=1/72"; 67.68pts = 0.94")
+	oTable.Columns:Item(2):SetWidth(288) -- in points (1pt=1/72"; 288pts = 4")
+	oTable.Columns:Item(3):SetWidth(54) -- in points (1pt=1/72"; 54pts = 0.75")
+	oTable.Columns:Item(4):SetWidth(76.32) -- in points (1pt=1/72"; 76.32pts = 1.06")
+]]
+	oTable.Columns:Item(1):SetWidth(67.68) -- in points (1pt=1/72"; 67.68pts = 0.94")
+	oTable.Columns:Item(2):SetWidth(262.8) -- in points (1pt=1/72"; 262.8pts = 3.65")
+	oTable.Columns:Item(3):SetWidth(54) -- in points (1pt=1/72"; 54pts = 0.75")
+	oTable.Columns:Item(4):SetWidth(76.32) -- in points (1pt=1/72"; 76.32pts = 1.06")
+
+	for iIndex = 1, iRowCount do
+		-- oTable:Cell(iIndex, 3).Range.Text = 'Cell3-' .. iIndex
+		-- oTable:Cell(iIndex, 4).Range.Text = 'Cell4-' .. iIndex
+		oTable:Cell(iIndex, 1).Range.ParagraphFormat.Alignment = 0 -- 0=wdAlignParagraphLeft
+		oTable:Cell(iIndex, 2).Range.ParagraphFormat.Alignment = 0 -- 0=wdAlignParagraphLeft
+		oTable:Cell(iIndex, 3).Range.ParagraphFormat.Alignment = 2 -- 2=wdAlignParagraphRight
+		oTable:Cell(iIndex, 4).Range.ParagraphFormat.Alignment = 2 -- 2=wdAlignParagraphRight
+	end
+end
+
+--------------------------------------------------
+-- AddMarriedCouple
+--------------------------------------------------
+function AddMarriedCouple(oTable, pFamRec, pFather, pMother, sCoupleDesc, sParents, pKeyDeathDate)
+	oRow = oTable.Rows:Add()
+	oRow.Cells:Item(2).Range.Text = sCoupleDesc
+
+	oRow = oTable.Rows:Add()
+
+	local pDtDate = fhGetValueAsDate(fhGetItemPtr(pFamRec, '~.MARR.DATE'))
+	if pDtDate ~= nil then
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Text = fhGetDisplayText(pFather) .. ' married ' .. fhGetDisplayText(pMother)
+		oRow.Cells:Item(3).Range.Text = 'Married:'
+		OutputDate(oRow.Cells:Item(4), fhGetItemPtr(pFamRec, '~.MARR'))
+	end
+
+	local bHePredeceased = false
+	local bShePredeceased = false
+	local pHisDeathNode = fhGetItemPtr(pFather, '~.DEAT')
+	local pHerDeathNode = fhGetItemPtr(pMother, '~.DEAT')
+	local pHisDeathDateNode = fhGetItemPtr(pHisDeathNode, '~.DATE')
+	local pHerDeathDateNode = fhGetItemPtr(pHerDeathNode, '~.DATE')
+	if IsDateEarlierThan(pHisDeathDateNode, pKeyDeathDate) then
+		bHePredeceased = true;
+	end
+	if IsDateEarlierThan(pHerDeathDateNode, pKeyDeathDate) then
+		bShePredeceased = true;
+	end
+
+	if pHisDeathNode:IsNotNull() then
+		oRow = oTable.Rows:Add()
+		if bHePredeceased and bShePredeceased then
+			oRow.Cells:Item(2).Range.Text = 'Both ' .. sParents .. ' predeceased.'
+		elseif bHePredeceased then
+			oRow.Cells:Item(2).Range.Text = 'He predeceased.'
+		end
+		oRow.Cells:Item(3).Range.Text = 'He died:'
+		OutputDate(oRow.Cells:Item(4), pHisDeathNode)
+	end
+
+	if pHerDeathNode:IsNotNull() then
+		oRow = oTable.Rows:Add()
+		if bShePredeceased and not bHePredeceased then
+			oRow.Cells:Item(2).Range.Text = 'She predeceased.'
+		end
+		oRow.Cells:Item(3).Range.Text = 'She died:'
+		OutputDate(oRow.Cells:Item(4), pHerDeathNode)
+	end
+end
+
+--------------------------------------------------
+-- GetSex
+--------------------------------------------------
+function GetSex(pIndRec)
+	local bFemale, sHeUc, sHeLc, sHis
+	
+	if fhGetItemText(pIndRec, '~.SEX') == 'Female' then
+		bFemale = true
+		sHeUc = 'She'
+		sHeLc = 'she'
+		sHis = 'her'
+	else
+		bFemale = false
+		sHeUc = 'He'
+		sHeLc = 'he'
+		sHis = 'his'
+	end
+	return bFemale, sHeUc, sHeLc, sHis
+end
+
+--------------------------------------------------
+-- HasDescs_Ind
+--------------------------------------------------
+function HasDescs_Ind(pIndRec)
+	local pAssoc = fhGetItemPtr(pIndRec, '~.FAMS') -- always rets ptr
+	local pFamRec
+	local pChild
+	while pAssoc:IsNotNull() do
+		pFamRec = fhGetValueAsLink(pAssoc) -- always rets ptr
+		pChild = fhGetItemPtr(pFamRec, '~.CHIL')
+		if pChild:IsNotNull() then
+			return 'yes'
+		end
+		pAssoc:MoveNext('SAME_TAG')
+	end
+	return 'none_found'
+end
+
+--------------------------------------------------
+-- HasDescs_Fam
+--------------------------------------------------
+function HasDescs_Fam(pFamRec)
+	local pAssoc = fhGetItemPtr(pFamRec, '~.CHIL')
+	local pIndRec
+
+	while pAssoc:IsNotNull() do
+		pIndRec = fhGetValueAsLink(pAssoc) -- always rets ptr
+		if pIndRec ~= nil and pIndRec:IsNotNull() then
+			return 'yes'
+		end
+		pAssoc:MoveNext('SAME_TAG')
+	end
+	return 'none_found'
+end
+
+--------------------------------------------------
+-- HasDescs_Fam_ApartFrom
+--------------------------------------------------
+function HasDescs_Fam_ApartFrom(pFamRec, pExcludeIndRec)
+	local pAssoc = fhGetItemPtr(pFamRec, '~.CHIL')
+	local pIndRec
+
+	while pAssoc:IsNotNull() do
+		pIndRec = fhGetValueAsLink(pAssoc) -- always rets ptr
+		if pIndRec ~= nil and pIndRec:IsNotNull() and not pIndRec:IsSame(pExcludeIndRec) then
+			return 'yes'
+		end
+		pAssoc:MoveNext('SAME_TAG')
+	end
+	return 'none_found'
+end
+
+--------------------------------------------------
+-- HasFams_Ind_ApartFrom
+--------------------------------------------------
+function HasFams_Ind_ApartFrom(pIndRec, pExcludeFamRec)
+	local pAssoc = fhGetItemPtr(pIndRec, '~.FAMS')
+	local pFamRec
+
+	while pAssoc:IsNotNull() do
+		pFamRec = fhGetValueAsLink(pAssoc) -- always rets ptr
+		if pFamRec ~= nil and pFamRec:IsNotNull() and not pFamRec:IsSame(pExcludeFamRec) then
+			return 'yes'
+		end
+		pAssoc:MoveNext('SAME_TAG')
+	end
+	return 'none_found'
+end
+
+--------------------------------------------------
+-- AddIssueRows_Ind
+--------------------------------------------------
+function AddIssueRows_Ind(oTable, pIndRec, pKeyDeathDate, bTheDesceased)
+	local tIndTable = CreateChildTable_Ind(pIndRec)
+	local pChild
+
+	for iIndex = 1, #tIndTable do
+		pChild = tIndTable[iIndex].pIndRec
+		AddLifeEventRowsAndIssue(oTable, pChild, pKeyDeathDate, bTheDesceased)
+	end
+end
+
+--------------------------------------------------
+-- CreateChildTable_Ind
+--------------------------------------------------
+function CreateChildTable_Ind(pIndRec)
+	local tIndTable = {}
+	
+	local pAssoc = fhGetItemPtr(pIndRec, '~.FAMS') -- always rets ptr
+	local pFamRec
+	local pChildAssoc
+	local pChildRec
+
+	while pAssoc:IsNotNull() do
+		pFamRec = fhGetValueAsLink(pAssoc) -- always rets ptr
+		pChildAssoc = fhGetItemPtr(pFamRec, '~.CHIL')
+		while pChildAssoc:IsNotNull() do
+			pChildRec = fhGetValueAsLink(pChildAssoc)
+			if pChildRec:IsNotNull() then
+				local tTemp = {}
+				tTemp.pIndRec = pChildRec
+				tTemp.pDtDate = fhGetValueAsDate(fhGetItemPtr(pChildRec, '~.BIRT.DATE'))
+				table.insert(tIndTable, tTemp)
+			end
+			pChildAssoc:MoveNext('SAME_TAG')
+		end
+		pAssoc:MoveNext('SAME_TAG')
+	end
+
+	table.sort(tIndTable, CompareTableItemsByDate)
+
+	return tIndTable
+end
+
+--------------------------------------------------
+-- AddIssueRows_Fam
+--------------------------------------------------
+function AddIssueRows_Fam(oTable, pFamRec, pStopInd, bGrandparentFam, bFather, pKeyDeathDate)
+	local tIndTable = CreateChildTable_Fam(pFamRec)
+	local pChild
+
+	for iIndex = 1, #tIndTable do
+		pChild = tIndTable[iIndex].pIndRec
+		if pStopInd ~= nil and pStopInd:IsSame(pChild) then
+			oRow = oTable.Rows:Add()
+			oRow.Cells:Item(2).Range.Underline = 0           -- 0 = wdUnderlineNone
+			oRow = oTable.Rows:Add()
+			oRow.Cells:Item(1).Range.Text = fhGetItemText(pChild, '~.REFN')
+			oRow.Cells:Item(2).Range.Text = fhGetDisplayText(pChild)
+			oRow = oTable.Rows:Add()
+			if bGrandparentFam then
+				local sFather = bFather and 'father' or 'mother' -- Lua equiv to "a ? b : c" in C++
+				oRow.Cells:Item(2).Range.Text = 'This is the starting person\'s ' .. sFather
+			else
+				oRow.Cells:Item(2).Range.Text = 'This is the starting person'
+			end
+			oRow.Cells:Item(3).Range.Text = 'Born:'
+			OutputDate(oRow.Cells:Item(4), fhGetItemPtr(pChild, '~.BIRT'))
+		else
+			AddLifeEventRowsAndIssue(oTable, pChild, pKeyDeathDate)
+		end
+	end
+end
+
+--------------------------------------------------
+-- CreateChildTable_Fam
+--------------------------------------------------
+function CreateChildTable_Fam(pFamRec)
+	local tIndTable = {}
+	local pChildRec
+	local pAssoc = fhGetItemPtr(pFamRec, '~.CHIL')	 -- always rets ptr
+
+	while pAssoc:IsNotNull() do
+		pChildRec = fhGetValueAsLink(pAssoc)
+		if pChildRec:IsNotNull() then
+			local tTemp = {}
+			tTemp.pIndRec = pChildRec
+			tTemp.pDtDate = fhGetValueAsDate(fhGetItemPtr(pChildRec, '~.BIRT.DATE'))
+			table.insert(tIndTable, tTemp)
+		end
+		pAssoc:MoveNext('SAME_TAG')
+	end
+
+	table.sort(tIndTable, CompareTableItemsByDate)
+
+	return tIndTable
+end
+
+--------------------------------------------------
+-- AddLifeEventRowsAndIssue
+--------------------------------------------------
+function AddLifeEventRowsAndIssue(oTable, pIndRec, pKeyDeathDate, bTheDeceased)
+	local sTag
+	local tFactTable = CreateVitalEventsTable(pIndRec)
+	local pNode
+	local bFemale, sHeUc, sHeLc = GetSex(pIndRec)
+	local bPredeceased = false
+
+	oRow = oTable.Rows:Add() -- leave a blank line before each person
+	oRow.Cells:Item(2).Range.Underline = 0           -- Clear the underline flag
+
+	for iIndex = 1, #tFactTable do
+		pNode = tFactTable[iIndex].pFactItem
+		sTag = fhGetTag(pNode)
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Underline = 0           -- Clear the underline flag
+		if iIndex == 1 then
+			  if not bTheDeceased then
+				oRow.Cells:Item(1).Range.Text = fhGetItemText(pIndRec, '~.REFN')
+			  end
+			oRow.Cells:Item(2).Range.Text = fhGetDisplayText(pIndRec)
+			if sTag ~= 'BIRT' then
+				oRow = oTable.Rows:Add()
+			end
+		end
+	end -- end for
+
+	if #tFactTable == 0 then
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(1).Range.Text = fhGetItemText(pIndRec, '~.REFN')
+		oRow.Cells:Item(2).Range.Text = fhGetDisplayText(pIndRec)
+	end
+
+	AddFlaggedText(oTable, pIndRec, sHeUc)
+end
+
+--------------------------------------------------
+-- AddFlaggedText
+--------------------------------------------------
+function AddFlaggedText(oTable, pIndRec, sHeUc)
+	local pFlags = fhGetItemPtr(pIndRec, '~._FLGS')
+	if pFlags:IsNull() then
+		return
+	end
+
+	local pFlg = fhNewItemPtr()
+
+	-- Contacted Flag (displays as 'Located')
+	pFlg:MoveTo(pFlags, '~.__SOME_FLAG_OR_OTHER')
+	if pFlg:IsNotNull() then
+		oRow = oTable.Rows:Add()
+		oRow.Cells:Item(2).Range.Text = 'Located'
+		oRow.Cells:Item(2).Range.Underline = 1           -- 1 = wdUnderlineSingle
+	end
+	
+end
+
+--------------------------------------------------
+-- CreateVitalEventsTable
+--------------------------------------------------
+function CreateVitalEventsTable(pIndRec)
+	local tEvents = {}
+	local pFamRec
+	local pAssoc
+	local pNode = fhNewItemPtr()
+	local sTag	 
+	pNode:MoveToFirstChildItem(pIndRec)
+	while pNode:IsNotNull() do
+		sTag = fhGetTag(pNode)
+		if sTag == 'BIRT' then
+			local tFact = {}
+			tFact.pFactItem = pNode:Clone()
+			tFact.pDtDate = fhGetValueAsDate(fhGetItemPtr(pNode, '~.DATE'))
+			table.insert(tEvents, tFact)
+		end
+		pNode:MoveNext()
+	end
+	pAssoc = fhGetItemPtr(pIndRec, '~.FAMS')
+	while pAssoc:IsNotNull() do
+		pFamRec = fhGetValueAsLink(pAssoc)
+		if pFamRec:IsNotNull() then
+			pNode:MoveToFirstChildItem(pFamRec)
+			
+			while pNode:IsNotNull() do
+				sTag = fhGetTag(pNode)
+				if sTag == 'MARR' or sTag == 'DIV' then
+					local tFact = {}
+					tFact.pFactItem = pNode:Clone()
+					tFact.pDtDate = fhGetValueAsDate(fhGetItemPtr(pNode, '~.DATE'))
+					table.insert(tEvents, tFact)
+				end
+				pNode:MoveNext()
+			end -- end while
+			
+			pAssoc:MoveNext('SAME_TAG')
+		end
+	end -- end while
+	table.sort(tEvents, CompareTableItemsByDate)
+	return tEvents
+end
+
+--------------------------------------------------
+-- CompareTableItemsByDate
+--------------------------------------------------
+function CompareTableItemsByDate(elem1, elem2)
+	local pDate1 = elem1.pDtDate
+	local pDate2 = elem2.pDtDate
+	if pDate1 ~= nil and pDate2 ~= nil and not pDate1:IsNull() and not pDate2:IsNull() then
+		if pDate1:Compare(pDate2) < 0 then
+			return true
+		else
+			return false
+		end
+	end
+	return false
+end
+
+--------------------------------------------------
+-- GetPartnersName
+--------------------------------------------------
+function GetPartnersName(pIndRec, pFamFact)
+	local pFamRec = fhNewItemPtr()
+	pFamRec:MoveToParentItem(pFamFact)
+	local pHusb = fhGetValueAsLink(fhGetItemPtr(pFamRec, '~.HUSB'))
+	local pWife = fhGetValueAsLink(fhGetItemPtr(pFamRec, '~.WIFE'))
+	if pIndRec:IsSame(pHusb) then
+		return fhGetDisplayText(pWife)
+	elseif pIndRec:IsSame(pWife) then
+		return fhGetDisplayText(pHusb)
+		end
+
+	return ''
+end
+
+--------------------------------------------------
+-- IsDateEarlierThan
+--------------------------------------------------
+function IsDateEarlierThan(pItem, pParamDate)
+	if pParamDate == nil then
+		return false
+	end
+	local pDate = fhGetValueAsDate(pItem)
+	if pDate == nil then
+		return false
+	end
+	
+	local pDt1 = pDate:GetDatePt1()
+	local pDt2 = pParamDate:GetDatePt1()
+	if pDt1 == nil or pDt2 == nil or pDt1:IsNull() or pDt2:IsNull() then
+		return false
+	end
+	if pDt1:Compare(pDt2) < 0 then
+		return true
+	end
+	return false
+end
+
+--------------------------------------------------
+-- IsDateValid
+--------------------------------------------------
+function IsDateValid(pItem)
+	local pDate = fhGetValueAsDate(pItem)
+	if pDate == nil or pDate:IsNull() then
+		return false
+	end
+	
+	local pDt1 = pDate:GetDatePt1()
+	if pDt1 == nil or pDt1:IsNull() then
+		return false
+	end
+
+	return true
+end
+
+--------------------------------------------------
+-- OutputDate
+--------------------------------------------------
+function OutputDate(cell, pDateNode)
+	if pDateNode ~= nil and pDateNode:IsNotNull() then
+		cell.Range.Text = fhGetItemText(pDateNode, '~.DATE:COMPACT')
+
+		local sPrevText = "previously"
+		local iPrevTextLen = 10
+		local sCertStatus = fhGetLabelledText(fhGetItemPtr(pDateNode, '~.NOTE2'), 'Certificate:')
+		local sPrefix = string.lower(string.sub(sCertStatus, 1, iPrevTextLen))
+
+		if sPrefix == sPrevText then
+			cell.Range.Bold = true
+			cell.Range.Underline = 1           -- 1 = wdUnderlineSingle
+		elseif string.len(sCertStatus) > 0 then
+			cell.Range.Bold = true
+			cell.Range.Underline = 0           -- 0 = wdUnderlineNone
+		end
+	end
+end
+
+--------------------------------------------------
+-- SetCodeValue
+--------------------------------------------------
+function SetCodeValue(oDoc, sCode, sValue)
+	local oRange = oDoc.Content
+	oRange.Find:ClearFormatting()
+
+	if oRange.Find:Execute(sCode) then
+		oRange:Delete()
+		oRange.Text = sValue
+	else
+		DisplayError(100, 'Missing Label ' .. sCode)
+	end
+end
+
+--------------------------------------------------
+-- DisplayError
+--------------------------------------------------
+function DisplayError(iCode, sError)
+	local sText = 'Error ' .. iCode
+	if sError ~= nil and sError ~= '' then
+		sText = sText .. ': ' .. sError
+	end
+	fhMessageBox(sText)
+end
+
+--------------------------------------------------
+-- jump to mainfunction
+--------------------------------------------------
+mainfunction()

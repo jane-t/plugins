@@ -1,0 +1,128 @@
+--[[
+@Title:			Occupations Per Census Year and Gender
+@Author:			Mike Tate
+@Version:			1.4
+@LastUpdated:	10 Oct 2013
+@Description:	Creates a Result Set of counts of Occupations per Census Year and Gender derived from your GEDCOM.
+@V1.4:				Include counts per Gender, fix Occupations with Date Range/Period, and check Census Event existed.
+@V1.3:				Cope with blank Occupation value.
+@ FHUG Work in Progress Versions:
+@V1.2:				Create Result Set instead of GUI Matrix & CSV, and auto-adapt to existing Census Events.
+@V1.1:				Added "Totals" & "Other" and CSV export.
+@V1.0:				Initial Work in Progress version.
+]]
+
+StrPlugin		= "Occupations Per Census Year and Gender"				-- Plugin title & version
+StrVersion	= " Version 1.4 "
+
+local tblGrid = { }																-- Grid of cells, where the tblGrid[intCol][intRow] holds count for Col number intCol & Row number intRow
+local intMin = 1700																-- Oldest Census year found
+local intMax = 1999																-- Latest Census year found
+
+function UpdateCount(strRow,strCol,strSex)								-- Update the Counts per Census Year and per Gender
+	local intRow = tblGrid.Row[strRow]										-- Lookup Row number of Occupation
+	local intCol = tblGrid.Col[strCol] or tblGrid.Col["Other"]		-- Lookup Col number of Census, or if no match use "Other" Col
+	local intSex = tblGrid.Col[strSex] or tblGrid.Col["Unknown"]		-- Lookup Col number of Gender, or if no match use "Unknown" Col
+	if not intRow then
+		table.insert(tblGrid.Row,strRow)									-- Make new Occupation name Row
+		intRow = #tblGrid.Row
+		tblGrid.Row[strRow] = intRow											-- Row lookup dictionary entry
+	end
+	tblGrid[intCol][intRow] = ( tblGrid[intCol][intRow] or 0 ) + 1	-- Increment Census cell count
+	tblGrid[intCol][1]      = ( tblGrid[intCol][1]      or 0 ) + 1	-- Increment "Totals" Row cell
+	tblGrid[intSex][intRow] = ( tblGrid[intSex][intRow] or 0 ) + 1	-- Increment Gender cell count
+	tblGrid[intSex][1]      = ( tblGrid[intSex][1]      or 0 ) + 1	-- Increment "Totals" Row cell
+	tblGrid[1]     [intRow] = ( tblGrid[1]     [intRow] or 0 ) + 1	-- Increment "Totals" Col cell
+	tblGrid[1]     [1]      = ( tblGrid[1]     [1]      or 0 ) + 1	-- Increment "Totals" "Totals" cell
+end -- function UpdateCount
+
+function CensusYear(datDate,ptrRec)											-- Find first matching Census year between date points
+	local ptrCens = fhNewItemPtr()											-- Census event pointer
+	local strType = datDate:GetSubtype()									-- Get date type
+	local intYear1 = datDate:GetDatePt1():GetYear()						-- 1st date point year
+	local intYear2 = datDate:GetDatePt2():GetYear()						-- 2nd date point year
+	local intMinimum = math.max(intMin,intYear1)							-- Minimum potential Census year
+	local intMaximum = math.min(intMax,intYear2)							-- Maximum potential Census year
+	if strType == "From"
+	or strType == "After" then												-- Include all possible Census years From/After 1st date point
+		intMinimum = math.max(intMin,intYear1)
+		intMaximum = intMax
+	elseif strType == "To"
+	or strType == "Before" then												-- Include all possible Census years To/Before 1st date point
+		intMinimum = intMin
+		intMaximum = math.min(intMax,intYear1)
+	end
+--	print(intYear1, intYear2, intMinimum, intMaximum, intMin, intMax, strType)
+	for intYear = intMinimum, intMaximum do								-- Step through each potential Census year
+		local strYear = tostring(intYear)
+		if tblGrid.Col[strYear] then											-- Census year found, but was individual in a Census that year
+			ptrCens:MoveTo(ptrRec,"~.OCCU[year="..strYear.."]")
+			if ptrCens:IsNotNull() then
+				return strYear													-- Use first matching Census year that individual appeared in
+			end
+		end
+	end
+	return tostring(intYear1)													-- Default to 1st date point year if no Census year matched
+end -- function CensusYear
+
+-- Main Code Starts Here --
+
+	local ptrRec = fhNewItemPtr()											-- Record pointer
+	local ptrRef = fhNewItemPtr()											-- Reference pointer
+
+	tblGrid.Col = {}															-- Col headings, where also tblGrid.Col[strCol] dictionary holds Col number for strCol name
+	tblGrid.Row = {"  Totals"}												-- Row headings, where also tblGrid.Row[strRow] dictionary holds Row number for strRow name 
+
+	ptrRec:MoveToFirstRecord("INDI")										-- Determine Census Year Col headings
+	while ptrRec:IsNotNull() do												-- Loop through each Individual Record
+		ptrRef:MoveTo(ptrRec,"~.CENS")
+		while ptrRef:IsNotNull() do											-- Loop through each instance of each Census
+			local strYear = fhGetItemText(ptrRef,"~.DATE:YEAR")			-- :YEAR qualifier works OK only for simple dates
+			if strYear > "1700" then
+				for intCol = 0, #tblGrid.Col do
+					if tblGrid.Col[intCol] == strYear then break end	-- Check for existing Census Year heading
+					if intCol == #tblGrid.Col then
+						table.insert(tblGrid.Col,strYear)					-- Add new Census Year to Col headings
+					end
+				end
+			end
+			ptrRef:MoveNext("SAME_TAG")
+		end
+		ptrRec:MoveNext()
+	end
+	table.sort(tblGrid.Col)													-- Sort Census Years into order
+	intMin = tonumber(tblGrid.Col[1])										-- Oldest Census year
+	intMax = tonumber(tblGrid.Col[#tblGrid.Col])							-- Latest Census year
+	table.insert(tblGrid.Col, 1, "Totals" )								-- Add Col "Totals"
+	table.insert(tblGrid.Col   , "Other"  )								-- Add Col "Other" non-Census Years
+	table.insert(tblGrid.Col   , "Male"   )								-- Add Col "Male" Gender
+	table.insert(tblGrid.Col   , "Female" )								-- Add Col "Female" Gender
+	table.insert(tblGrid.Col   , "Unknown")								-- Add Col "Unknown" Gender
+
+	for intCol, strCol in ipairs(tblGrid.Col) do							-- Reset Grid of cells
+		tblGrid.Col[strCol] = intCol											-- Col lookup dictionary
+		tblGrid[intCol] = {}													-- Col of Row counts is empty
+	end
+	tblGrid.Row[tblGrid.Row[1]] = 1											-- Row lookup dictionary for solitary "Totals" first Row
+
+	ptrRec:MoveToFirstRecord("INDI")										-- Compose the Occupation statistics		
+	while ptrRec:IsNotNull() do												-- Loop through each Individual Record
+		local strSex = fhGetItemText(ptrRec,"~.SEX")
+		ptrRef:MoveTo(ptrRec,"~.OCCU")
+		while ptrRef:IsNotNull() do											-- Loop through each instance of each Occupation
+			local strOccu = fhGetItemText(ptrRef,"~")						-- Occupation name
+			if strOccu == "" then
+				strOccu = " ~ Occupation value is blank ~ "
+			end
+			local datDate = fhGetValueAsDate(fhGetItemPtr(ptrRef,"~.DATE"))
+			local strYear = CensusYear(datDate,ptrRec)					-- Find first matching Census Year between date points
+			UpdateCount(strOccu,strYear,strSex)								-- Increment Occupation statistics
+			ptrRef:MoveNext("SAME_TAG")
+		end
+		ptrRec:MoveNext()
+	end 																			-- Output the Result Set of statistics sorted by Occupation
+	fhOutputResultSetTitles(StrPlugin..StrVersion, StrPlugin..StrVersion.."  %x" )
+	fhOutputResultSetColumn(StrPlugin..StrVersion,  "text",  tblGrid.Row,     #tblGrid.Row, 200, "align_left", 1 )
+	for intRow = 1, #tblGrid.Col do
+	 fhOutputResultSetColumn(tblGrid.Col[intRow], "integer", tblGrid[intRow], #tblGrid.Row, 36, "align_right" )
+	end

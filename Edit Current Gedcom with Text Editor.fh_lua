@@ -1,0 +1,36 @@
+--[[
+@Title: Edit Current Gedcom in Text Editor
+@Author: Jane Taubman
+@LastUpdated: December 2013
+@Version: 1.2
+@Description: Launches default Text Editor for the Current Gedcom File/Project
+]]
+
+function main()
+    fhInitialise(5,0,0, "save_recommended")
+    strProgram = '"notepad.exe"'
+    local id = 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\textfile\\shell\\open\\command\\'
+    key,err = getRegKey(id)
+    if err then
+    else
+        strProgram = key:gsub(' "%%1"','')
+    end
+    strProjectFile = fhGetContextInfo("CI_GEDCOM_FILE")
+    local err,msg,txt = fhShellExecute(strProgram,strProjectFile)
+    if not(err) then
+        fhMessageBox('Error Loading Editor'..msg..' '..(txt or ''))
+    end
+end
+
+function getRegKey(key)
+    local sh = luacom.CreateObject "WScript.Shell"
+    local ans
+        if pcall(function () ans = sh:RegRead(key) end) then
+        return ans
+    else
+        return nil,true
+    end
+end
+----------------------------- Run Script
+require "luacom"
+main()

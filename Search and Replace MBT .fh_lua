@@ -1,0 +1,333 @@
+--[[
+@Title: Search and Replace
+@Author: Jane Taubman && Mike Tate
+@Lastupdated: 24 Oct 2013
+@Version: 1.7
+@Description:
+Searches for and replaces any given text or date within the current project, with an option to ask for confirmation for each change.
+At the end, lists all changed fields with links back to the record (double-click on an item to view it in the Property Box).
+@Update:
+1.1 Add Skip tick box to replace prompt.
+1.2 Change to Provide a Skip Button, to cancel click the close button on the window.
+1.3 Add Case insensitive searching and cancel or close the window will abort the replaces, while still listing the changes made.
+1.4 Add options for whole word search only and prevent wild card patterns being used automatically 
+1.5 General Code Tidy
+1.6 Add more details to the replace prompt for the context of the field being changed.
+1.7 Add the Date search & replace capability, see lines marked with -- V1.7
+]]
+----------------------------------------------------- Start Search Replace Prompt
+
+function linecount(string,maxlines)
+--[[
+  @function linecount
+  @description
+  Works out approximate number of lines to display a text string in an input box.
+  @parms
+      string:  string to process mandatory
+      maxlines:  maximum height for text box,  defaults to 9 lines if not provided
+    ]]
+    maxlines = maxlines or 9
+    local intLines = 1
+    for strLine in string.gmatch(string.."\n","(.-)\n") do
+        intLines = intLines + math.ceil(string.len(strLine)/80)
+    end
+    return math.min(intLines,maxlines)
+end
+
+function srPrompt(txtType,strFrom,strTo,bConfirm,sMessage)
+    local btn_ok = iup.button { title="Replace",padding = '5x5',size='50'}
+    local btn_skip = iup.button { title="Skip",padding = '5x5',size='50'}
+    local btn_cancel = iup.button { title="Cancel",padding = '5x5',size='50'}
+    
+    local inp_from_string = iup.text{expand="HORIZONTAL",minsize='150'}
+    local inp_to_string = iup.text{expand="HORIZONTAL"}
+    local inp_confirm = iup.toggle {'1'}
+    if txtType == "M" then
+        inp_from_string.multiline = 'YES'
+        inp_from_string.size = '0x80'
+        inp_from_string.wordwrap = 'YES'
+        inp_from_string.visiblelines = linecount(strFrom,10)
+        inp_to_string.multiline = 'YES'
+        inp_to_string.size = '0x80'
+        inp_to_string.wordwrap = 'YES'
+        inp_to_string.visiblelines = linecount(strTo,10)
+    end
+    local bSkip = false
+    local bQuit = false
+    
+    local vbox = iup.vbox {
+        iup.label {title=sMessage},
+        iup.label {title="Original"},
+        inp_from_string,
+        iup.label {title="Replacement"},
+        inp_to_string,
+        iup.hbox {
+            iup.label {title="Confirm All Replacements"},
+        inp_confirm},
+        iup.hbox{
+        btn_ok,btn_skip,btn_cancel,expandchildren = 'YES', expand="YES"},
+        expandchildren = 'YES', alignment = 'ACENTER', gap = '10', margin = '10x10',expand="YES"
+    }
+    local dlg = iup.dialog{vbox;expandchildren = 'YES', title="Search and Replace",size="HALF", startfocus=btn_ok}
+
+    function btn_ok:action(dlg)
+        btn = 'replace'
+        return iup.CLOSE
+    end
+
+    function btn_skip:action(dlg)
+        btn = 'skip'
+        return iup.CLOSE
+    end
+
+    function btn_cancel:action(dlg)
+        btn = 'cancel'
+        return iup.CLOSE
+    end
+    inp_from_string.value = strFrom
+    inp_to_string.value = strTo
+    if bConfirm then
+        inp_confirm.value = 'ON'
+    else
+        inp_confirm.value = 'OFF'
+    end
+    dlg:show()
+    
+    dlg.minsize = dlg.size
+    iup.MainLoop()
+    
+    strFrom = inp_from_string.value
+    strTo = inp_to_string.value
+    bConfirm = (inp_confirm.value == 'ON')
+    dlg:destroy()
+    return strFrom,strTo,bConfirm,btn
+end
+----------------------------------------------------- End Search Replace Prompt
+
+function DoAllItems(strType,tblClass,action)
+    -- strType: Main Item Type (eg text)
+    -- strClass: Keyworded Array of Classes
+    -- action: function to perform
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types
+    local ii = 0
+    local ptr = fhNewItemPtr()
+    local bContinue = true
+    for ii =1,iCount do
+        strRecType = fhGetRecordTypeTag(ii)
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+            strDataClass = fhGetDataClass(ptr)
+            if ( fhGetValueType(ptr) == strType or fhGetValueType(ptr) == 'date' ) and tblClass[fhGetDataClass(ptr)] == true then
+                bContinue = action(ptr)
+            end
+            if not(bContinue) then
+                ptr:SetNull()
+            else
+                ptr:MoveNextSpecial()
+            end
+        end
+    end
+end
+
+function param_action(dialog,index)
+    if index == -3 then
+        bSkip = true
+        return 1
+    end
+end
+-- Build Pattern from String for case insensitive search
+
+function nocase (s)
+    s = string.gsub(s, "%a", function (c)
+        return string.format("[%s%s]", string.lower(c),
+        string.upper(c))
+    end)
+    return s
+end
+
+function strPlainText(strText)
+    -- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
+    return strText:gsub("(%W)","%%%1")
+end
+
+function doUpdate(ptr,strToString)                                              -- V1.7 new function
+    if p.a.date and fhGetValueType(ptr) == 'date' then
+        local oldDate = fhGetValueAsDate(ptr)
+        local newDate = fhNewDate(1999)
+        local button = ''
+        local isOK = newDate:SetValueAsText(strToString,false)                  -- For 'date' value type use Date Object
+        if isOK then
+            fhSetValueAsDate(ptr,newDate)
+            local strWarn = fhCallBuiltInFunction("GetDataWarning",ptr,1)       -- Check for invalid Date warnings
+            if strWarn ~= "" then
+                button = fhMessageBox(ptrDetails(ptr)..'\n\nNew date "'..strToString..'" is invalid.\n'..strWarn..'\n\nDo you want it set as a Date anyway (Yes or No) or Cancel all changes?','MB_YESNOCANCEL','MB_ICONQUESTION')
+                if button ~= 'Yes' then
+                    fhSetValueAsDate(ptr,oldDate)                               -- Restore the original Date value
+                end
+            end
+        else
+            button = fhMessageBox(ptrDetails(ptr)..'\n\nNew date "'..strToString..'" is invalid.\n\nDo you want it set as a Date Phrase (Yes or No) or Cancel all changes?','MB_YESNOCANCEL','MB_ICONQUESTION')
+            if button == 'Yes' then
+                isOK = newDate:SetValueAsText(strToString,true)                 -- Allow Date Phrase for the Date Object
+            end
+            if isOK then fhSetValueAsDate(ptr,newDate) end
+        end
+        if button == 'Cancel' then return false end
+    else
+        fhSetValueAsText(ptr,strToString)                                        -- For 'text' value type use Text object
+    end
+    fhUpdateDisplay()
+    return true
+end
+
+function Replace(ptr)
+    local ptrRecord = fhNewItemPtr()
+    local strFromString = fhGetValueAsText(ptr)
+    local strFromDate = fhGetDisplayText(ptr):gsub("Date: ",""):gsub("Entry ","") -- V1.7 new variable
+    local strBoxType = 's'
+    local strToString = ''
+    local strSearchFor = strSearchi
+    local strReplaceWith = strReplace
+    bSkip = false
+    if fhGetDataClass(ptr) == 'longtext' then
+        strBoxType = 'M'
+    end
+    if p.Whole == 1 and p.Plain == 1 then
+        strSearchFor = '([%s%p])('..strSearchi..')([%s%p])'
+        strReplaceWith = '%1'..strReplace..'%3'
+    end
+    local strToString = string.gsub(strFromString,strSearchFor,strReplaceWith)
+    if p.Whole == 1 and p.Plain == 1 then
+        -- Special Case search for last word and first word
+        local strSearchFor3 = '([%s%p])('..strSearchi..')$'
+        local strReplaceWith3 = '%1'..strReplace
+        strToString = string.gsub(strToString,strSearchFor3,strReplaceWith3)
+        local strSearchFor3 = '^('..strSearchi..')([%s%p])'
+        local strReplaceWith3 = strReplace..'%2'
+        strToString = string.gsub(strToString,strSearchFor3,strReplaceWith3)
+    end
+    if p.a.date and fhGetValueType(ptr) == 'date' then                    -- V1.7 new conditional statement
+        strFromString = strFromDate
+        strToString = string.gsub(strFromDate,strSearchFor,strReplaceWith)
+    end
+    if strFromString ~= strToString then
+        ptrRecord:MoveToRecordItem(ptr)
+        if p.Confirm == 1 and strFromString ~= strToString then
+            bConfirm = true
+            strFromString,strToString,bConfirm,btn = srPrompt(strBoxType,strFromString,strToString,bConfirm,ptrDetails(ptr))
+            if btn == 'cancel' or btn == nil then
+                return false
+            elseif btn == 'replace' then
+                -- Replace String
+                table.insert(tblRecord,ptrRecord:Clone())
+                table.insert(tblItem,ptr:Clone())
+                table.insert(tblReplaced,strFromString)
+                    if not doUpdate(ptr,strToString) then return false end -- V1.7 call new function
+            elseif btn == 'skip' then
+            end
+            if bConfirm == false then
+                p.Confirm = 0
+            end
+        else
+            -- Replace String
+            table.insert(tblRecord,ptrRecord:Clone())
+            table.insert(tblItem,ptr:Clone())
+            table.insert(tblReplaced,strFromString)
+            if not doUpdate(ptr,strToString) then return false end         -- V1.7 call new function
+        end
+    end
+    return true
+end
+
+function ptrDetails(ptr)
+local desc = {}
+local wrkPtr = ptr:Clone()
+table.insert(desc,BuildDR(ptr))
+wrkPtr:MoveToParentItem(wrkPtr)
+while wrkPtr:IsNotNull() do
+table.insert(desc,1,fhGetDisplayText(wrkPtr))
+wrkPtr:MoveToParentItem(wrkPtr)
+end
+wrkPtr:MoveToRecordItem(ptr) 
+table.insert(desc,1,'Record: '..fhGetTag(wrkPtr)..' '..fhGetRecordId(wrkPtr))
+return table.concat(desc,'\n')
+end
+
+function BuildDR(ptr)
+   local ptrTemp = fhNewItemPtr()
+   ptrTemp:MoveTo(ptr)
+   strDR = fhGetTag(ptrTemp)
+   while fhHasParentItem(ptrTemp) do
+      ptrTemp:MoveToParentItem(ptrTemp)
+      strDR = fhGetTag(ptrTemp)..'.'..strDR
+   end
+   return strDR
+end
+
+------------
+-- Main Code
+-------------
+-- Prompt for Options
+-- Prompt for confirmation using iup.GetParm %b are tick boxes
+-- set initial values
+p ={}
+p.a ={text=1,longtext=1,name=1,place=1,wordlist=1,date=1}                   -- V1.7 new date=1 entry
+p.Sensitive= 0
+p.Confirm  = 1
+p.Whole  = 1
+p.Plain = 1
+bSkip = false
+tblRecord = {}
+tblItem = {}
+tblReplaced = {}
+-- Prompt User to Confirm Options
+pprompt = [[Search For: %s
+Replace with: %s
+Confirm Every Change: %b
+Case Sensitive: %b
+Replace in the following Classes %t
+Text fields: %b{Name Prefix/Suffix/Given/Nickname, Attribute values, Cause, Where Within Source, Title, Type, Custom Id, City, State, Postcode, Country, Phone, E-mail, Website, File, Format, Keywords, Sentence, etc.}
+Long Text: %b{Note, Address, Author, Text From Source, Publication Info, Link/Note}
+Names: %b{Name fields only}
+Places: %b{Place fields only}
+Dates: %b(Date fields only)
+Extra Search Options %t                                                      -- V1.7 new 'Dates' field
+Plain Text Search: %b{Plain Text or Regular Expression search & replace.}
+Whole Words (needs plain text): %b{Whole words are delimited by spaces, tabs, and punctuation.}]]
+
+-- Prompt User to Confirm Options                                            -- V1.7 new p.a.date parameter added twice
+bOK, strSearch,strReplace,p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.a.date,p.Plain,p.Whole =
+iup.GetParam("Family Historian Text Search and Replace",nil,
+pprompt,
+"","",p.Confirm,p.Sensitive,p.a.text,p.a.longtext,p.a.name,p.a.place,p.a.date,p.Plain,p.Whole)
+-- Set Values for "odd text fields" from normal text field
+p.a.word = p.a.text
+p.a.wordlist = p.a.text
+strSearchi = strSearch
+if p.Plain == 1 then
+    strSearchi = strPlainText(strSearchi)
+end
+if p.Sensitive == 0 then
+    strSearchi = nocase(strSearchi)
+end
+if bOK then
+    -- Swap 1 for true
+    for strType,Value in pairs(p.a) do
+        p.a[strType] = (Value == 1)
+    end
+    DoAllItems('text',p.a,Replace)
+    if #tblRecord == 0 then
+        fhMessageBox('No Items Replaced')
+    else
+        -- Output Result Set
+        strTitle = 'Search and Replace Results '
+        strSubTitle = 'Replacing '..strSearch..' with '..strReplace
+        fhOutputResultSetTitles(strTitle..strSubTitle,strTitle, strSubTitle.." Date: %#x")
+        fhOutputResultSetColumn("Record", "item", tblRecord, #tblRecord, 180, "align_left")
+        fhOutputResultSetColumn("Item", "item", tblItem, #tblRecord, 180, "align_left")
+        fhOutputResultSetColumn("Old Value", "text", tblReplaced, #tblRecord, 180, "align_left")
+    end
+else
+    return
+end

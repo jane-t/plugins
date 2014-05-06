@@ -1,0 +1,90 @@
+--[[
+@Title: Fix Genes Reunited Files
+@Author: Jane Taubman  
+@Version: 0.1
+@LastUpdated: March 2014 
+@Description: For files which show duplicate IDs, make all record ID's non numeric 
+]]
+
+function main()
+    -- Prompt User for File
+    sfile, err = iup.GetFile("*.ged")
+    if err ~= 0 then
+        return
+    end
+    -- load file
+    local tblLines,err = fileToArray(sfile)
+    local tblId = {}
+    -- Find all the record IDs
+    if tblLines then
+        dprint (#tblLines) -- Prints number of lines in the file
+        for k,v in ipairs(tblLines) do -- to process contents
+            if v:sub(1,1) == '0' then
+                sId = v:match('%s(@%w+@)')
+                if sId then
+                    table.insert(tblId,sId)
+                    dprint(k,v, sId)
+                end
+            end
+        end
+        -- Search and replace them in all occurances
+        sOutLines = table.concat(tblLines,'\n')
+        for _,sId in ipairs(tblId) do
+            local sNewId = '@'..sId:match('@(%w+)@')..'X@'
+            sOutLines = sOutLines:gsub(sId,sNewId)
+        end
+        local sNewFile = newFileName(sfile)
+        SaveStringToFile(sOutLines,sNewFile)
+        fhMessageBox('File saved as : '..sNewFile)
+    else
+        fhMessageBox(err)
+    end
+    dprint(#tblId)
+end
+------------------------------------------------------ functions
+
+function dprint(...)
+    print(...)
+end
+
+function fileToArray(filename)
+    local file = io.open(filename)
+    local tbllines = {}
+    local i = 0
+    if file then
+        for line in file:lines() do
+            i = i + 1
+            tbllines[i] = line
+        end
+        file:close()
+        return tbllines
+    else
+        return false,'File Failed To Open'
+    end
+end
+-- Open File and return Handle --
+
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"w")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end -- function SaveStringToFile
+
+function newFileName(strfilename)
+    sP,sF,sE = string.match(strfilename, "(.-)([^\\]-)([^\\%.]+)$")
+    return sP..sF..'new.'..sE
+end
+------------------------------------------------------ require
+require "iup"
+------------------------------------------------------ main
+main()

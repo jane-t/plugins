@@ -1,0 +1,2691 @@
+--[[
+@Title:			Find Duplicate Individuals
+@Author:			Mike Tate
+@Version:			3.0
+@LastUpdated:	1 Nov 2012
+@Description:	Find duplicated Individual Records
+@TBD:				www.behindthename.com/api for Related Names as per www.fhug.org.uk/cgi-bin/index.cgi?action=forum&board=luaplugins&op=display&num=6524&start=11
+@V3.0:				Update to Omit Non-Duplicates list, remove Named List option, add Erase Soundex Cache, finish Help & Advice, and first Plugin Store release.
+@V2.6:				Minor updates to the Soundex function and its file load/save, plus better Progress Bar presentation.
+@V2.5:				Minor updates to Name & Event checks and ProgressBar to improve performance, extra ProgressBar.Messages and moved ProgressBar.Stop() after output of Result Set.
+@V2.4:				Minor adjustment to Set Preferences, structured Help & Advice, small corrections to Name & Event checks, plus Soundex and ProgressBar function prototypes.
+@V2.3:				Add extra chronology date checks & remove obsolete checks, add CheckVersionInStore, strip all spaces & ignore case in Place parts, better Result Set sort, add complete sticky Set Preferences.
+@V2.2:				Bug fix for Non-Duplicates list, and some minor improvements.
+@V2.1:				Adjust Soundex scoring for similar Lastname & Forename case, treat space separated Surnames as one Name, ignore case when matching Fornames,
+					monospaced font for Non-Duplicates tab, added some Set Preferences sticky options and tabs. 
+@V2.0:				Add Non-Duplicates list management tab & simple Set Preferences tab, deduction for Surname mismatch per relative, proportional Chronology in Months.
+@V1.9:				Fix bug in scoring values per relative.
+@V1.8:				Add name scoring values per relative, separate Period/Range and Approx/Calc/Est timespans, proportional Chronology scores, show previous Result Set.
+@V1.7:				Add Forename positional scores, increase score for Surname match, reduce Name mismatch to 0,
+					add Place positional scores, drop Child Count, reduce Generation Gap deductions, include Percentage result score,
+					new Date timespans for Approx/Calc/Est & Before/After & From/To, check 1st Child Gender, User Preference Settings,
+					synthesise missing Event Dates, extra Chronology checks, exclude multiple Chronology errors, exclude close Family,
+					sticky Settings and Soundex & NonDups tables, Date Timespans in diagnostic Results, GUI Last Run Date and bug fixes.
+@V1.6:				Fix bug with selecting subset, extra Date chronology checks.
+@V1.5:				1st Child name check, corrected Gen Gap check, better Date chronology check, tweaked other scores, improved run time estimate, Diagnostic mode.
+@V1.4:				Fixed GUI size on Font change, fixed bug in last Update check, corrected run time estimate, added Burial Event, added Date chronology check.
+@V1.3:				Proportional Generation gap score, separate Names table, Father & Mother Name & Soundex check, Result Set diagnostic sub-scores, GUI with selection options.
+@V1.2:				Soundex checks runtime improvements, limit Name checks score, Event Date +/-50 days check, Place Name & Soundex check, Spouse Name & Soundex check, Generation gap check.
+@V1.1:				Added child count comparison. Prune low scores from results to prevent exceeding memory.
+@V1.0:				Initial version.
+]]
+
+	require "iuplua"											-- To access GUI window builder
+	require "lfs"												-- To access LUA filing system
+	require "iupluaole"											-- To access OLE subsystem
+	require "luacom"											-- To access COM subsystem
+
+-- Global Data Constants Definition --
+function PresetGlobalConstants()
+
+	-- GUI Global Constants
+
+	StrPlugin			= "Find Duplicate Individuals"		-- Plugin title & version
+	StrVersion		= " Version 3.0 "
+	StrRed				= "255 0 0"								-- Color attributes (must exclude leading zeros & spaces to allow value comparisons)
+	StrAmber			= "250 160 0"
+	StrGreen			= "0 120 0"
+	StrBlue			= "0 0 255"
+	StrShade			= "245 245 245"
+	StrGray			= "120 120 120"
+	StrBlack			= "0 0 0"
+	StrWhite			= "255 255 255"
+	StrGap 			= "2"										-- Gap & Margin attributes
+	StrMinMargin		= "1x1"
+	StrBigMargin		= "8x8"
+	StrFontSetTitle	= "Set Interface Font"
+	IntFontPlain		= 1											-- Font Face & Style values for IntFontSet
+	IntFontBold		= 2
+	IntArialPlain	= 3
+	IntArialBold		= 4
+	IntTahomaPlain	= 5
+	IntTahomaBold	= 6
+	StrFontFace		= string.gsub(iup.GetGlobal("DEFAULTFONT"),",.*","")
+
+	-- Filename Global Constants
+
+	StrComputerName = os.getenv("COMPUTERNAME")
+
+	StrStickyFile = fhGetPluginDataFileName()
+	-- Allow plugins with variant filenames to use same plugin data files
+	StrStickyFile = string.gsub(StrStickyFile,"\\find_duplicate_individuals","\\"..StrPlugin)
+	StrStickyFile = string.gsub(StrStickyFile,"\\"..StrPlugin..".+%.[D,d][A,a][T,t]$","\\"..StrPlugin..".dat")
+	if StrStickyFile == "" then
+		-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
+		StrStickyFile = fhGetContextInfo("CI_GEDCOM_FILE")
+		StrStickyFile = string.gsub(StrStickyFile, "%.[G,g][E,e][D,d]", ".fh_data")
+		lfs.mkdir(StrStickyFile)
+		StrStickyFile = StrStickyFile.."\\Plugin Data"
+		lfs.mkdir(StrStickyFile)
+		StrStickyFile = StrStickyFile.."\\"..StrPlugin..".dat"
+	end
+
+	-- Plugin data folder path name
+	StrPluginPath = string.gsub(StrStickyFile,"\\"..StrPlugin.."%.[D,d][A,a][T,t]$","")
+
+	-- Plugin data file root name, and sticky table file names
+	local strPluginRoot = StrPluginPath.."\\"..StrPlugin
+	StrNonDupsFile = strPluginRoot..".nondups"
+	StrOptionsFile = strPluginRoot..".options"
+	StrResultsFile = strPluginRoot..".results"
+	StrSoundexFile = strPluginRoot..".soundex"
+
+	-- Public data folder path name
+	StrPublicPath = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")
+	if StrPublicPath == "" then StrPublicPath = StrPluginPath end
+
+	-- User preferences defaults
+	PresetGlobalDefaults()
+	SetUserInterfaceDefaults()
+	SetNamesMatchDefaults()
+	SetEventMatchDefaults()
+	SetChronologyDefaults()
+	SetOtherMatchDefaults()
+
+end -- function PresetGlobalConstants
+
+-- Global User Defaults Definition --
+function PresetGlobalDefaults()
+
+	TblData = {}													-- Data table per Individual Record Id of key information
+
+	TblNonDups = {}												-- Non-Duplicate pairs of Record Id to exclude
+
+	-- User Interface Defaults 		-- Default Value	-- Description of Default
+	IntIndiScoreMinDef =     12		--		 12 Points	-- Minimum score needed for Individual to assess Relations
+	IntLeastResultsDef =      1		--		  1 Point		-- Result Set lowest score to display
+	IntLimitResultsDef =    100		--		100 Rows		-- Result Set limit of rows to display
+	IntPruneResultsDef =    200		--		200 Entries	-- Results table threshold to avoid exhausting memory about twice IntLimitResults
+	IntProgBarStartDef = 400000		--	400000 Compares	-- Threshold of Comparisons at which to start Progress Bar
+																	-- Comparisons = R * (R-1) / 2 where R = Total Individual Records
+
+	-- Names Matching Defaults		-- Default Value	-- Description of Default
+	IntLastNameRightDef =     7		--		  7 Points	-- Addition for Lastname perfect match
+	IntForeNameRightDef =     6		--		  6 Points	-- Addition for Forename perfect match in the right position
+	IntForeNameOtherDef =     3		--		  3 Points	-- Addition for Forename perfect match but in other position
+	IntNameSoundexDef   =     2		--		  2 Points	-- Addition for any Name Soundex match only
+	IntNameLastWrongDef =    -0		--		 -0 Points	-- Deduction for Lastname total mismatch
+	IntNameMinimumDef   =     1		--		  1 Point 	-- Minimum needed to avoid entire Names mismatch
+	IntNameDeductionDef =    -0		--		 -0 Points	-- Deduction for Relation entire Names mismatch (not used for Individual)
+	IntNameMaximumDef   =    20		--		 20 Points	-- Maximum entire Names match to avoid overwhelming result
+	IntNameThresholdDef =     6		--		  6 Points	-- Threshold needed to proceed with Event assessments, etc
+
+	IntIndivi = 1												-- Table index per Relation
+	IntFather = 2
+	IntMother = 3
+	IntSpouse = 4
+	IntChild1 = 5
+
+	TblLastNameRight = { }										-- Table entry per Relation
+	TblForeNameRight = { }
+	TblForeNameOther = { }
+
+	TblNameLastRight = { }
+	TblNameForeRight = { }
+	TblNameForeOther = { }
+ 	TblNameSoundex   = { }
+	TblNameLastWrong = { }
+	TblNameMinimum   = { }
+	TblNameDeduction = { }
+	TblNameMaximum   = { }
+	TblNameThreshold = { }
+
+	-- Event Matching Defaults		-- Default Value	-- Description of Default
+	IntDatesToleranceDef =   50		--		±50 Days		-- Tolerance to grant a Lower or Upper Date Timespan match
+	IntDatesMatchedDef   =    2		--		  2 Points	-- Addition for a tolerant Lower/Upper Date Timespan match
+	IntDatesOverlapDef   =    2		--		  2 Points	-- Addition for an overlapping Date Timespan
+	IntDatesMinimumDef   =    1		--		  1 Point 	-- Minimum Dates score to avoid entire Dates mismatch
+	IntDatesDeductionDef =  -15		--		-15 Points	-- Deduction for entire Dates mismatch
+	IntPlacePartRightDef =    3		--		  3 Points	-- Addition for Place Part perfect match in the right position 
+	IntPlacePartOtherDef =    2		--		  2 Points	-- Addition for Place Part perfect match but in other position
+	IntPlaceSoundexDef   =    1		--		  1 Point		-- Addition for Place Part Soundex match only
+	IntEventMaximumDef   =   10		--		 10 Points	-- Maximum for entire Event match to avoid overwhelming result
+
+	-- Date Chronology Defaults		-- Default Value	-- Description of Default
+	IntDatesTimespanDef  =   50		--		±50 Years		-- Timespan to extend 'After', 'Before', 'From', 'To' Period & Range Dates
+	IntDatesVarianceDef  =    5		--		 ±5 Years		-- Variance for 'Approximate', 'Calculated', 'Estimated' Year only Dates
+	IntDatesPregnantDef  =    9		--		  9 Months	-- Pregnancy duration for synthesised Dates for Chronology checks
+	IntDatesPubertyDef   =   12		--		 12 Years		-- Minimum puberty age for synthesised Dates for Chronology checks
+	IntDatesMarriageDef  =   16		--		 16 Years		-- Minimum marriage age for synthesised Dates for Chronology checks
+	IntDatesFertileDef   =   50		--		 50 Years		-- Maximum fertile age for synthesised Dates for Chronology checks
+	IntDatesLifespanDef  =  100		--		100 Years		-- Maximum lifespan age for synthesised Dates for Chronology checks
+	IntChronMagnitudeDef =   12		--		 12 Months	-- Magnitude of Date Chronology mismatch to deduct 1 point
+	IntChronToleranceDef =  -20		--		-20 Points	-- Degree of mismatch tolerated before excluding Individuals
+	IntDaysPerYear       =  365.242199
+
+	--	Generation Gap Defaults		-- Default Value	-- Description of Default
+	IntGenGapFamilyDef   =	   2		--		  2 Gen Gap	-- Largest Generations Up + Down that defines immediate Family to exclude ( < IntGenGapRelative )
+	IntGenGapRelativeDef =	   6 		--		  6 Gen Gap	-- Largest Generations Up + Down that defines a close Relative
+	IntGenGapDeductDef   =	  -5		--		 -5 Points	-- Deduction for a close Relative as defined above
+
+	--	Gender Mismatch Default
+	IntGenderDeductDef   =	 -10		--		-10 Points	-- Deduction for Individual gender mismatch and Child gender mismatch
+
+end -- function PresetGlobalDefaults()
+
+-- Global Functions --
+
+-- Set User Interface Defaults --
+function SetUserInterfaceDefaults()
+	IntIndiScoreMin = IntIndiScoreMinDef
+	IntLeastResults = IntLeastResultsDef
+	IntLimitResults = IntLimitResultsDef
+	IntPruneResults = IntPruneResultsDef
+	IntProgBarStart = IntProgBarStartDef
+end -- function SetUserInterfaceDefaults
+
+-- Set Names Matching Defaults --
+function SetNamesMatchDefaults()
+	for intRelation = IntIndivi, IntChild1 do
+		TblLastNameRight[intRelation] = IntLastNameRightDef
+		TblForeNameRight[intRelation] = IntForeNameRightDef
+		TblForeNameOther[intRelation] = IntForeNameOtherDef
+		TblNameSoundex  [intRelation] = IntNameSoundexDef
+		TblNameLastWrong[intRelation] = IntNameLastWrongDef
+		TblNameMinimum  [intRelation] = IntNameMinimumDef
+		TblNameDeduction[intRelation] = IntNameDeductionDef
+		TblNameMaximum  [intRelation] = IntNameMaximumDef
+		TblNameThreshold[intRelation] = IntNameThresholdDef
+		SetNamesPoints(intRelation)
+	end
+end -- function SetNamesMatchDefaults
+
+-- Set Event Matching Defaults --
+function SetEventMatchDefaults()
+	IntDatesTolerance = IntDatesToleranceDef
+	IntDatesMatched   = IntDatesMatchedDef
+	IntDatesOverlap   = IntDatesOverlapDef
+	IntDatesMinimum   = IntDatesMinimumDef
+	IntDatesDeduction = IntDatesDeductionDef
+	IntPlacePartRight = IntPlacePartRightDef
+	IntPlacePartOther = IntPlacePartOtherDef
+	IntPlaceSoundex   = IntPlaceSoundexDef
+	IntEventMaximum   = IntEventMaximumDef
+end -- function SetEventMatchDefaults
+
+-- Set Date Chronology Defaults --
+function SetChronologyDefaults()
+	IntDatesTimespan  = IntDatesTimespanDef
+	IntDatesVariance  = IntDatesVarianceDef
+	IntDatesPregnant  = IntDatesPregnantDef
+	IntDatesPuberty   = IntDatesPubertyDef
+	IntDatesMarriage  = IntDatesMarriageDef
+	IntDatesFertile   = IntDatesFertileDef
+	IntDatesLifespan  = IntDatesLifespanDef
+	IntChronMagnitude = IntChronMagnitudeDef
+	IntChronTolerance = IntChronToleranceDef
+end -- function SetChronologyDefaults
+
+-- Set Generation Gap & Gender Mismatch Defaults --
+function SetOtherMatchDefaults()
+	IntGenGapFamily   =	 IntGenGapFamilyDef
+	IntGenGapRelative =	 IntGenGapRelativeDef
+	IntGenGapDeduct   =	 IntGenGapDeductDef
+	IntGenderDeduct   = IntGenderDeductDef
+end -- function SetOtherMatchDefaults
+
+-- Set other Names values from sticky preference values --
+function SetNamesPoints(intRelation)
+	TblNameForeOther[intRelation] = TblForeNameOther[intRelation] - TblNameSoundex[intRelation]
+	TblNameForeRight[intRelation] = TblForeNameRight[intRelation] - TblNameSoundex[intRelation] - TblNameForeOther[intRelation]
+	TblNameLastRight[intRelation] = TblLastNameRight[intRelation] - TblNameSoundex[intRelation]
+end -- function SetNamesPoints
+
+-- Set other Event values from sticky preference values --
+function SetEventPoints(flag)
+	IntPartOther = IntPlacePartOther - IntPlaceSoundex
+	IntPartRight = IntPlacePartRight - IntPlaceSoundex - IntPartOther
+	if flag == nil then SaveSettings(StrStickyFile) end
+end -- function SetEventPoints
+
+-- Set other Chronology values from sticky preference values --
+function SetChronology(flag)
+	IntTimespanDays = math.floor( IntDatesTimespan * IntDaysPerYear )
+	IntVarianceDays = math.floor( IntDatesVariance * IntDaysPerYear )
+	IntPregnantDays = math.floor( IntDatesPregnant * IntDaysPerYear / 12 )
+	IntPubertyDays  = math.floor( IntDatesPuberty  * IntDaysPerYear )
+	IntMarriageDays = math.floor( IntDatesMarriage * IntDaysPerYear )
+	IntFertileDays  = math.floor( IntDatesFertile  * IntDaysPerYear )
+	IntLifespanDays = math.floor( IntDatesLifespan * IntDaysPerYear )
+	IntChronMagDays = math.floor( IntChronMagnitude* IntDaysPerYear / 12 )
+	-- These two tables are only used by function TblGetEventData(ptrIndi,strTag)
+	TblLower = { Before=IntTimespanDays,  To=IntTimespanDays, Approximate0=IntVarianceDays, Calculated0=IntVarianceDays, Estimated0=IntVarianceDays }
+	TblUpper = { After=IntTimespanDays, From=IntTimespanDays, Approximate0=IntVarianceDays, Calculated0=IntVarianceDays, Estimated0=IntVarianceDays }
+	if flag == nil then SaveSettings(StrStickyFile) end
+end -- function SetChronology
+
+-- Set other Generations values from sticky preference values --
+function SetGenerations(flag)
+	IntGenGapDeduction = math.abs(IntGenGapDeduct)
+	IntFamGenGapMax = -math.floor( ( IntGenGapRelative - IntGenGapFamily - 0.5 ) * IntGenGapDeduction )
+	if flag == nil then SaveSettings(StrStickyFile) end
+end -- function SetGenerations
+
+------------------------------------------------------ Start Table Load Save
+-- require "_tableloadsave"
+--[[
+   Save Table to File/Stringtable
+   Load Table from File/Stringtable
+   v 0.94
+   
+   Lua 5.1 compatible
+   
+   Userdata and indices of these are not saved
+   Functions are saved via string.dump, so make sure it has no upvalues
+   References are saved
+   ----------------------------------------------------
+   table.save( table [, filename] )
+   
+   Saves a table so it can be called via the table.load function again
+   table must a object of type 'table'
+   filename is optional, and may be a string representing a filename or true/1
+   
+   table.save( table )
+      on success: returns a string representing the table (stringtable)
+      (uses a string as buffer, ideal for smaller tables)
+   table.save( table, true or 1 )
+      on success: returns a string representing the table (stringtable)
+      (uses io.tmpfile() as buffer, ideal for bigger tables)
+   table.save( table, "filename" )
+      on success: returns 1
+      (saves the table to file "filename")
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   table.load( filename or stringtable )
+   
+   Loads a table that has been saved via the table.save function
+   
+   on success: returns a previously saved table
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   
+   chillcode, http://lua-users.org/wiki/SaveTableToFile
+   Licensed under the same terms as Lua itself.
+]]--
+do
+   -- declare local variables
+   --// exportstring( string )
+   --// returns a "Lua" portable version of the string
+   local function exportstring( s )
+      s = string.format( "%q",s )
+      -- to replace
+      s = string.gsub( s,"\\\n","\\n" )
+      s = string.gsub( s,"\r","\\r" )
+      s = string.gsub( s,string.char(26),"\"..string.char(26)..\"" )
+      return s
+   end
+--// The Save Function
+function table.save(  tbl,filename )
+   local charS,charE = "   ","\n"
+   local file,err
+   -- create a pseudo file that writes to a string and return the string
+   if not filename then
+      file =  { write = function( self,newstr ) self.str = self.str..newstr end, str = "" }
+      charS,charE = "",""
+   -- write table to tmpfile
+   elseif filename == true or filename == 1 then
+      charS,charE,file = "","",io.tmpfile()
+   -- write table to file
+   -- use io.open here rather than io.output, since in windows when clicking on a file opened with io.output will create an error
+   else
+      file,err = io.open( filename, "w" )
+      if err then return _,err end
+   end
+   -- initiate variables for save procedure
+   local tables,lookup = { tbl },{ [tbl] = 1 }
+   file:write( "return {"..charE )
+   for idx,t in ipairs( tables ) do
+      if filename and filename ~= true and filename ~= 1 then
+         file:write( "-- Table: {"..idx.."}"..charE )
+      end
+      file:write( "{"..charE )
+      local thandled = {}
+      for i,v in ipairs( t ) do
+         thandled[i] = true
+         -- escape functions and userdata
+         if type( v ) ~= "userdata" then
+            -- only handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables, v )
+                  lookup[v] = #tables
+               end
+               file:write( charS.."{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( charS.."loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write(  charS..value..","..charE )
+            end
+         end
+      end
+      for i,v in pairs( t ) do
+         -- escape functions and userdata
+         if (not thandled[i]) and type( v ) ~= "userdata" then
+            -- handle index
+            if type( i ) == "table" then
+               if not lookup[i] then
+                  table.insert( tables,i )
+                  lookup[i] = #tables
+               end
+               file:write( charS.."[{"..lookup[i].."}]=" )
+            else
+               local index = ( type( i ) == "string" and "["..exportstring( i ).."]" ) or string.format( "[%d]",i )
+               file:write( charS..index.."=" )
+            end
+            -- handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables,v )
+                  lookup[v] = #tables
+               end
+               file:write( "{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( "loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write( value..","..charE )
+            end
+         end
+      end
+      file:write( "},"..charE )
+   end
+   file:write( "}" )
+   -- Return Values
+   -- return stringtable from string
+   if not filename then
+      -- set marker for stringtable
+      return file.str.."--|"
+   -- return stringttable from file
+   elseif filename == true or filename == 1 then
+      file:seek ( "set" )
+      -- no need to close file, it gets closed and removed automatically
+      -- set marker for stringtable
+      return file:read( "*a" ).."--|"
+   -- close file and return 1
+   else
+      file:close()
+      return 1
+   end
+end
+
+--// The Load Function
+function table.load( sfile )
+   -- catch marker for stringtable
+   if string.sub( sfile,-3,-1 ) == "--|" then
+      tables,err = loadstring( sfile )
+   else
+      tables,err = loadfile( sfile )
+   end
+   if err then return _,err
+   end
+   tables = tables()
+   for idx = 1,#tables do
+      local tolinkv,tolinki = {},{}
+      for i,v in pairs( tables[idx] ) do
+         if type( v ) == "table" and tables[v[1]] then
+            table.insert( tolinkv,{ i,tables[v[1]] } )
+         end
+         if type( i ) == "table" and tables[i[1]] then
+            table.insert( tolinki,{ i,tables[i[1]] } )
+         end
+      end
+      -- link values, first due to possible changes of indices
+      for _,v in ipairs( tolinkv ) do
+         tables[idx][v[1]] = v[2]
+      end
+      -- link indices
+      for _,v in ipairs( tolinki ) do
+         tables[idx][v[2]],tables[idx][v[1]] =  tables[idx][v[1]],nil
+      end
+   end
+   return tables[1]
+end
+-- close do
+end
+------------------------------------------------------ End Table Load Save
+
+-- Split a string using separator --
+function string:split(sep)
+	local sep = sep or ":"
+	local fields = {}
+	local pattern = string.format("([^%s]+)", sep)
+	self:gsub(pattern, function(c) fields[#fields+1] = c end)
+	return fields
+end -- function string:split
+
+-- Split a string into numbers using separators space or comma or x --
+function string:SplitNumbers()
+	local tblNum = {}
+	self:gsub("([^%s,x]+)", function(c) tblNum[#tblNum+1] = c end)
+	for i=1, #tblNum do
+		tblNum[i] = tonumber(tblNum[i])
+	end
+	return tblNum
+end -- function string:SplitNumbers
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+end -- function FlgFileExists
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if fileHandle == nil then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Delete file if it exists --
+function DeleteFile(strFileName)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(string.gsub(strError,strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")) end
+		end
+	end
+end -- function DeleteFile
+
+-- Inhibit Regular Expression magic characters ^$()%.[]*+-?)
+function StrPlainText(strText)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character, where %% is the % escape, and %1 is original character
+	return strText:gsub("(%W)","%%%1")
+end -- function StrPlainText
+
+-- Obtain Version in Plugin Store by Id or Name --
+function StrVersionInStore(strPlugin)
+	local strType = "name="
+	if tonumber(strPlugin) then strType = "id=" end
+	if strPlugin then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..strPlugin
+ 		http:Open("GET",strRequest,false)
+		http:Send()
+		local strReturn = http.Responsebody
+		local strVersion = "0"
+		if strReturn ~= nil then
+			strVersion = strReturn:match("(%d.*),%d*")
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function StrVersionInStore
+
+-- Check if New Version Available --
+function CheckVersionInStore(strOldVer)
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = StrVersionInStore(strPlugin:gsub(" %- .*",""))
+	if strNewVer > strOldVer:match("[^%d]*([%d%.]*)") then
+		iup.Alarm(strPlugin..strOldVer,"Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.","OK")
+	end
+end -- function CheckVersionInStore
+
+-- Reset GUI Sticky Settings to Default Values --
+function ResetDefaultSettings()
+	IntMainX		= iup.CENTER															-- GUI Main window position X & Y co-ordinate and rastersize
+	IntMainY		= iup.CENTER
+	IntHelpX		= iup.CENTER															-- GUI Help window position X & Y co-ordinate and rastersize
+	IntHelpY		= iup.CENTER
+	StrHelpS		= "1030x730"
+	IntDataX		= iup.CENTER															-- ProgressBar window position X & Y co-ordinate
+	IntDataY		= iup.CENTER
+	StrDate		= "1 Jan 1900"														-- Last Updated threshold
+end -- function ResetDefaultSettings
+
+-- Load Sticky Settings from File --
+function LoadSettings(strFileName)
+
+	local tblStickyData = {}
+
+	local function strLoadLocal(strParam,strDefault)							-- Load Local Parameter for this PC
+		return tblStickyData[StrComputerName.."-"..strParam] or strDefault
+	end
+
+	local function strLoadGlobal(strParam,strDefault)							-- Load Global Parameter for all PC
+		return tblStickyData[strParam] or strDefault
+	end
+
+	local function intintCheckPosition(x,y)										-- Ensure Window Position is on Screen
+		local tblScrn = iup.GetGlobal("VIRTUALSCREEN"):SplitNumbers()
+		-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+		if tonumber(x) == nil then
+			x = iup.CENTER
+		elseif tonumber(x) > tblScrn[3] then
+			x = iup.CENTER
+		end
+		if tonumber(y) == nil then
+			y = iup.CENTER
+		elseif tonumber(y) > tblScrn[4] then
+			y = iup.CENTER
+		end
+		return tonumber(x),tonumber(y)
+	end -- local function intintCheckPosition
+
+	if FlgFileExists(strFileName) then
+		local tblField = {}
+		for strLine in io.lines(strFileName) do									-- Load Settings File in table lines with key & val fields
+			if strLine == "return {" then											-- Unless entire StickyData table was saved
+				tblStickyData, StrErr = table.load(strFileName)					-- Load Settings File table
+				break
+			end
+			tblField = strLine:split("=")
+			tblStickyData[tblField[1]] = tblField[2]
+		end
+		IntMainX = tonumber(strLoadLocal("MainX",IntMainX))
+		IntMainY = tonumber(strLoadLocal("MainY",IntMainY))
+		IntHelpX = tonumber(strLoadLocal("HelpX",IntHelpX))
+		IntHelpY = tonumber(strLoadLocal("HelpY",IntHelpY))
+		StrHelpS = strLoadLocal			("HelpS",StrHelpS)
+		IntDataX = tonumber(strLoadLocal("DataX",IntDataX))
+		IntDataY = tonumber(strLoadLocal("DataY",IntDataY))
+		StrDate  = strLoadGlobal			("Dated",StrDate)
+		StrLast  = strLoadGlobal			("Last" ,StrLast)
+		StrDate  = strLoadGlobal			("Date" ,StrDate)
+		IntFontSet= tonumber(strLoadGlobal("FontSet",IntFontSet))
+
+		IntIndiScoreMin   = strLoadGlobal("IndiScoreMin"  , IntIndiScoreMin)
+		IntLeastResults   = strLoadGlobal("LeastResults"  , IntLeastResults)
+		IntLimitResults   = strLoadGlobal("LimitResults"  , IntLimitResults)
+		IntPruneResults   = strLoadGlobal("PruneResults"  , IntPruneResults)
+
+		TblLastNameRight  = strLoadGlobal("LastNameRight" , TblLastNameRight)
+		TblForeNameRight  = strLoadGlobal("ForeNameRight" , TblForeNameRight)
+		TblForeNameOther  = strLoadGlobal("ForeNameWrong" , TblForeNameOther)	-- Legacy
+		TblForeNameOther  = strLoadGlobal("ForeNameOther" , TblForeNameOther)
+		TblNameSoundex    = strLoadGlobal("NameSoundex"   , TblNameSoundex)
+		TblNameLastWrong  = strLoadGlobal("NameLastWrong" , TblNameLastWrong)
+		TblNameMinimum    = strLoadGlobal("NameMinimum"   , TblNameMinimum)
+		TblNameDeduction  = strLoadGlobal("NameDeduction" , TblNameDeduction)
+		TblNameMaximum    = strLoadGlobal("NameMaximum"   , TblNameMaximum)
+		TblNameThreshold  = strLoadGlobal("NameThreshold" , TblNameThreshold)
+
+		IntDatesTolerance = strLoadGlobal("DatesTolerance", IntDatesTolerance)
+		IntDatesMatched   = strLoadGlobal("DatesMatched"  , IntDatesMatched)
+		IntDatesOverlap   = strLoadGlobal("DatesOverlap"  , IntDatesOverlap)
+		IntDatesMinimum   = strLoadGlobal("EventMinimum"  , IntDatesMinimum)	-- Legacy
+		IntDatesMinimum   = strLoadGlobal("DatesMinimum"  , IntDatesMinimum)
+		IntDatesDeduction = strLoadGlobal("EventDeduction", IntDatesDeduction)	-- Legacy
+		IntDatesDeduction = strLoadGlobal("DatesDeduction", IntDatesDeduction)
+		IntPlacePartRight = strLoadGlobal("PlacePartRight", IntPlacePartRight)
+		IntPlacePartOther = strLoadGlobal("PlacePartOther", IntPlacePartOther)
+		IntPlaceSoundex   = strLoadGlobal("SoundexPlaces" , IntPlaceSoundex)	-- Legacy
+		IntPlaceSoundex   = strLoadGlobal("PlaceSoundex"  , IntPlaceSoundex)
+		IntEventMaximum   = strLoadGlobal("EventMaximum"  , IntEventMaximum)
+
+		IntDatesTimespan  = strLoadGlobal("DatesTimespan" , IntDatesTimespan)
+		IntDatesVariance  = strLoadGlobal("DatesVariance" , IntDatesVariance)
+		IntDatesPregnant  = strLoadGlobal("DatesPregnant" , IntDatesPregnant)
+		IntDatesPuberty   = strLoadGlobal("DatesPuberty"  , IntDatesPuberty)
+		IntDatesMarriage  = strLoadGlobal("DatesMarriage" , IntDatesMarriage)
+		IntDatesFertile   = strLoadGlobal("DatesFertile"  , IntDatesFertile)
+		IntDatesLifespan  = strLoadGlobal("DatesLifespan" , IntDatesLifespan)
+		IntChronMagnitude = strLoadGlobal("ChronMagnitude", IntChronMagnitude)
+		IntChronTolerance = strLoadGlobal("ChronTolerance", IntChronTolerance)
+
+		IntGenGapFamily   = strLoadGlobal("GenGapFamily"  , IntGenGapFamily)
+		IntGenGapRelative = strLoadGlobal("GenGapRelative", IntGenGapRelative)
+		IntGenGapDeduct   = strLoadGlobal("GenGapDeduct"  , IntGenGapDeduct)
+		IntGenderDeduct   = strLoadGlobal("GenderDeduct"  , IntGenderDeduct)
+	end
+	IntMainX,IntMainY = intintCheckPosition(IntMainX,IntMainY)
+	IntHelpX,IntHelpY = intintCheckPosition(IntHelpX,IntHelpY)
+	IntDataX,IntDataY = intintCheckPosition(IntDataX,IntDataY)
+	GUI_FontDialogue(IntFontSet)														-- Assign font set
+	for intRelation = IntIndivi, IntChild1 do
+		SetNamesPoints(intRelation)													-- Assign derived User Preference settings
+	end
+	SetEventPoints("No SaveSettings")
+	SetChronology ("No SaveSettings")
+	SetGenerations("No SaveSettings")
+	if FlgFileExists(StrNonDupsFile) then
+		TblNonDups, StrErr = table.load(StrNonDupsFile)							-- Load Non-Duplicates table
+--		if TblNonDups[1] and TblNonDups[1][1] then TblNonDups = {} end		-- Remove legacy temp table
+	end
+	SaveSettings(strFileName)															-- Save Sticky Data settings (must be last)
+end -- function LoadSettings
+
+-- Save Sticky Settings to File --
+function SaveSettings(strFileName)
+
+	local tblStickyData = {}
+
+	local function doSaveLocal(strParam,param)									-- Save Local Parameter for this PC
+		tblStickyData[StrComputerName.."-"..strParam] = param
+	end
+
+	local function doSaveGlobal(strParam,param)									-- Save Global Parameter for all PC
+		tblStickyData[strParam] = param
+	end
+
+	doSaveLocal("MainX",IntMainX)													-- Save Sticky Data settings
+	doSaveLocal("MainY",IntMainY)
+	doSaveLocal("HelpX",IntHelpX)
+	doSaveLocal("HelpY",IntHelpY)
+	doSaveLocal("HelpS",StrHelpS)
+	doSaveLocal("DataX",IntDataX)
+	doSaveLocal("DataY",IntDataY)
+	doSaveGlobal("Last",StrLast)
+	doSaveGlobal("Date",StrDate)
+	doSaveGlobal("FontSet",IntFontSet)
+
+	doSaveGlobal("IndiScoreMin"  , IntIndiScoreMin)
+	doSaveGlobal("LeastResults"  , IntLeastResults)
+	doSaveGlobal("LimitResults"  , IntLimitResults)
+	doSaveGlobal("PruneResults"  , IntPruneResults)
+
+	doSaveGlobal("LastNameRight" , TblLastNameRight)
+	doSaveGlobal("ForeNameRight" , TblForeNameRight)
+	doSaveGlobal("ForeNameOther" , TblForeNameOther)
+	doSaveGlobal("NameSoundex"   , TblNameSoundex)
+	doSaveGlobal("NameLastWrong" , TblNameLastWrong)
+	doSaveGlobal("NameMinimum"   , TblNameMinimum)
+	doSaveGlobal("NameDeduction" , TblNameDeduction)
+	doSaveGlobal("NameMaximum"   , TblNameMaximum)
+	doSaveGlobal("NameThreshold" , TblNameThreshold)
+
+	doSaveGlobal("DatesTolerance", IntDatesTolerance)
+	doSaveGlobal("DatesMatched"  , IntDatesMatched)
+	doSaveGlobal("DatesOverlap"  , IntDatesOverlap)
+	doSaveGlobal("DatesMinimum"  , IntDatesMinimum)
+	doSaveGlobal("DatesDeduction", IntDatesDeduction)
+	doSaveGlobal("PlacePartRight", IntPlacePartRight)
+	doSaveGlobal("PlacePartOther", IntPlacePartOther)
+	doSaveGlobal("PlaceSoundex"  , IntPlaceSoundex)
+	doSaveGlobal("EventMaximum"  , IntEventMaximum)
+
+	doSaveGlobal("DatesTimespan" , IntDatesTimespan)
+	doSaveGlobal("DatesVariance" , IntDatesVariance)
+	doSaveGlobal("DatesPregnant" , IntDatesPregnant)
+	doSaveGlobal("DatesPuberty"  , IntDatesPuberty)
+	doSaveGlobal("DatesMarriage" , IntDatesMarriage)
+	doSaveGlobal("DatesFertile"  , IntDatesFertile)
+	doSaveGlobal("DatesLifespan" , IntDatesLifespan)
+	doSaveGlobal("ChronMagnitude", IntChronMagnitude)
+	doSaveGlobal("ChronTolerance", IntChronTolerance)
+
+	doSaveGlobal("GenGapFamily"  , IntGenGapFamily)
+	doSaveGlobal("GenGapRelative", IntGenGapRelative)
+	doSaveGlobal("GenGapDeduct"  , IntGenGapDeduct)
+	doSaveGlobal("GenderDeduct"  , IntGenderDeduct)
+
+	table.save(tblStickyData,strFileName)											-- Save Sticky Data table
+	table.save(TblNonDups,StrNonDupsFile)											-- Save Non-Duplicates table
+
+end -- function SaveSettings
+
+-- Flag if GUI Window is Normal rather than Minimised or Maximised --
+function IsNormalWindow(dialogGUI)
+	-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+	local tblPosn = dialogGUI.screenposition:SplitNumbers()
+	local intPosX = tblPosn[1]
+	local intPosY = tblPosn[2]
+	if intPosX < 0 and intPosY < 0 then						-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
+		return false												-- then is Maximised or Minimised
+	end
+	return true
+end -- function IsNormalWindow
+
+-- GUI Font Face & Style Dialogue --
+function GUI_FontDialogue(intFontSet)
+
+	-- Note: Pixel sizes -21 = -20 & -17 = -16 & -14 = -13 and pixel sizes -22, -18 & -13 have no point size equivalent.
+	local tblFontSet = {}			-- Lookup table for StrFontHead and StrFontBody font sets
+	tblFontSet[IntFontPlain]		=	{ Head=StrFontFace..", Bold -16",	Body=StrFontFace..",      -16", }
+	tblFontSet[IntFontBold]		=	{ Head=StrFontFace..", Bold -16",	Body=StrFontFace..", Bold -15", }
+	tblFontSet[IntArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
+	tblFontSet[IntArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
+	tblFontSet[IntTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
+	tblFontSet[IntTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
+
+	-- Assign font set global variables
+	local function doAssignFontSet(intFontSet)
+		IntFontSet = intFontSet
+		StrFontHead = tblFontSet[intFontSet]["Head"] -- Font for all GUI dialog header text
+		StrFontBody = tblFontSet[intFontSet]["Body"] -- Font for all GUI dialog body text
+	end -- local function doAssignFontSet
+
+	-- If parameter exists, simply set it as current font set
+	if intFontSet then doAssignFontSet(intFontSet) return end
+
+	local strAnswer = "Change"
+
+	local strFontPlainTitle	= StrFontFace.." Plain"
+	local strFontBoldTitle		= StrFontFace.." Bold"
+	local strArialPlainTitle	= "Arial Plain"
+	local strArialBoldTitle	= "Arial Bold"
+	local strTahomaPlainTitle	= "Tahoma Plain"
+	local strTahomaBoldTitle	= "Tahoma Bold"
+
+	-- Create each GUI label and button with title and tooltip
+	local	lblHeadName		= iup.label	{ title=" Name :"				, tip="Names of the available Fonts"				, }
+	local	lblHeadPlain		= iup.label	{ title=" Plain :"				, tip="Plain versions of the Fonts"					, }
+	local	lblHeadBold		= iup.label	{ title=" Bold :"				, tip="Bold versions of the Fonts"					, }
+	local	lblFontName		= iup.label	{ title="Font "..StrFontFace	, tip="Default Windows fontface"					, }
+	local	btnFontPlain		= iup.button	{ title=strFontPlainTitle		, tip="Choose "..strFontPlainTitle.." style"		, }
+	local	btnFontBold		= iup.button	{ title=strFontBoldTitle		, tip="Choose "..strFontBoldTitle.." style"		, }
+	local	lblArialName		= iup.label	{ title="Font Arial"			, tip="Arial alternative fontface"					, }
+	local	btnArialPlain	= iup.button	{ title=strArialPlainTitle	, tip="Choose "..strArialPlainTitle.." style"	, }
+	local	btnArialBold		= iup.button	{ title=strArialBoldTitle		, tip="Choose "..strArialBoldTitle.." style"		, }
+	local	lblTahomaName	= iup.label	{ title="Font Tahoma"			, tip="Tahoma alternative fontface"					, }
+	local	btnTahomaPlain	= iup.button	{ title=strTahomaPlainTitle	, tip="Choose "..strTahomaPlainTitle.." style"	, }
+	local	btnTahomaBold	= iup.button	{ title=strTahomaBoldTitle	, tip="Choose "..strTahomaBoldTitle.." style"	, }
+	local	lblChoose			= iup.label	{ title="Choose your interface font style or"										, }
+	local	btnClose			= iup.button	{ title="Close"					, tip="Close this Font Style window"				, }
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local	dialogFont		= iup.dialog { title=(StrPlugin or "").." Font Style", dialogframe="YES", background=StrWhite, startfocus=btnClose,
+										iup.vbox { alignment="ACENTER", gap=StrGap, margin=StrBigMargin,
+											iup.frame { font=StrFontHead, fgcolor=StrBlack, active="YES", title="Font Style",
+												iup.vbox { margin=StrMinMargin,
+													iup.hbox { homogeneous="YES", lblHeadName,	lblHeadPlain,	lblHeadBold,		},
+													iup.hbox { homogeneous="YES", lblFontName,	btnFontPlain,	btnFontBold,		},
+													iup.hbox { homogeneous="YES", lblArialName,	btnArialPlain,	btnArialBold,	},
+													iup.hbox { homogeneous="YES", lblTahomaName,	btnTahomaPlain,	btnTahomaBold,	},
+													iup.hbox { lblChoose, btnClose, },
+												},
+											},
+										},
+										move_cb	= function(self,x,y) IntDataX=x IntDataY=y end,
+										close_cb	= function() strAnswer="Ignore" return iup.CLOSE end,
+									}
+
+	-- Assign font styles for GUI labels and buttons
+	local strFontPlain		= tblFontSet	[IntFontPlain]	["Body"]
+	local strFontBold		= tblFontSet	[IntFontBold]	["Body"]
+	local strArialPlain		= tblFontSet	[IntArialPlain]	["Body"]
+	local strArialBold		= tblFontSet	[IntArialBold]	["Body"]
+	local strTahomaPlain	= tblFontSet	[IntTahomaPlain]["Body"]
+	local strTahomaBold		= tblFontSet	[IntTahomaBold]	["Body"]
+
+	-- Set other GUI attributes for labels and buttons
+	for iupName, tblAttr in pairs( {
+		--	Control		=	1~fgcolor	, 2~font			, 3~FontSet		, 4~action function()
+		[lblHeadName]	= { StrBlack	, StrFontBody	, false			, false	},
+		[lblHeadPlain]	= { StrBlack	, strFontPlain	, false			, false	},
+		[lblHeadBold]	= { StrBlack	, strFontBold	, false			, false	},
+		[lblFontName]	= { StrBlack	, strFontPlain	, false			, false	},
+		[btnFontPlain]	= { StrGreen	, strFontPlain	, IntFontPlain	, false	},
+		[btnFontBold]	= { StrGreen	, strFontBold	, IntFontBold	, false	},
+		[lblArialName]	= { StrBlack	, strArialPlain	, false			, false	},
+		[btnArialPlain]	= { StrGreen	, strArialPlain	, IntArialPlain	, false	},
+		[btnArialBold]	= { StrGreen	, strArialBold	, IntArialBold	, false	},
+		[lblTahomaName]	= { StrBlack	, strTahomaPlain, false			, false	},
+		[btnTahomaPlain]= { StrGreen	, strTahomaPlain, IntTahomaPlain, false	},
+		[btnTahomaBold]	= { StrGreen	, strTahomaBold	, IntTahomaBold	, false	},
+		[lblChoose]		= { StrBlack	, StrFontBody	, false			, false	},
+		[btnClose]		= { StrRed	, StrFontBody	, false			, dialogFont.close_cb },
+		} ) do
+		iupName.expand	= "YES"
+		iupName.fgcolor	= tblAttr[1]
+		iupName.font		= tblAttr[2]
+		if tblAttr[3] then
+			if tblAttr[3] == IntFontSet then iupName.active = "NO" end	-- Disable button for currently selected font
+			iupName.action = function() doAssignFontSet(tblAttr[3]) return iup.CLOSE end
+		end
+		if tblAttr[4] then iupName.action = tblAttr[4] end
+	end
+
+	if iup.MainLoopLevel() == 0 then	-- called from outside Main GUI, so must use showxy() instead of popup()
+		dialogFont:showxy(IntDataX,IntDataY)
+	else
+		dialogFont:popup(IntDataX,IntDataY)
+	end
+
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+
+	return strAnswer
+end -- function GUI_FontDialogue
+
+-- Progress Bar Function Prototype --
+function NewProgressBar(tblGauge)
+
+	local tblGauge	= tblGauge or {}							-- Optional table of external parameters
+	local strFont	= tblGauge.Font	or nil						-- Font dialogue default is current font
+	local strButton	= tblGauge.Button	or "255 0 0"			-- Button colour default is red
+	local strBehind	= tblGauge.Behind	or "255 255 255"	-- Background colour default is white
+	local intShowX	= tblGauge.ShowX	or iup.CENTER		-- Show window default position is central
+	local intShowY	= tblGauge.ShowY	or iup.CENTER
+	local intMax, intVal, intPercent, intStart, intDelta, intScale, strClock, isBarStop
+	local lblText, barGauge, lblDelta, btnStop, dlgGauge
+
+	local function doUpdate()										-- Update the Progress Gauge and the Delta % with clock
+		barGauge.value = intVal
+		lblDelta.title = string.format("%4d %%      %s ",intPercent,strClock)
+	end -- local function doUpdate
+
+	local function doReset()										-- Reset all dialogue variables and Update display
+		intVal		= 0													-- Current value of Progress Bar
+		intPercent= -0.1											-- Percentage of progress
+		intStart	= os.time()										-- Start time of progress
+		intDelta	= 0													-- Delta time of progress
+		intScale	= math.ceil( intMax / 1000 )					-- Scale of percentage per second of progress (initial guess is corrected in Step function)
+		strClock	= "00 : 00 : 00"								-- Clock delta time display
+		isBarStop	= false											-- Stop button pressed signal
+		doUpdate()
+	end -- local function doReset
+
+	local tblProgressBar = {
+
+		Start = function(strTitle,intMaximum)					-- Create & start Progress Bar window
+			if not dlgGauge then
+				strTitle	= strTitle or ""						-- Dialogue and button title
+				intMax		= intMaximum or 100						-- Maximun range of Progress Bar
+				local strSize = tostring( math.max( 100, string.len(" Stop "..strTitle) * 8 ) ).."x30"			-- Adjust Stop button size to Title
+				lblText	= iup.label	{ title=" ", expand="YES", alignment="ACENTER", tip="Progress Message" }
+				barGauge	= iup.progressbar { rastersize="400x30", value=0, max=intMax, tip="Progress Bar" }
+				lblDelta	= iup.label	{ title=" ", expand="YES", alignment="ACENTER", tip="Percentage and Elapsed Time" }
+				btnStop	= iup.button	{ title=" Stop "..strTitle, rastersize=strSize, fgcolor=strButton, tip="Stop Progress Button", action=function() isBarStop = true end }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
+				dlgGauge	= iup.dialog	{ title=strTitle.." Progress ", font=strFont, dialogframe="YES", background=strBehind,	-- Remove Windows minimize/maximize menu
+									iup.vbox{ alignment="ACENTER", gap="10", margin="10x10",
+										lblText,
+										barGauge,
+										lblDelta,
+										btnStop,
+									},
+									move_cb	= function(self,x,y) tblGauge.ShowX = x tblGauge.ShowY = y end,
+									close_cb	= btnStop.action,	-- Windows Close button = Stop button
+								}
+				dlgGauge:showxy(intShowX,intShowY)				-- Show the Progress Bar window
+				doReset()												-- Reset the Progress Bar display
+			end
+		end,
+
+		Message = function(strText)								-- Show the Progress Bar message
+			if dlgGauge then lblText.title = strText end
+		end,
+
+		Step = function(intStep)									-- Step the Progress Bar forward
+			if dlgGauge then
+				intVal = intVal + ( intStep or 1 )				-- Default step is 1
+				local intNew = math.ceil( intVal / intMax * 100 * intScale ) / intScale
+				if intPercent < intNew then						-- Update progress once per percent or per second, whichever is smaller
+					intPercent = intNew
+					if intVal > intMax then intVal = intMax intPercent = 100 end		-- Ensure values do not exceed maximum
+					intNew = os.difftime(os.time(),intStart)
+					if intDelta < intNew then						-- Update clock of elapsed time
+						intDelta = intNew
+						intScale = math.ceil( intDelta / intPercent )	-- Scale of seconds per percentage step
+						local intHour = math.floor( intDelta / 3600 )
+						local intMins = math.floor( intDelta / 60 - intHour * 60 )
+						local intSecs = intDelta - intMins * 60 - intHour * 3600
+						strClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+						dlgGauge.bringfront="YES"					-- If used too often, inhibits other windows scroll bars, etc
+					end
+					doUpdate()										-- Update the Progress Bar display
+				end
+				iup.LoopStep()
+			end
+		end,
+
+		Reset = function()											-- Reset the Progress Bar display
+			if dlgGauge then doReset() end
+		end,
+
+		Stop = function()											-- Check if Stop button pressed
+			iup.LoopStep()
+			return isBarStop
+		end,
+
+		Close = function()											-- Close the Progress Bar window
+			isBarStop = false
+			if dlgGauge then dlgGauge:destroy() dlgGauge = nil end
+		end,
+
+	} -- end ProgressBar
+	return tblProgressBar
+end -- function NewProgressBar
+
+-- GUI Help & Advice Dialogue --
+function GUI_HelpDialogue(strOrigin)
+
+	local function doActivateMainHelpButton()
+		if BtnHelp then BtnHelp.active = "YES" end
+	end -- local function doActivateMainHelpButton
+
+	-- create the WebBrowser based on its ProgID and connect it to LuaCOM
+	local	oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+			oleControl:CreateLuaCOM()
+
+	-- Create each GUI button with title and tooltip
+	local	btnIntro	= iup.button	{ title="Introduction"			, tip="Introduction for Help and Advice"			, }
+	local	btnResult	= iup.button	{ title="Result Set"			, tip="Result Set Help and Advice"					, }
+	local	btnFind	= iup.button	{ title="Find Duplcates"		, tip="Find Duplicates Tab Help and Advice"		, }
+	local	btnOmit	= iup.button	{ title="Omit Non-Duplicates", tip="Omit Non-Duplicates Tab Help and Advice"	, }
+	local	btnPref	= iup.button	{ title="Set Preferences"		, tip="Set Preferences Tab Help and Advice"		, }
+	local	btnClose	= iup.button	{ title="Close Window"			, tip="Close this Help and Advice window"			, }
+
+	-- The following controls are global to allow Main GUI to alter font and restore default position
+	HboxHelp		=	iup.hbox { font=StrFontBody, margin=StrMinMargin, homogeneous="YES", btnIntro, btnResult, btnFind, btnOmit, btnPref, btnClose, }
+	DialogHelp	=	iup.dialog { title=StrPlugin.." Help & Advice", background=StrWhite, startfocus=btnClose, rastersize=StrHelpS,
+							iup.vbox { alignment="ACENTER", margin=StrBigMargin, expandchildren="YES",
+								oleControl,
+								HboxHelp,
+							},
+							move_cb	= function(self,x,y) if IsNormalWindow(self) then IntHelpX=x IntHelpY=y end end,
+							resize_cb	= function(self) if IsNormalWindow(self) then StrHelpS=self.rastersize end end,
+							close_cb	= function() doActivateMainHelpButton() end,
+						}
+
+	local strFHUG = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:find_duplicate_individuals:"
+	local tblFHUG = {"find_duplicate_individuals","result_set","find_duplicates_tab","omit_non-duplicates_tab","set_preferences_tab",}
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control	=	1~fgcolor	, 2~URL	, 3~action function()
+		[btnIntro]	= { StrGreen	,	1		, false },
+		[btnResult]	= { StrGreen	,	2		, false },
+		[btnFind]		= { StrGreen	,	3		, false },
+		[btnOmit]		= { StrGreen	,	4		, false },
+		[btnPref]		= { StrGreen	,	5		, false },
+		[btnClose]	= { StrRed	, false	, function() DialogHelp:destroy() doActivateMainHelpButton() end }
+		} ) do
+		iupName.expand	= "HORIZONTAL"
+		iupName.size		= "x10"
+		iupName.fgcolor	= tblAttr[1]
+		if tblAttr[2] then iupName.action = function() oleControl.com:Navigate(strFHUG..tblFHUG[tblAttr[2]]) end end
+		if tblAttr[3] then iupName.action = tblAttr[3] end
+	end
+
+	DialogHelp:showxy(IntHelpX,IntHelpY)											-- Show Help GUI window
+	DialogHelp.rastersize=nil															-- Allow window to be resized	nil = iup.NULL
+
+	if not strOrigin then strOrigin = "find_duplicate_individuals" end
+	for intFHUG = 1, #tblFHUG do
+		local strFHUG = tblFHUG[intFHUG]
+		if strFHUG:match(strOrigin) then
+			strOrigin = strFHUG
+			break
+		end
+	end
+	oleControl.com:Navigate(strFHUG..strOrigin)
+
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+
+end -- function GUI_HelpDialogue
+
+-- Graphical User Interface --
+function GUI_MainDialogue()
+
+	local function setNameItem(tblName,intRelation,intItem)					-- Set Name for Relation spin value item
+		tblName[intRelation] = intItem
+		SetNamesPoints(intRelation)
+		SaveSettings(StrStickyFile)
+	end -- local function setNameItem
+
+	-- Create the Find Duplicates controls with title/value (and tooltip, etc)
+	local	btnLast	= iup.button	{ title="Set the Updated from Date to this last run Date" }
+	local	txtLast	= iup.text	{ value=StrLast, rastersize="220", readonly="YES" }
+
+	local	lblDate	= iup.label	{ title="Include Individuals last Updated from this Date" }
+	local	txtDate	= iup.text	{ value=StrDate, rastersize="220" }
+
+	local	btnPick	= iup.button	{ title="Include any Selected Subset of the Individuals" }
+	local	txtPick	= iup.text	{ value="0 Rec", rastersize="220", readonly="YES" }
+
+	local	lblLine	= iup.label	{ separator="HORIZONTAL" }
+
+	local	btnFind	= iup.button	{ title="Find any Duplicates constrained by the Included subset of Individuals" }
+
+	local	lblTime	= iup.label	{ title="Estimated run time to check Individuals for Duplicates is 99 min 99 sec" }
+
+	local	btnShow	= iup.button	{ title="Show the previous Result Set of Duplicates in Family Historian" }
+
+	local	tglDiag	= iup.toggle	{ title="Enable Diagnostic Mode  :", value="OFF", rightbutton="YES" }
+	local	lblNull	= iup.label	{ title=" " }
+	local	tglSpan	= iup.toggle	{ title="Including Timespan Dates  :", value="OFF", rightbutton="YES", active="NO" }
+
+	-- Create the Omit Non-Duplicates controls with title/value (and tooltip, etc)
+	local	lstMove	= iup.list	{ value=0, visiblelines=4 }
+	local	txtMove	= iup.text	{ value=" ", readonly="YES" }
+	local	btnMove	= iup.button	{ title="Move selected Result Set entry to Non-Duplicates list below", active="NO" }
+	local	lstDrop	= iup.list	{ value=0, visiblelines=4 }
+	local	txtDrop	= iup.text	{ value=" ", readonly="YES" }
+	local	btnWipe	= iup.button	{ title="Erase the entire Non-Duplicates list", active="NO" }
+	local	btnDrop	= iup.button	{ title="Drop selected entry from Non-Duplicates", active="NO" }
+
+	-- Create the Dialogue Common controls with title/value (and tooltip, etc)
+			BtnHelp	= iup.button	{ title="  Help && Advice" }
+	local	btnClose	= iup.button	{ title="Close Plugin" }
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Control	=	1~fgcolor	, 2~alignment		, 3~expand	, 4~padding		Find Duplicates controls
+		[btnLast]		= { StrGreen	, false				, false		, 10	},
+		[txtLast]		= { StrGreen	, "ACENTER"			, "VERTICAL"	, 10	},
+		[lblDate]		= { StrBlack	, "ACENTER:ACENTER"	, false		, 10	},
+		[txtDate]		= { StrGreen	, "ACENTER"			, "VERTICAL"	, 10	},
+		[btnPick]		= { StrGreen	, false				, false		, 10	},
+		[txtPick]		= { StrBlack	, "ACENTER"			, "VERTICAL"	, 10	},
+		[btnFind]		= { StrGreen	, false				, false		, 10	},
+		[lblTime]		= { StrBlack	, "ACENTER:ACENTER"	, false		, 10	},
+		[btnShow]		= { StrGreen	, false				, false		, 10	},
+		[tglDiag]		= { StrBlack	, false				, false		,  0	},
+		[lblNull]		= { StrBlack	, "ACENTER"			, false		, 40	},	-- was 30
+		[tglSpan]		= { StrBlack	, false				, false		,  0	},
+
+		-- Control	=	1~fgcolor	, 2~alignment		, 3~expand	, 4~padding		Omit Non-Duplicates controls
+		[lstMove]		= { StrBlack	, "ALEFT"				, false		,  0	},
+		[txtMove]		= { StrBlack	, "ALEFT"				, false		,  0	},
+		[btnMove]		= { StrGreen	, false				, false		, 10	},
+		[lstDrop]		= { StrBlack	, "ALEFT"				, false		,  0	},
+		[txtDrop]		= { StrBlack	, "ALEFT"				, false		,  0	},
+		[btnWipe]		= { StrGreen	, false				, false		, 10	},
+		[btnDrop]		= { StrGreen	, false				, false		, 10	},
+
+		-- Control	=	1~fgcolor	, 2~alignment		, 3~expand	, 4~padding		Dialogue Common controls
+		[BtnHelp]		= { StrGreen	, false				,"HORIZONTAL","10x4"},
+		[btnClose]	= { StrRed	, false				,"HORIZONTAL","10x4"},
+		} ) do
+		iupName.fgcolor	= tblAttr[1]
+		if tblAttr[2] then iupName.alignment	= tblAttr[2] end
+		if tblAttr[3] then iupName.expand		= tblAttr[3] else iupName.expand = "YES" end
+		if tblAttr[4] then iupName.padding		= tblAttr[4] end
+	end
+
+	-- Create the Set Preferences controls with title/value (and tooltip, etc)
+	local tblSet = {}																	-- Table to hold all the Set Preference tab controls
+	local intTab = 0																	-- Index to Tab number on Set Preference tab
+	local intRow = 0																	-- Index to Row of controls on each Tab
+	local intPadding = 20
+	for intTab = 1, 5 do																-- Set the default attributes for up to 5 Tabs and 10 Rows of controls
+		tblSet[intTab] = {}
+		for intRow = 1, 10 do
+			tblSet[intTab][intRow] = {}
+			local tblRow = tblSet[intTab][intRow]
+			tblRow.heading = iup.label	{ title=" ", expand="HORIZONTAL", padding="x1" }
+			if intTab == 2 then															-- Names Matching is 2nd tab
+				if intRow == 1 then														-- 1st Row has Relations titles, and Defaults button
+					local tblTitle = { "Individual ", "Father ", "Mother ", "Spouse ", "Child " }
+					for intRel = IntIndivi, IntChild1 do
+						tblRow[intRel]=iup.label{ title=tblTitle[intRel], expand="HORIZONTAL", alignment="ACENTER", padding="x3" }
+					end
+					tblRow.default = iup.button{ title="Defaults ", expand="HORIZONTAL", fgcolor=StrGreen, padding="10x2" }
+				else																		-- Other Rows have Relations spin controls, and default integers & measurements
+					for intRel = IntIndivi, IntChild1 do
+						tblRow[intRel] = iup.text { spin="YES", border="NO", alignment="ARIGHT", rastersize=85, font=StrFontHead, readonly="YES", bgcolor=StrShade, fgcolor=StrGreen, padding=intPadding, spinalign="RIGHT", spinvalue=0, spininc=1, spinmin=0, spinmax=100 }
+					end
+					tblRow.integer = iup.label { title="9", expand="HORIZONTAL", alignment="ARIGHT" }
+					tblRow.measure = iup.label { title="Points" }
+					tblRow.default = iup.hbox  { homogeneous="YES", tblRow.integer, tblRow.measure, margin=0 }
+				end
+				tblRow.overall = iup.hbox { homogeneous="YES", tblRow.heading, tblRow[IntIndivi], tblRow[IntFather], tblRow[IntMother], tblRow[IntSpouse], tblRow[IntChild1], tblRow.default }
+			else
+				if intRow == 1 then														-- 1st Row has bold title, Current Settings title, and Default Settings button
+					tblRow.heading.font = StrFontHead
+					tblRow.current = iup.label { title=" Current Settings ", padding="x3" }
+					tblRow.default = iup.button{ title=" Default Settings ", expand="HORIZONTAL", fgcolor=StrGreen, padding="10x2" }
+				else																		-- Other Rows have Settings spin control, and default integers & measurements
+					tblRow.current = iup.text  { spin="YES", border="NO", alignment="ARIGHT", rastersize=110, font=StrFontHead, readonly="YES", bgcolor=StrShade, fgcolor=StrGreen, padding=intPadding, spinalign="RIGHT", spinvalue=0, spininc=1, spinmin=0, spinmax=100 }
+					tblRow.integer = iup.label { title="9", expand="HORIZONTAL", alignment="ARIGHT" }
+					tblRow.measure = iup.label { title=" Points " }
+					tblRow.default = iup.hbox  { homogeneous="YES", tblRow.integer, tblRow.measure, margin=0 }
+				end
+				tblRow.overall = iup.hbox { homogeneous="YES", tblRow.heading, tblRow.current, tblRow.default }
+			end
+		end
+	end
+
+	-- User Interface tab --
+	intTab = intTab + 1
+	intRow = 1
+	local intInter = intTab
+	local tblResultSetLim = tblSet[intTab][intRow]
+	tblResultSetLim.heading.title   = "Result Set Limits"
+	tblResultSetLim.heading.padding = "x4"
+	intRow = intRow + 1
+	local tblIndiScoreMin = tblSet[intTab][intRow]
+	tblIndiScoreMin.heading.title   = "Individual Threshold"
+	tblIndiScoreMin.current.spinmin = -100
+	tblIndiScoreMin.current.spinmax = 100
+	tblIndiScoreMin.current.spin_cb = function(self,intItem) IntIndiScoreMin=intItem SaveSettings(StrStickyFile) end
+	tblIndiScoreMin.integer.title   = tostring(IntIndiScoreMinDef)
+	intRow = intRow + 1
+	local tblLeastResults = tblSet[intTab][intRow]
+	tblLeastResults.heading.title   = "Results Minimum Score"
+	tblLeastResults.current.spinmin = -100
+	tblLeastResults.current.spinmax = 100
+	tblLeastResults.current.spin_cb = function(self,intItem) IntLeastResults=intItem SaveSettings(StrStickyFile) end
+	tblLeastResults.integer.title   = tostring(IntLeastResultsDef)
+	tblLeastResults.measure.title   = " Point "
+	intRow = intRow + 1
+	local tblLimitResults = tblSet[intTab][intRow]
+	tblLimitResults.heading.title   = "Results Maximum Rows"
+	tblLimitResults.current.spinmin = 20
+	tblLimitResults.current.spinmax = 500
+	tblLimitResults.integer.title   = tostring(IntLimitResultsDef)
+	tblLimitResults.measure.title   = " Rows "
+	intRow = intRow + 1
+	local tblPruneResults = tblSet[intTab][intRow]
+	tblPruneResults.heading.title   = "Memory Conservation"
+	tblPruneResults.current.spinmin = 20
+	tblPruneResults.current.spinmax = 1000
+	tblPruneResults.current.spin_cb = function(self,intItem) IntPruneResults=intItem SetEventPoints() end
+	tblPruneResults.integer.title   = tostring(IntPruneResultsDef)
+	tblPruneResults.measure.title   = " Entries "
+	intRow = intRow + 1
+	iup.Destroy(tblSet[intTab][intRow].overall)	tblSet[intTab][intRow].overall = iup.vbox { iup.hbox { margin="8x15" }, iup.label { separator="HORIZONTAL" }, margin="1x1" }
+	intRow = intRow + 1
+	local	btnReset	= iup.button	{ title="Restore GUI Defaults", expand="HORIZONTAL", fgcolor=StrGreen, padding="10x4" }
+	local	btnErase	= iup.button	{ title="Erase Soundex Cache ", expand="HORIZONTAL", fgcolor=StrGreen, padding="10x4" }
+	local	btnFont	= iup.button	{ title=" Set Interface Font ", expand="HORIZONTAL", fgcolor=StrGreen, padding="10x4" }
+	iup.Destroy(tblSet[intTab][intRow].overall)	tblSet[intTab][intRow].overall = iup.hbox { btnReset, btnErase, btnFont, homogeneous="YES", margin="30x50", gap="10" }
+	intRow = intRow + 1
+	tblSet[intTab][intRow] = nil
+
+	-- Names Matching tab --
+	intTab = intTab + 1
+	intRow = 1
+	local intNames = intTab
+	local tblNamesDefaults = tblSet[intTab][intRow]
+	intRow = intRow + 1
+	local tblLastNameRight = tblSet[intTab][intRow]
+	tblLastNameRight.heading.title    = "Last Right"
+	for intRel = IntIndivi, IntChild1 do
+	 tblLastNameRight[intRel].spin_cb = function(self,intItem) setNameItem(TblLastNameRight,intRel,intItem) end
+	end
+	tblLastNameRight.integer.title    = tostring(IntLastNameRightDef)
+	intRow = intRow + 1
+	local tblForeNameRight = tblSet[intTab][intRow]
+	tblForeNameRight.heading.title    = "Fore Right"
+	for intRel = IntIndivi, IntChild1 do
+	 tblForeNameRight[intRel].spin_cb = function(self,intItem) setNameItem(TblForeNameRight,intRel,intItem) end
+	end
+	tblForeNameRight.integer.title    = tostring(IntForeNameRightDef)
+	intRow = intRow + 1
+	local tblForeNameOther = tblSet[intTab][intRow]
+	tblForeNameOther.heading.title    = "Fore Other"
+	for intRel = IntIndivi, IntChild1 do
+	 tblForeNameOther[intRel].spinmin = -100
+	 tblForeNameOther[intRel].spin_cb = function(self,intItem) setNameItem(TblForeNameOther,intRel,intItem) end
+	end
+	tblForeNameOther.integer.title    = tostring(IntForeNameOtherDef)
+	intRow = intRow + 1
+	local tblNameSoundex = tblSet[intTab][intRow]
+	tblNameSoundex.heading.title    = "Soundex"
+	for intRel = IntIndivi, IntChild1 do
+	 tblNameSoundex[intRel].spin_cb = function(self,intItem) setNameItem(TblNameSoundex,intRel,intItem) end
+	end
+	tblNameSoundex.integer.title    = tostring(IntNameSoundexDef)
+	intRow = intRow + 1
+	local tblNameLastWrong = tblSet[intTab][intRow]
+	tblNameLastWrong.heading.title    = "Last Wrong"
+	for intRel = IntIndivi, IntChild1 do
+	 tblNameLastWrong[intRel].spinmin = -100
+	 tblNameLastWrong[intRel].spinmax = 0
+	 tblNameLastWrong[intRel].spin_cb = function(self,intItem) setNameItem(TblNameLastWrong,intRel,intItem) end
+	end
+	tblNameLastWrong.integer.title    = tostring(IntNameLastWrongDef)
+	intRow = intRow + 1
+	local tblNameMinimum = tblSet[intTab][intRow]
+	tblNameMinimum.heading.title    = "Minimum"
+	tblNameMinimum[IntIndivi].visible = "NO"
+	for intRel = IntIndivi, IntChild1 do
+	 tblNameMinimum[intRel].spin_cb = function(self,intItem) setNameItem(TblNameMinimum,intRel,intItem) end
+	end
+	tblNameMinimum.integer.title    = tostring(IntNameMinimumDef)
+	tblNameMinimum.measure.title    = "Point "
+	intRow = intRow + 1
+	local tblNameDeduction = tblSet[intTab][intRow]
+	tblNameDeduction.heading.title    = "Deduction"
+	tblNameDeduction[IntIndivi].visible = "NO"
+	for intRel = IntFather, IntChild1 do
+	 tblNameDeduction[intRel].spinmin = -100
+	 tblNameDeduction[intRel].spinmax = 0
+	 tblNameDeduction[intRel].spin_cb = function(self,intItem) setNameItem(TblNameDeduction,intRel,intItem) end
+	end
+	tblNameDeduction.integer.title    = tostring(IntNameDeductionDef)
+	intRow = intRow + 1
+	local tblNameMaximum = tblSet[intTab][intRow]
+	tblNameMaximum.heading.title    = "Maximum"
+	for intRel = IntIndivi, IntChild1 do
+	 tblNameMaximum[intRel].spin_cb = function(self,intItem) setNameItem(TblNameMaximum,intRel,intItem) end
+	end
+	tblNameMaximum.integer.title    = tostring(IntNameMaximumDef)
+	intRow = intRow + 1
+	local tblNameThreshold = tblSet[intTab][intRow]
+	tblNameThreshold.heading.title    = "Threshold"
+	for intRel = IntIndivi, IntChild1 do
+	 tblNameThreshold[intRel].spin_cb = function(self,intItem) setNameItem(TblNameThreshold,intRel,intItem) end
+	end
+	tblNameThreshold.integer.title    = tostring(IntNameThresholdDef)
+	intRow = intRow + 1
+	tblSet[intTab][intRow] = nil
+
+	-- Event Matching tab --
+	intTab = intTab + 1
+	intRow = 1
+	local intEvent = intTab
+	local tblEventDefault = tblSet[intTab][intRow]
+	intRow = intRow + 1
+	local tblDatesTolerance = tblSet[intTab][intRow]
+	tblDatesTolerance.heading.title   = "Dates Tolerance"
+	tblDatesTolerance.current.spinmax = 200
+	tblDatesTolerance.current.spin_cb = function(self,intItem) IntDatesTolerance=intItem SetEventPoints() end
+	tblDatesTolerance.integer.title   = "±"..tostring(IntDatesToleranceDef)
+	tblDatesTolerance.measure.title   = " Days "
+	intRow = intRow + 1
+	local tblDatesMatched = tblSet[intTab][intRow]
+	tblDatesMatched.heading.title     = "Dates Matched"
+	tblDatesMatched.current.spin_cb   = function(self,intItem) IntDatesMatched=intItem SetEventPoints() end
+	tblDatesMatched.integer.title     = tostring(IntDatesMatchedDef)
+	intRow = intRow + 1
+	local tblDatesOverlap = tblSet[intTab][intRow]
+	tblDatesOverlap.heading.title     = "Dates Overlap"
+	tblDatesOverlap.current.spin_cb   = function(self,intItem) IntDatesOverlap=intItem SetEventPoints() end
+	tblDatesOverlap.integer.title     = tostring(IntDatesOverlapDef)
+	intRow = intRow + 1
+	local tblDatesMinimum = tblSet[intTab][intRow]
+	tblDatesMinimum.heading.title     = "Dates Minimum"
+	tblDatesMinimum.current.spin_cb   = function(self,intItem) IntDatesMinimum=intItem SetEventPoints() end
+	tblDatesMinimum.integer.title     = tostring(IntDatesMinimumDef)
+	tblDatesMinimum.measure.title     = " Point "
+	intRow = intRow + 1
+	local tblDatesDeduction = tblSet[intTab][intRow]
+	tblDatesDeduction.heading.title   = "Dates Deduction"
+	tblDatesDeduction.current.spinmin = -100
+	tblDatesDeduction.current.spinmax = 0
+	tblDatesDeduction.current.spin_cb = function(self,intItem) IntDatesDeduction=intItem SetEventPoints() end
+	tblDatesDeduction.integer.title   = tostring(IntDatesDeductionDef)
+	intRow = intRow + 1
+	local tblPlacePartRight = tblSet[intTab][intRow]
+	tblPlacePartRight.heading.title   = "Place Part Right"
+	tblPlacePartRight.current.spin_cb = function(self,intItem) IntPlacePartRight=intItem SetEventPoints() end
+	tblPlacePartRight.integer.title   = tostring(IntPlacePartRightDef)
+	intRow = intRow + 1
+	local tblPlacePartOther = tblSet[intTab][intRow]
+	tblPlacePartOther.heading.title   = "Place Part Other"
+	tblPlacePartOther.current.spin_cb = function(self,intItem) IntPlacePartOther=intItem SetEventPoints() end
+	tblPlacePartOther.integer.title   = tostring(IntPlacePartOtherDef)
+	intRow = intRow + 1
+	local tblPlaceSoundex = tblSet[intTab][intRow]
+	tblPlaceSoundex.heading.title     = "Place Part Soundex"
+	tblPlaceSoundex.current.spin_cb   = function(self,intItem) IntPlaceSoundex=intItem SetEventPoints() end
+	tblPlaceSoundex.integer.title     = tostring(IntPlaceSoundexDef)
+	tblPlaceSoundex.measure.title     = " Point "
+	intRow = intRow + 1
+	local tblEventMaximum = tblSet[intTab][intRow]
+	tblEventMaximum.heading.title     = "Event Maximum"
+	tblEventMaximum.current.spin_cb   = function(self,intItem) IntEventMaximum=intItem SetEventPoints() end
+	tblEventMaximum.integer.title     = tostring(IntEventMaximumDef)
+	intRow = intRow + 1
+	tblSet[intTab][intRow] = nil
+
+	-- Date Chronology tab --
+	intTab = intTab + 1
+	intRow = 1
+	local intChron = intTab
+	local tblChronDefault = tblSet[intTab][intRow]
+	intRow = intRow + 1
+	local tblDatesTimespan = tblSet[intTab][intRow]
+	tblDatesTimespan.heading.title   = "Dates Timespan"
+	tblDatesTimespan.current.spinmax = 200
+	tblDatesTimespan.current.spin_cb = function(self,intItem) IntDatesTimespan=intItem SetChronology() end
+	tblDatesTimespan.integer.title   = "±"..tostring(IntDatesTimespanDef)
+	tblDatesTimespan.measure.title   = " Years "
+	intRow = intRow + 1
+	local tblDatesVariance = tblSet[intTab][intRow]
+	tblDatesVariance.heading.title   = "Dates Variance"
+	tblDatesVariance.current.spin_cb = function(self,intItem) IntDatesVariance=intItem SetChronology() end
+	tblDatesVariance.integer.title   = "±"..tostring(IntDatesVarianceDef)
+	tblDatesVariance.measure.title   = " Years "
+	intRow = intRow + 1
+	local tblDatesPregnant = tblSet[intTab][intRow]
+	tblDatesPregnant.heading.title   = "Pregnancy Duration"
+	tblDatesPregnant.current.spinmin = 6
+	tblDatesPregnant.current.spinmax = 12
+	tblDatesPregnant.current.spin_cb = function(self,intItem) IntDatesPregnant=intItem SetChronology() end
+	tblDatesPregnant.integer.title   = tostring(IntDatesPregnantDef)
+	tblDatesPregnant.measure.title   = " Months "
+	intRow = intRow + 1
+	local tblDatesPuberty = tblSet[intTab][intRow]
+	tblDatesPuberty.heading.title   = "Min Puberty Age"
+	tblDatesPuberty.current.spinmin = 10
+	tblDatesPuberty.current.spinmax = 20
+	tblDatesPuberty.current.spin_cb = function(self,intItem) IntDatesPuberty=intItem SetChronology() end
+	tblDatesPuberty.integer.title   = tostring(IntDatesPubertyDef)
+	tblDatesPuberty.measure.title   = " Years "
+	intRow = intRow + 1
+	local tblDatesMarriage = tblSet[intTab][intRow]
+	tblDatesMarriage.heading.title   = "Min Marriage Age"
+	tblDatesMarriage.current.spinmin = 10
+	tblDatesMarriage.current.spinmax = 20
+	tblDatesMarriage.current.spin_cb = function(self,intItem) IntDatesMarriage=intItem SetChronology() end
+	tblDatesMarriage.integer.title   = tostring(IntDatesMarriageDef)
+	tblDatesMarriage.measure.title   = " Years "
+	intRow = intRow + 1
+	local tblDatesFertile = tblSet[intTab][intRow]
+	tblDatesFertile.heading.title   = "Max Fertile Age"
+	tblDatesFertile.current.spinmin = 40
+	tblDatesFertile.current.spinmax = 80
+	tblDatesFertile.current.spin_cb = function(self,intItem) IntDatesFertile=intItem SetChronology() end
+	tblDatesFertile.integer.title   = tostring(IntDatesFertileDef)
+	tblDatesFertile.measure.title   = " Years "
+	intRow = intRow + 1
+	local tblDatesLifespan = tblSet[intTab][intRow]
+	tblDatesLifespan.heading.title   = "Max Lifespan Age"
+	tblDatesLifespan.current.spinmin = 60
+	tblDatesLifespan.current.spinmax = 140
+	tblDatesLifespan.current.spin_cb = function(self,intItem) IntDatesLifespan=intItem SetChronology() end
+	tblDatesLifespan.integer.title   = tostring(IntDatesLifespanDef)
+	tblDatesLifespan.measure.title   = " Years "
+	intRow = intRow + 1
+	local tblChronMagnitude = tblSet[intTab][intRow]
+	tblChronMagnitude.heading.title   = "Chron Magnitude"
+	tblChronMagnitude.current.spinmin = 1
+	tblChronMagnitude.current.spinmax = 120
+	local	txtChMag = tblChronMagnitude.current
+	tblChronMagnitude.integer.title   = tostring(IntChronMagnitudeDef)
+	tblChronMagnitude.measure.title   = " Months "
+	intRow = intRow + 1
+	local tblChronTolerance = tblSet[intTab][intRow]
+	tblChronTolerance.heading.title   = "Chron Tolerance"
+	tblChronTolerance.current.spinmin = -100
+	tblChronTolerance.current.spinmax = 0
+	tblChronTolerance.current.spin_cb = function(self,intItem) IntChronTolerance=intItem SetChronology() end
+	tblChronTolerance.integer.title   = tostring(IntChronToleranceDef)
+	intRow = intRow + 1
+	tblSet[intTab][intRow] = nil
+
+	-- Family & Gender tab --
+	intTab = intTab + 1
+	intRow = 1
+	local intOther = intTab
+	local tblOtherDefault = tblSet[intTab][intRow]
+	tblOtherDefault.heading.title   = "Generation Gap"
+	tblOtherDefault.heading.padding = "x4"
+	intRow = intRow + 1
+	local tblGenGapFamily = tblSet[intTab][intRow]
+	tblGenGapFamily.heading.title   = "Family Generations"
+	tblGenGapFamily.current.spinmax = 10
+	tblGenGapFamily.current.spin_cb = function(self,intItem) IntGenGapFamily=intItem SetGenerations() end
+	tblGenGapFamily.integer.title   = tostring(IntGenGapFamilyDef)
+	tblGenGapFamily.measure.title   = " Gen Gap "
+	intRow = intRow + 1
+	local tblGenGapRelative = tblSet[intTab][intRow]
+	tblGenGapRelative.heading.title   = "Relatives Generations"
+	tblGenGapRelative.current.spinmax = 10
+	tblGenGapRelative.current.spin_cb = function(self,intItem) IntGenGapRelative=intItem SetGenerations() end
+	tblGenGapRelative.integer.title   = tostring(IntGenGapRelativeDef)
+	tblGenGapRelative.measure.title   = " Gen Gap "
+	intRow = intRow + 1
+	local tblGenGapDeduct = tblSet[intTab][intRow]
+	tblGenGapDeduct.heading.title   = "Relatives Deduction"
+	tblGenGapDeduct.current.spinmin = -100
+	tblGenGapDeduct.current.spinmax = 0
+	tblGenGapDeduct.current.spin_cb = function(self,intItem) IntGenGapDeduct=intItem SetGenerations() end
+	tblGenGapDeduct.integer.title   = tostring(IntGenGapDeductDef)
+	intRow = intRow + 1
+	iup.Destroy(tblSet[intTab][intRow].overall)	tblSet[intTab][intRow].overall = iup.vbox { iup.hbox { margin="8x8" }, iup.label { separator="HORIZONTAL" }, iup.hbox { margin="8x8" }, margin="1x1" }
+	intRow = intRow + 1
+	local tblGenderMismatch = tblSet[intTab][intRow]
+	iup.Destroy(tblGenderMismatch.heading)
+	iup.Destroy(tblGenderMismatch.current)
+	iup.Destroy(tblGenderMismatch.default)
+	tblGenderMismatch.heading = iup.label { title="Gender Mismatch", expand="HORIZONTAL", padding="x4", font=StrFontHead }
+	tblGenderMismatch.overall = iup.hbox { homogeneous="YES", tblGenderMismatch.heading, iup.label { title=" Current Settings " }, iup.label { title=" " } }
+	intRow = intRow + 1
+	local tblGenderDeduct = tblSet[intTab][intRow]
+	tblGenderDeduct.heading.title   = "Gender Deduction"
+	tblGenderDeduct.current.spinmin = -100
+	tblGenderDeduct.current.spinmax = 0
+	tblGenderDeduct.current.spin_cb = function(self,intItem) IntGenderDeduct=intItem SaveSettings(StrStickyFile) end
+	tblGenderDeduct.integer.title   = tostring(IntGenderDeductDef)
+	intRow = intRow + 1
+	tblSet[intTab][intRow] = nil
+
+	intTab = intTab + 1
+	tblSet[intTab] = nil
+
+	-- Create the Find Duplicates tab layout
+	local	vboxFind	= 	iup.vbox { font=StrFontBody, alignment="ARIGHT", gap="8", margin="8x8",
+								iup.hbox	{ margin="10x0", btnLast, txtLast, },
+								iup.hbox	{ margin="10x0", lblDate, txtDate, },
+								iup.hbox	{ margin="10x0", btnPick, txtPick, },
+								iup.hbox	{ margin="10x20",lblLine, },
+								iup.hbox	{ margin="10x0", btnFind, },
+								iup.hbox	{ margin="10x0", lblTime, },
+								iup.hbox	{ margin="10x0", btnShow, },
+								iup.hbox	{ margin="70x0", tglDiag, lblNull, tglSpan },
+							}
+
+	-- Create the Omit Non-Duplicates tab layout
+	local	vboxOmit	= 	iup.vbox { font=StrFontBody, alignment="ARIGHT", gap="8", margin="8x8",
+								iup.vbox	{ margin="10x0", lstMove, txtMove, btnMove, lstDrop, txtDrop, iup.hbox	{ margin="0x0", btnWipe, btnDrop, homogeneous="YES" }, }
+							}
+
+	-- Create the Set Preferences tab layout
+	local tblPref = {}
+	for intTab = 1, #tblSet do
+		if tblSet[intTab] == nil then break end
+		local intMargin = "40x1"
+		if intTab == intNames then intMargin = "2x1" end
+		tblPref[intTab] = iup.vbox { font=StrFontBody, alignment="ARIGHT", gap="8", margin=intMargin }
+		for intRow = 1, #tblSet[intTab] do
+			if tblSet[intTab][intRow] == nil then break end
+			iup.Append( tblPref[intTab], tblSet[intTab][intRow].overall )
+		end
+	end
+
+	local	tabPref	=	iup.tabs { font=StrFontHead, padding="8x8",
+								tblPref[intInter], tabtitle0=" User Interface ",
+								tblPref[intNames], tabtitle1=" Names Matching ",
+								tblPref[intEvent], tabtitle2=" Event Matching ",
+								tblPref[intChron], tabtitle3=" Date Chronology ",
+								tblPref[intOther], tabtitle4=" Family && Gender ",
+							}
+	local	vboxPref	= 	iup.vbox { font=StrFontBody, alignment="ARIGHT", gap="10",
+								tabPref,
+							}
+
+	-- Create the Tab controls layout
+	local	tabCont	=	iup.tabs { font=StrFontHead, padding="8x8",
+								vboxFind,	tabtitle0="  Find Duplicates  ",
+								vboxOmit,	tabtitle1="Omit Non-Duplicates",
+								vboxPref,	tabtitle2="  Set Preferences  ",
+							}
+
+	-- Combine all the above controls
+	local	allCont	=	iup.vbox { font=StrFontBody, alignment="ARIGHT", StrMinMargin,
+								tabCont,
+								iup.hbox	{ margin="90x20", BtnHelp, btnClose, homogeneous="YES", gap="100" }
+ 							}
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local	dialogMain =	iup.dialog { title=StrPlugin..StrVersion, dialogframe="YES", background=StrWhite, startfocus=btnClose, font=StrFontBody, allCont, rastersize="768", 	--	was "760" and "770x550"
+								move_cb	=function(self,x,y) if IsNormalWindow(self) then IntMainX=x IntMainY=y end end,
+							}
+
+	-- Local Variables and Functions
+	local intTotal	= 0																	-- Total number of Idividual Records
+	local intPick	= 0																	-- Picked number of Individual Records
+	local tblIndi	= {}																-- User selection of Individual Records
+	local intDate	= 0																	-- Date threshold for last Updated value
+	local tblResults = {}																-- Results List for Omit Non-Duplicates tab, and Show previous Result Set button
+	local intTabPosn = 0
+
+	local function doResetRecords()													-- Reset all Records to excluded
+		intTotal = 0
+		local ptrIndi = fhNewItemPtr()
+		ptrIndi:MoveToFirstRecord("INDI")
+		while ptrIndi:IsNotNull() do
+			local intRecId = fhGetRecordId(ptrIndi)
+			if not TblData[intRecId] then TblData[intRecId] = {} end			-- Create table of Data entries per Record Id
+			TblData[intRecId].Chosen = false										-- Flag all Records as excluded
+			intTotal = intTotal + 1													-- Count the Total number of Records
+			ptrIndi:MoveNext()
+		end
+	end -- local function doResetRecords
+
+	local function intChosenRecord(ptrIndi)										-- Check if Record last Updated after chosen Date
+		local intRecId = fhGetRecordId(ptrIndi)
+		if ( fhCallBuiltInFunction("DayNumber",fhCallBuiltInFunction("LastUpdated",ptrIndi)) or 0 ) >= intDate then
+			TblData[intRecId].Chosen = true											-- Flag the chosen Records to include
+			return 1
+		end
+		TblData[intRecId].Chosen = false											-- Flag the other Records to exclude
+		return 0
+	end -- local function intChosenRecord
+
+	local function setEstimatedTime()												-- Set estimated run time based on chosen & total records
+		local strTime = "less than a few minutes"
+		local intScale = 60000000
+		if tglDiag.value == "ON" then intScale = intScale / 20 end			-- Lengthen estimate in Diagnostic Mode
+		local intMins = math.floor( intPick * intTotal / intScale )
+		if intMins <= 0 then strTime = "only a few seconds" end
+		if intMins >= 2 then strTime = "from "..intMins.." minutes to "..(intMins*4).." minutes" end
+		lblTime.title = "Estimated run time to check for Duplicates is "..strTime
+	end -- local function setEstimatedTime
+
+	local function intPickRecords()													-- Pick chosen Individual Records
+		intPick = 0
+		if #tblIndi == 0 then															-- No selection
+			local ptrIndi = fhNewItemPtr()
+			ptrIndi:MoveToFirstRecord("INDI")
+			while ptrIndi:IsNotNull() do
+				intPick = intPick + intChosenRecord(ptrIndi)						-- So check all the Records
+				ptrIndi:MoveNext()
+			end
+		else
+			for intIndi = 1, #tblIndi do
+				intPick = intPick + intChosenRecord(tblIndi[intIndi])			-- Check just selected Records
+			end
+		end
+		txtPick.value = intPick.." Records"	
+		setEstimatedTime()
+		if intPick == 0 then btnFind.active = "NO" else btnFind.active = "YES" end
+		return intPick
+	end -- local function intPickRecords
+
+	local function setDateValue()													-- Set Date Value
+		local strDate = txtDate.value
+		local datDate = fhNewDate(9999)
+		if datDate:SetValueAsText(strDate) then									-- Check that Date has valid format
+			intDate = fhCallBuiltInFunction("DayNumber",datDate:GetDatePt1())
+		else
+			intDate = nil
+		end
+		if intDate then
+			StrDate = strDate
+			SaveSettings(StrStickyFile)												-- Save the Date
+		else
+ 			fhMessageBox("Unrecognised Date\n"..strDate)
+			intDate = 0
+		end
+	end -- local function intSetDate
+
+	local function strFormatResult(tblEntry)										-- Format a pair of Duplicate Records
+		if not tblEntry then return " " end
+		local intRecordIdA = tblEntry.RecordIdA or 0
+		local ptrPossibleA = fhNewItemPtr()											-- Record Id and Pointer of Individual A
+		ptrPossibleA:MoveToRecordById("INDI",intRecordIdA)
+		local intRecordIdB = tblEntry.RecordIdB or 0
+		local ptrPossibleB = fhNewItemPtr()											-- Record Id and Pointer of Individual B
+		ptrPossibleB:MoveToRecordById("INDI",intRecordIdB)
+		local strFormatted = string.format("%6d %-30.30s%6d %-.30s",intRecordIdA,fhGetDisplayText(ptrPossibleA),intRecordIdB,fhGetDisplayText(ptrPossibleB))
+		return strFormatted 						-- :gsub(" ","  ")
+	end -- local function strFormatResult
+
+	local function doDisplayTables()												-- Display both Results List and Non-Duplicates tables in Omit Non-Duplicates tab
+		local strStyle = "     -15"
+		if StrFontBody:match(" Bold ") then strStyle = "Bold -14" end
+		local strFont = "Lucida Console, "..strStyle								-- Monospaced font "Consolas, " or "Lucida Console, " or "Lucida Sans Typewriter, " or "DejaVu Sans Mono, "
+		lstMove.font = strFont
+		txtMove.font = strFont
+		lstDrop.font = strFont
+		txtDrop.font = strFont
+		local intValue = lstMove.value
+		lstMove.removeitem = nil
+		for intEntry = 1, #tblResults do
+			lstMove[intEntry] = strFormatResult(tblResults[intEntry])			-- Results List candidate pairs
+		end
+		lstMove.value = intValue
+		local intValue = lstDrop.value
+		lstDrop.removeitem = nil
+		for intEntry = 1, #TblNonDups do
+			lstDrop[intEntry] = strFormatResult(TblNonDups[intEntry])			-- Non-Duplicates list of pairs
+		end
+		lstDrop.value = intValue
+	end -- local function doDisplayTables
+
+	local function doLoadLists()														-- Load the Result List excluding missing Records and Non-Duplicate pairs
+		if FlgFileExists(StrResultsFile) then
+			local tblResultsFile, strErr = table.load(StrResultsFile)			-- Retrieve saved previous Result Set file
+			local intEntry = 1
+			for i, tblResultsFile in ipairs( tblResultsFile ) do
+				local intDataA = tblResultsFile.RecordIdA							-- Get RecordIds of each Result Set pair in turn
+				local intDataB = tblResultsFile.RecordIdB
+				local ptrIndiA = fhNewItemPtr()
+				local ptrIndiB = fhNewItemPtr()
+				ptrIndiA:MoveToRecordById('INDI',intDataA)						-- Do both Individual Records exist i.e. have not been Merged
+				ptrIndiB:MoveToRecordById('INDI',intDataB)
+				if ptrIndiA:IsNotNull() and ptrIndiB:IsNotNull() then			-- Both the Individual Records do exist in GEDCOM
+					tblResults[intEntry] = tblResultsFile
+					for i, tblNonDups in ipairs( TblNonDups ) do					-- Search Non-Duplicates table
+						if intDataA == tblNonDups.RecordIdA and intDataB == tblNonDups.RecordIdB then
+							tblResults[intEntry] = nil
+							intEntry = intEntry - 1									-- Exclude Non-Duplicate pairs
+							break
+						end
+					end
+					intEntry = intEntry + 1											-- Step onto next internal Results List entry
+				end
+			end
+			doDisplayTables()
+			if #TblNonDups > 0 then btnWipe.active = "YES" end
+		end
+	end -- local function doLoadLists
+
+	function btnLast:action()															-- Action for Last run date button
+		txtDate.value = txtLast.value
+		setDateValue()
+		txtPick.value = intPickRecords().." Records"
+	end -- function btnLast:action
+
+	function txtDate:valuechanged_cb()												-- Call back after Date is edited
+		setDateValue()
+		txtPick.value = intPickRecords().." Records"
+	end -- function txtDate:valuechanged_cb
+
+	function btnPick:action()															-- Action for Pick button
+		dialogMain.active = "NO"
+		tblIndi = fhPromptUserForRecordSel('INDI')
+		if #tblIndi > 0 then doResetRecords() end
+		txtPick.value = intPickRecords().." Records"								-- Pick and count the Records
+		dialogMain.bringfront = "YES"
+		dialogMain.active = "YES"
+	end -- function btnPick:action
+
+	function btnFind:action()															-- Action for Find any Duplicates button
+		local tglSpanActive = tglSpan.active
+		tglSpan.active = "NO"
+		dialogMain.active = "NO"
+		if intPick > 0 then																-- If any Records chosen, then run Find Duplicates, which returns true if any found
+			if FindDuplicateRecords(intTotal,tglDiag.value=="ON",tglSpan.value=="ON") then
+				local dateToday	= fhNewDate(0000)
+				dateToday:SetSimpleDate(fhCallBuiltInFunction("Today"))
+				StrLast = dateToday:GetDisplayText("COMPACT")					-- Set date Today as last run date
+				SaveSettings(StrStickyFile)
+				return iup.CLOSE
+			end
+		end
+		dialogMain.bringfront = "YES"
+		dialogMain.active = "YES"
+		tglSpan.active = tglSpanActive
+	end -- function btnFind:action
+
+	function btnShow:action()															-- Action for Show previous Result Set button
+		local tglSpanActive = tglSpan.active
+		tglSpan.active = "NO"
+		dialogMain.active = "NO"
+		if FlgFileExists(StrResultsFile) then
+			doLoadLists()																-- Load the Results List and display as Result Set
+			if DisplayResultSet(tblResults,tglDiag.value=="ON",tglSpan.value=="ON") then
+				return iup.CLOSE
+			end
+		end
+		dialogMain.bringfront = "YES"
+		dialogMain.active = "YES"
+		tglSpan.active = tglSpanActive
+	end -- function btnShow
+
+	function tglDiag:action(intState)												-- Action for Diagnostic toggle
+--		if intState == 0 then StrDiag = "OFF" end
+--		if intState == 1 then StrDiag = "ON" end									-- Add StrDiag to ResetDefault/Load/SaveSettings to make it sticky
+		if tglDiag.value == "ON" then tglSpan.active = "YES" end
+		if tglDiag.value == "OFF" then tglSpan.active = "NO" end
+		setEstimatedTime()																-- Increase run time estimate
+--		SaveSettings(StrStickyFile)
+	end -- function tglDiag:action
+
+	function tglSpan:action(intState)												-- Action for Timespan toggle
+--		if intState == 0 then StrSpan = "OFF" end
+--		if intState == 1 then StrSpan = "ON" end									-- Add StrSpan to ResetDefault/Load/SaveSettings to make it sticky
+--		SaveSettings(StrStickyFile)
+	end -- function tglSpan:action
+
+	function lstMove:button_cb(intButton,intPress,intX,intY,strState)		-- Select an entry from Results List on Omit Non-Duplicates tab
+		if intPress == 0 then
+			local intEntry = tonumber(lstMove.value)
+			txtMove.value = strFormatResult(tblResults[intEntry])
+			if string.len(txtMove.value) > 2 then btnMove.active = "YES" end
+		end
+	end -- function lstMove:button_cb
+
+	function btnMove:action()															-- Action for Move button to move Results List entry into Non-Duplicates List
+		local intEntry = tonumber(lstMove.value)
+		table.insert(TblNonDups,tblResults[intEntry])
+		table.remove(tblResults,intEntry)
+		doDisplayTables()
+		txtMove.value = " "
+		btnMove.active = "NO"
+		btnWipe.active = "YES"
+	end -- function btnMove:action
+
+	function lstDrop:button_cb(intButton,intPress,intX,intY,strState)		-- Select an entry from Non-Duplicates List on Omit Non-Duplicates tab
+		if intPress == 0 then
+			local intEntry = tonumber(lstDrop.value)
+			txtDrop.value = strFormatResult(TblNonDups[intEntry])
+			if string.len(txtDrop.value) > 2 then btnDrop.active = "YES" end
+		end
+	end -- function lstMove:button_cb
+
+	function btnDrop:action()															-- Action for Drop button to remove entry from Non-Duplicates List
+		local intEntry = tonumber(lstDrop.value)
+		table.remove(TblNonDups,intEntry)
+		doLoadLists()
+		txtDrop.value = " "
+		btnDrop.active = "NO"
+		if #TblNonDups == 0 then btnWipe.active = "NO" end
+	end -- function btnDrop:action
+
+	function btnWipe:action()															-- Action for Wipe button to empty entire Non-Duplicates List
+		local intButton = iup.Alarm("Erase Non-Duplicates List ?","Continue to ERASE the entire Non-Duplicates list ?","Yes, Erase","No, Cancel")
+		if intButton == 1 then
+			TblNonDups = {}
+			doLoadLists()
+			txtDrop.value = " "
+			btnDrop.active = "NO"
+			btnWipe.active = "NO"
+		end
+	end -- function btnWipe:action
+
+	function btnReset:action()														-- Action for Restore GUI Defaults button on Set Preferences tab
+		ResetDefaultSettings()
+		if	BtnHelp.active == "NO" then												-- If Help button inactive, then Help is active, so redisplay its dialogue
+			DialogHelp.rastersize = StrHelpS
+			DialogHelp:showxy(IntHelpX,IntHelpY)
+		end
+		txtDate.value = StrDate														-- Reset controls & redisplay Main dialogue
+		setDateValue()
+		tblIndi = {}
+		txtPick.value = intPickRecords().." Records"
+		dialogMain:showxy(IntMainX,IntMainY)
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function btnReset:action
+
+	function btnErase:action()														-- Action for Erase Soundex Cache button on Set Preferences tab
+		TblSoundex = { }																-- Soundex dictionary codes cache of previously coded Names & Places
+		table.save(TblSoundex,StrSoundexFile)
+	end -- function btnErase:action
+
+	function btnFont:action()															-- Action for Set Interface Font button on Set Preferences tab
+
+		local function setPadding(control)											-- pcall(setPadding,control) prevents missing control handle errors propagating
+			if control.spin == "YES" then
+				control.font = StrFontHead
+				control.padding = intPadding
+			end
+		end -- local function setPadding()
+
+		local strAnswer = GUI_FontDialogue()
+		if strAnswer == "Change" then
+			for i, control in ipairs({ tabCont, tabPref, tblResultSetLim.heading, tblOtherDefault.heading, tblGenderMismatch.heading, }) do
+				control.font = StrFontHead
+			end
+			for i, control in ipairs({ vboxFind, vboxOmit, vboxPref, tblPref[intInter], tblPref[intNames], tblPref[intEvent], tblPref[intChron], tblPref[intOther], allCont, }) do
+				control.font = StrFontBody
+			end
+			for intTab = 1, #tblSet do												-- Reset the font and padding in every spin control
+				if tblSet[intTab] == nil then break end
+				for intRow = 1, #tblSet[intTab] do
+					if tblSet[intTab][intRow] == nil then break end
+					if intTab == intNames then
+						for intRel = IntIndivi, IntChild1 do
+							pcall(setPadding,tblSet[intTab][intRow][intRel])	-- pcall prevents missing handle errors propagating
+						end
+					else
+						pcall(setPadding,tblSet[intTab][intRow].current)		-- pcall prevents missing handle errors propagating
+					end
+				end
+			end
+			if	BtnHelp.active == "NO" then											-- If Help button inactive, then Help is active, so update its font
+				HboxHelp.font = StrFontBody
+			end
+			SaveSettings(StrStickyFile)												-- Save sticky data settings
+		end
+	end -- function btnFont:action
+
+	function tblLimitResults.current:spin_cb(intItem)							-- Call back for Result Set Maximum Rows spin control on Set Preferences tab
+		IntLimitResults = intItem
+		tblPruneResults.current.spinmin = intItem
+		intItem = intItem * 2
+		if IntPruneResults < intItem then
+			IntPruneResults = intItem
+			tblPruneResults.current.spinvalue = intItem
+		end
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function tblLimitResults.current:spin_cb
+
+	local function setResultSet()													-- Set the Result Set spin values
+		tblIndiScoreMin.current.spinvalue = IntIndiScoreMin
+		tblLeastResults.current.spinvalue = IntLeastResults
+		tblLimitResults.current.spinvalue = IntLimitResults
+		tblPruneResults.current.spinmin   = IntLimitResults
+		tblPruneResults.current.spinvalue = IntPruneResults
+	end -- local function setResultSet
+
+	function tblResultSetLim.default:action()										-- Action for Result Set Limits Default Settings button on Set Preferences tab
+		SetUserInterfaceDefaults()
+		setResultSet()
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function tblResultSetLim.default:action
+
+	local function setNamesValues()													-- Set the Names Matching spin Values
+		for intRelation = IntIndivi, IntChild1 do
+			tblLastNameRight[intRelation].spinvalue = TblLastNameRight[intRelation]
+			tblForeNameRight[intRelation].spinvalue = TblForeNameRight[intRelation]
+			tblForeNameOther[intRelation].spinvalue = TblForeNameOther[intRelation]
+			tblNameSoundex  [intRelation].spinvalue = TblNameSoundex  [intRelation]
+			tblNameLastWrong[intRelation].spinvalue = TblNameLastWrong[intRelation]
+			tblNameMinimum  [intRelation].spinvalue = TblNameMinimum  [intRelation]
+			tblNameDeduction[intRelation].spinvalue = TblNameDeduction[intRelation]
+			tblNameMaximum  [intRelation].spinvalue = TblNameMaximum  [intRelation]
+			tblNameThreshold[intRelation].spinvalue = TblNameThreshold[intRelation]
+		end
+	end -- local function setNamesValues
+
+	function tblNamesDefaults.default:action()									-- Action for Names Matching Default Settings button on Set Preferences tab
+		SetNamesMatchDefaults()
+		setNamesValues()
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function tblNamesDefaults.default:action
+
+	local function setEventValues()													-- Set the Event Matching spin Values
+		tblDatesTolerance.current.spinvalue = IntDatesTolerance
+		tblDatesMatched  .current.spinvalue = IntDatesMatched
+		tblDatesOverlap  .current.spinvalue = IntDatesOverlap
+		tblDatesMinimum  .current.spinvalue = IntDatesMinimum
+		tblDatesDeduction.current.spinvalue = IntDatesDeduction
+		tblPlacePartRight.current.spinvalue = IntPlacePartRight
+		tblPlacePartOther.current.spinvalue = IntPlacePartOther
+		tblPlaceSoundex  .current.spinvalue = IntPlaceSoundex
+		tblEventMaximum  .current.spinvalue = IntEventMaximum
+	end -- local function setEventValues
+
+	function tblEventDefault.default:action()										-- Action for Event Matching Default Settings button on Set Preferences tab
+		SetEventMatchDefaults()
+		setEventValues()
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function tblEventDefault.default:action
+
+	local intSpinLo = 1
+	local intSpinHi = 6
+
+	function tblChronMagnitude.current:spin_cb(intItem)							-- Call back for Chronology Magnitude spin control on Set Preferences tab
+		local intSpininc = tonumber(txtChMag.spininc)							-- Magnitudes = 1, 2, 3, 4, 6, 12, 18 and increments of intSpinHi=6 to 120 Months
+		if intSpininc > intSpinLo and intItem < 6 then
+			txtChMag.spininc = intSpinLo												-- When value decreases below 6 set decrement = intSpinLo=1 and adjust value
+			intItem = 4
+			txtChMag.spinvalue = intItem + intSpininc
+		elseif intSpininc < intSpinHi and intItem > 4 then
+			txtChMag.spininc = intSpinHi												-- When value increases above 4 set increment = intSpinHi=6 and adjust value
+			intItem = math.ceil( intItem / intSpinHi ) * intSpinHi
+			txtChMag.spinvalue = intItem - intSpininc
+		end
+		if intItem == 6 then txtChMag.spininc = 2 end							-- Needed to allow spin decrement below 6 to reduce to 1
+		IntChronMagnitude = intItem
+		SetChronology()
+	end -- function tblChronMagnitude.current:spin_cb
+
+	local function setChronValues()													-- Set the Date Chronology spin Values
+		tblDatesTimespan .current.spinvalue = IntDatesTimespan
+		tblDatesVariance .current.spinvalue = IntDatesVariance
+		tblDatesPregnant .current.spinvalue = IntDatesPregnant
+		tblDatesPuberty  .current.spinvalue = IntDatesPuberty
+		tblDatesMarriage .current.spinvalue = IntDatesMarriage
+		tblDatesFertile  .current.spinvalue = IntDatesFertile
+		tblDatesLifespan .current.spinvalue = IntDatesLifespan
+		tblChronMagnitude.current.spinvalue = IntChronMagnitude
+		tblChronTolerance.current.spinvalue = IntChronTolerance
+		local intSpininc = 2
+		if IntChronMagnitude < 6 then intSpininc = intSpinLo end
+		if IntChronMagnitude > 6 then intSpininc = intSpinHi end
+		tblChronMagnitude.current.spininc = intSpininc
+	end -- local function setChronValues
+
+	function tblChronDefault.default:action()										-- Action for Date Chronology Default Settings button on Set Preferences tab
+		SetChronologyDefaults()
+		setChronValues()
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function tblChronDefault.default:action
+
+	local function setOtherValues()													-- Set Family & Gender spin Values
+		tblGenGapFamily  .current.spinvalue = IntGenGapFamily
+		tblGenGapRelative.current.spinvalue = IntGenGapRelative
+		tblGenGapDeduct  .current.spinvalue = IntGenGapDeduct
+		tblGenderDeduct  .current.spinvalue = IntGenderDeduct
+	end -- local function setOtherValues
+
+	function tblOtherDefault.default:action()										-- Action for Date Chronology Default Settings button on Set Preferences tab
+		SetOtherMatchDefaults()
+		setOtherValues()
+		SaveSettings(StrStickyFile)													-- Save sticky data settings
+	end -- function tblOtherDefault.default:action
+
+	function tabCont:tabchangepos_cb(intNew,intOld)								-- Call back when Main tab position is changed  
+		intTabPosn = intNew + 1
+		if intNew == 1 then
+			doLoadLists()
+		end
+	end -- function tabCont:tabchangepos_cb
+
+	function BtnHelp:action()															-- Action for Help & Advice button
+		BtnHelp.active = "NO"
+		if     intTabPosn == 0 then GUI_HelpDialogue()
+		elseif intTabPosn == 1 then GUI_HelpDialogue("find_duplicates")
+		elseif intTabPosn == 2 then GUI_HelpDialogue("omit_non.duplicates")
+		elseif intTabPosn == 3 then GUI_HelpDialogue("set_preferences")
+		end
+	end -- function BtnHelp:action
+
+	function btnClose:action()														-- Action for Close Plugin button
+		return iup.CLOSE
+	end -- function btnClose:action
+
+	doResetRecords()
+	txtDate.value = StrDate
+	setDateValue()
+	txtPick.value = intPickRecords().." Records"
+	if not FlgFileExists(StrResultsFile) then btnShow.active = "NO" end
+	setResultSet()
+	setNamesValues()
+	setEventValues()
+	setChronValues()
+	setOtherValues()
+
+	dialogMain:showxy(IntMainX,IntMainY)											-- Display Main GUI Dialogue
+
+	if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+
+end -- function GUI_MainDialogue
+
+function NewSoundex(tblSoundex)														-- Prototype Soundex Calculator
+
+	local tblSoundex = tblSoundex or { }											-- Soundex dictionary cache of previously coded Names
+	tblSoundex[""] = "Z000"															-- Seed with null string special case
+
+	local tblCodeNum = {																-- Soundex code number table
+		A=0,E=0,I=0,O=0,U=0,Y=0,		--	H=0,W=0,									-- H & W are ignored
+		B=1,F=1,P=1,V=1,
+		C=2,G=2,J=2,K=2,Q=2,S=2,X=2,Z=2,
+		D=3,T=3,
+		L=4,
+		M=5,N=5,
+		R=6
+	}
+
+	return function (strAnyName)														-- Convert a Name to Soundex as per http://en.wikipedia.org/wiki/Soundex and http://creativyst.com/Doc/Articles/SoundEx1/SoundEx1.htm#SoundExAndCensus
+		strAnyName = string.upper(strAnyName:gsub("[^%a]",""))					-- Make name upper case letters only
+		local strSoundex = tblSoundex[strAnyName]									-- If already coded in cache then return previous Soundex code
+		if strSoundex then return strSoundex end
+		local strSoundex = string.sub(strAnyName,1,1)							-- Soundex starts with initial letter
+		local strLastNum = tblCodeNum[strSoundex]									-- Set initial Soundex code number
+		for i = 2, string.len(strAnyName) do
+			local strCodeNum = tblCodeNum[string.sub(strAnyName,i,i)]			-- Step through Soundex code of each subsequent letter
+			if strCodeNum then
+				if strCodeNum > 0 and strCodeNum ~= strLastNum then				-- Not a vowel nor same as Soundex preceeding code
+					strSoundex = strSoundex..strCodeNum								-- So append Soundex code until 4 chars long
+					if string.len(strSoundex) == 4 then
+						tblSoundex[strAnyName] = strSoundex							-- Save code in cache for future quick lookup
+						return strSoundex
+					end
+				end
+				strLastNum = strCodeNum												-- Save as Soundex preceeding code, unless H or W
+			end
+		end
+		strSoundex = string.sub(strSoundex.."0000",1,4)							-- Pad code with zeroes to 4 chars long
+		tblSoundex[strAnyName] = strSoundex											-- Save code in cache for future quick lookup
+		return strSoundex
+	end -- anonymous function
+end -- function Soundex
+
+function TblGetNamesData(ptrIndi)													-- Create a Names & Soundex Dictionary for an Individual
+	local tblName = {}
+	local ptrName = fhGetItemPtr(ptrIndi,"~.NAME")
+	while ptrName:IsNotNull() do														-- Loop through every NAME tag instance replacing punctuation such as - , . [ ] ( ) with a space
+		local strSurname = fhGetItemText(ptrName,"~:SURNAME")
+		local strSURNAME = " "..string.upper(strSurname:gsub("%s",""):gsub("%p"," ")).." "	-- Strip spaces in Surnames, so "Van Dyke" becomes "VANDYKE", but "Smith-Jones" becomes "SMITH JONES"
+		strSurname = " "..string.lower(strSurname):gsub("%p"," ").." "
+		for intRef, strRef in ipairs({"~:ADORNED_FULL","~.NICK","~._USED"}) do
+			local strName = string.lower(fhGetItemText(ptrName,strRef)):gsub("%p"," ").." "	-- Remove unnamed Names, ensure Forenames are lowercase, and Surname is uppercase
+			strName = strName:gsub("%[unnamed person%]",""):gsub(strSurname,strSURNAME)
+			for intName, strName in ipairs(strName:split("%s")) do				-- Extract Names separated by space, and more than 2 chars long
+				if string.len(strName) > 2 and not tblName[strName] then		-- Ensure replicated Names are skipped
+					if strName:match("%u") then
+						tblName["~"..strName] = TblNameLastRight					-- Lastname gets most points, has "~" upper case	( default 7 total = 5 + 2 for Soundex )
+					else
+						tblName[intName..strName] = TblNameForeRight				-- Forename in right position, has leading 1 - 9	( default 6 total = 3 + 1 below + 2 for Soundex )
+						tblName[strName] = TblNameForeOther							-- Forename in other position, is all lower case	( default 3 total = 1 + 2 for Soundex )
+					end
+					local strSoundex = StrSoundex(strName)
+					if not tblName[strSoundex] then
+						tblName[strSoundex] = TblNameSoundex						-- Soundex match only points, has capital + digits	( default 2 total )
+					else
+						local tblSoundex = {}											-- Different Name part but replicated Soundex, so points must accumulate to achieve correct total
+						for intRelation = IntIndivi, IntChild1 do
+							tblSoundex[intRelation] = tblName[strSoundex][intRelation] + TblNameSoundex[intRelation]
+						end
+						tblName[strSoundex] = tblSoundex
+					end
+				end
+			end
+		end
+		ptrName:MoveNext("SAME_TAG")
+	end
+	return tblName
+end -- function TblGetNamesData
+
+function TblMakeEvent(intLower,intUpper,tblPlace)								-- Make Event from Date timespan & Place parts
+	local tblEvent = {}
+	tblEvent.Lower = intLower
+	tblEvent.Upper = intUpper
+	tblEvent.Place = tblPlace
+	return tblEvent
+end -- function TblMakeEvent
+
+function TblGetEventData(ptrIndi,strTag)											-- Obtain the BMD Event Data Timespan for an Individual
+	local dateDate = fhGetValueAsDate(fhGetItemPtr(ptrIndi,"~."..strTag..".DATE"))
+	if dateDate:IsNull() then return nil end										-- If no Event Date, then return nil
+	local pntLower = dateDate:GetDatePt1()											-- Lower Date whether Type is Simple or Period or Range
+	local intLower = fhCallBuiltInFunction("DayNumber",pntLower) or 0		-- Lower Date with Month missing uses Jan, and with Day missing uses 1st
+	local pntUpper = dateDate:GetDatePt2()
+	local intUpper = fhCallBuiltInFunction("DayNumber",pntUpper)
+	if intUpper then																	-- Upper Date for Period(From-To) or Range(Between)=Quarter Date
+		if   pntUpper:GetMonth() == 0 then intUpper = intUpper + 364			-- Upper Date with Month missing, so extend to end of Year
+		elseif pntUpper:GetDay() == 0 then intUpper = intUpper + 30 end		-- Upper Date with Day missing, so extend to end of Month (could adjust according to Month?)
+	else																					-- No Upper Date for Simple(Approximate,Calculated,Extimated) or Period(From,To) or Range(After,Before)
+		intUpper = intLower																-- So Upper Date = Lower Date and extend as above
+		if   pntLower:GetMonth() == 0 then intUpper = intUpper + 364
+		elseif pntLower:GetDay() == 0 then intUpper = intUpper + 30 end
+		local strSubType = dateDate:GetSubtype()									-- Subtype is Approximate, Calculated, Estimated, From, To, After, Before, or ""
+		if string.len(strSubType) > 7 then
+			strSubType = strSubType..pntLower:GetMonth()							-- Simple(Approximate,Calculated,Estimated) Year Date needs Upper/Lower = +/- half Timespan
+		end
+		intLower = intLower - ( TblLower[strSubType] or 0 )						-- Period(To) or Range(Before) Date needs Lower = Lower - Timespan
+		intUpper = intUpper + ( TblUpper[strSubType] or 0 )						-- Period(From) or Range(After) Date needs Upper = Upper + Timespan
+	end
+	local tblPlace = {}
+	for intPlace, strPlace in ipairs(fhGetValueAsText(fhGetItemPtr(ptrIndi,"~."..strTag..".PLAC")):split(",")) do
+		strPlace = string.lower(strPlace:gsub("[%s%p]",""))						-- Remove all spaces and punctuation from Place part and ensure lowercase
+		if string.len(strPlace) > 1 and not tblPlace[strPlace] then			-- Ensure replicated Places & Soundex are eliminated, and part > 1 char
+			tblPlace[strPlace] = IntPartOther										-- Place part in other position, is all lower case	( default 2 total = 1 + 1 for Soundex )
+			tblPlace[intPlace..strPlace] = IntPartRight							-- Place part in right position, has leading digit	( default 3 total = 1 + 1 above + 1 for Soundex )
+			tblPlace[StrSoundex(strPlace)] = IntPlaceSoundex					-- Similar sounding Place part, has capital+digits	( default 1 total )
+		end
+	end
+	return TblMakeEvent(intLower,intUpper,tblPlace)								-- Save Lower & Upper Date Timespan and Place & Soundex for each comma separated Place part
+end -- function TblGetEventData
+
+function IntKeyData(ptrIndi)															-- Get key Individual Record data
+	if ptrIndi:IsNull() then return nil end
+	local intData = fhGetRecordId(ptrIndi)											-- Obtain the Record Id of Individual
+	local tblIndi = TblData[intData]
+	if not tblIndi.Indiv then															-- Individual Record data needs creating
+		tblIndi.Indiv	= ptrIndi:Clone()
+		tblIndi.Names	= TblGetNamesData(ptrIndi)								-- Save Names scoring for each Relation
+		tblIndi.Birth	= TblGetEventData(ptrIndi,"BIRT")
+		tblIndi.BapCh	= TblGetEventData(ptrIndi,"BAPM") or TblGetEventData(ptrIndi,"CHR")
+		tblIndi.Marry	= TblGetEventData(ptrIndi,"FAMS>MARR")
+		tblIndi.Death	= TblGetEventData(ptrIndi,"DEAT") or TblGetEventData(ptrIndi,"BURI")
+		tblIndi.Gender	= fhGetItemText(ptrIndi,"~.SEX")
+	end
+	return intData
+end -- function IntKeyData
+
+function IntScoreNamesData(tblListA,tblListB,intRelation)						-- Calculate the Score for Comparing two Name Lists
+	if tblListA and tblListB then													-- Both the Names Lists exist
+		local intScore = 0
+		local intLastWrong = TblNameLastWrong[intRelation]						-- Deduction if no Lastname match (default is 0)
+		for strName in pairs(tblListA) do
+			local tblName = tblListB[strName]
+			if tblName then
+				if strName:sub(1,1) == "~" then intLastWrong = 0 end			-- Check if Lastname matches to inhibit deduction
+				intScore = intScore + tblName[intRelation]						-- Increase score for any Name or Soundex matches
+			end
+		end
+		if intLastWrong < 0 then return intLastWrong end						-- Reduce score if no Lastname match and deduction exists
+		if intScore < TblNameMinimum[intRelation] then return TblNameDeduction[intRelation]	end -- Reduce score for Names matches below minimum threshold
+		if intScore > TblNameMaximum[intRelation] then return TblNameMaximum[intRelation]	end -- Limit prevents multiple Alternate Name matches overwhelming result
+		return intScore
+	end
+	return 0
+end -- function IntScoreNamesData
+
+function IntScoreEventData(tblEventA,tblEventB)									-- Calculate the Score for Comparing two Events
+	if tblEventA and tblEventB
+	and tblEventA.Place and tblEventB.Place then									-- Both the Event Dates exist and are Real not Synthetic
+		local intScore = 0
+		if math.abs(tblEventA.Lower-tblEventB.Lower) <= IntDatesTolerance then intScore = intScore + IntDatesMatched end
+		if math.abs(tblEventA.Upper-tblEventB.Upper) <= IntDatesTolerance then intScore = intScore + IntDatesMatched end
+		if math.max(tblEventA.Lower,tblEventB.Lower) <= math.min(tblEventA.Upper,tblEventB.Upper) then intScore = intScore + IntDatesOverlap end
+		if intScore < IntDatesMinimum then return IntDatesDeduction end		-- Dates completely different, so reduce score
+		for strPlace in pairs(tblEventA.Place) do
+			intScore = intScore + ( tblEventB.Place[strPlace] or 0 )			-- Increase score for Place part or Soundex matches
+		end
+		if intScore > IntEventMaximum then return IntEventMaximum end 		-- Limit prevents multiple Place part matches overwhelming result
+		return intScore
+	end
+	return 0
+end -- function IntScoreEventData
+
+function IntScoreRelatives(intDataA,intDataB,intRelation)						-- Calculate the Score for Comparing two Relatives
+	if intDataA and intDataB then													-- Both the Record Id exist, but if both the same person return maximum score
+		if intDataA == intDataB then return TblNameMaximum[intRelation] + (IntEventMaximum * 4), TblNameMaximum[intRelation], IntEventMaximum, IntEventMaximum, IntEventMaximum, IntEventMaximum end
+		local tblIndiA = TblData[intDataA]
+		local tblIndiB = TblData[intDataB]											-- Score Names data
+		local intNames = IntScoreNamesData(tblIndiA.Names,tblIndiB.Names,intRelation)
+		if intNames >= TblNameThreshold[intRelation] then						-- Threshold has been reached, so score Event data
+			local tblIndiA = tblIndiA
+			local tblIndiB = tblIndiB
+			local intBirth = IntScoreEventData(tblIndiA.Birth,tblIndiB.Birth)
+			local intBapCh = IntScoreEventData(tblIndiA.BapCh,tblIndiB.BapCh)
+			local intMarry = IntScoreEventData(tblIndiA.Marry,tblIndiB.Marry)
+			local intDeath = IntScoreEventData(tblIndiA.Death,tblIndiB.Death)
+			return intNames+intBirth+intBapCh+intMarry+intDeath, intNames, intBirth, intBapCh, intMarry, intDeath
+		end
+		return intNames, intNames, 0, 0, 0, 0
+	end
+	return 0, 0, 0, 0, 0, 0
+end -- function IntScoreRelatives
+
+function IntScoreGender(tblIndiA,tblIndiB)										-- Calculate Score for Comparing Gender of Individual and 1st Child
+	local intIndivGend = 0
+	if tblIndiA.Gender ~= tblIndiB.Gender then intIndivGend = IntGenderDeduct end
+	local intChildGend = 0
+	local tblChildA = tblIndiA.Child1
+	local tblChildB = tblIndiB.Child1
+	if tblChildA and tblChildB then
+		if TblData[tblChildA].Gender ~= TblData[tblChildB].Gender then intChildGend = IntGenderDeduct end
+	end
+	return intIndivGend+intChildGend, intIndivGend, intChildGend
+end -- function IntScoreGender
+
+function IntLower(tblEvent)															-- Lower date range value
+	if tblEvent then return tblEvent.Lower end
+	return -99999
+end -- function IntLower
+
+function IntUpper(tblEvent)															-- Upper date range value
+	if tblEvent then return tblEvent.Upper end
+	return 999999
+end -- function IntUpper
+
+function SynthesiseDates(tblIndiA)													-- Synthesise missing Event Dates from other Event Dates
+	local tblBirth = tblIndiA.Birth
+	local tblBapCh = tblIndiA.BapCh
+	local tblMarry = tblIndiA.Marry
+	local tblDeath = tblIndiA.Death
+	local intSpouse	= tblIndiA.Spouse
+	if intSpouse and not tblMarry then																-- Married but no Marriage Date, so synthesise from own/spouse BMD events
+		local tblSpouse	= TblData[intSpouse]
+		local intLower	= math.max( IntLower(tblBirth), IntLower(tblBapCh), IntLower(tblSpouse.Birth), IntLower(tblSpouse.BapCh) )
+		local intUpper	= math.min( IntUpper(tblDeath), IntUpper(tblSpouse.Death) )
+		if intLower > 0 or intUpper < 999999 then													-- Synthetic Lower or Upper date exists
+			if intLower <= 0		then intLower = intUpper - IntLifespanDays				-- No Lower date so Lower = Upper - Lifespan
+										else intLower = intLower + IntMarriageDays end			-- Lower Birth/Baptism date exists so add Age of Consent
+			if intUpper >= 999999	then intUpper = intLower + IntLifespanDays end			-- No upper date so Upper = Lower + Lifespan
+			tblIndiA.Marry = TblMakeEvent(intLower,intUpper)									-- Synthesise Event
+			tblMarry = tblIndiA.Marry
+		end
+	end
+	if not tblBirth then																				-- No Birth Date, so synthesise from own/child/parent BMD events
+		local intLower = -99999
+		local intUpper = math.min( IntUpper(tblDeath), IntUpper(tblMarry) - IntMarriageDays, IntUpper(tblBapCh) )
+		local intChild1 = tblIndiA.Child1
+		if intChild1 then
+			local tblChild1	= TblData[intChild1]													-- Latest Birth is Child's latest Birth/Baptism/Death - Age of Puberty, or Marriage - Age of Puberty - Age of Consent
+			intUpper = math.min( intUpper, IntUpper(tblChild1.Birth) - IntPubertyDays, IntUpper(tblChild1.BapCh) - IntPubertyDays, IntUpper(tblChild1.Death) - IntPubertyDays, IntUpper(tblChild1.Marry) - IntPubertyDays - IntMarriageDays )
+		end
+		local intMother = tblIndiA.Mother
+		if intMother then
+			local tblMother	= TblData[intMother]
+			intLower = math.max( intLower, IntLower(tblMother.Birth) + IntPubertyDays )	-- Earliest Birth is Mother's earliest Birth + Age of Puberty
+			intUpper = math.min( intUpper, IntUpper(tblMother.Birth) + IntFertileDays, IntUpper(tblMother.Death) )
+		end																									-- Latest Birth is earliest of Mother's latest Birth + Age of Fertility, or Mother's latest Death
+		local intFather = tblIndiA.Father
+		if intFather then
+			local tblFather	= TblData[intFather]
+			intLower = math.max( intLower, IntLower(tblFather.Birth) + IntPubertyDays )	-- Earliest Birth is Father's earliest Birth + Age of Puberty
+			intUpper = math.min( intUpper, IntUpper(tblFather.Death) + IntPregnantDays )	-- Latest Birth is Father's latest Death + Pregnancy
+		end
+		if intLower > 0 or intUpper < 999999 then													-- Synthetic Lower or Upper date exists
+			if intLower <= 0		then intLower = intUpper - IntLifespanDays end			-- No Lower date so Lower = Upper - Lifespan
+			if intUpper >= 999999	then intUpper = intLower + IntLifespanDays end			-- No upper date so Upper = Lower + Lifespan
+			tblIndiA.Birth = TblMakeEvent(intLower,intUpper)									-- Synthesise Event
+			tblBirth = tblIndiA.Birth
+		end
+	end
+	if tblBirth and not tblDeath then
+		tblIndiA.Death = TblMakeEvent(tblBirth.Lower,tblBirth.Upper+IntLifespanDays)		-- Birth Date but no Death Date, so synthesise from own Birth event
+	end
+end -- function SynthesiseDates
+
+function IntDateChronCheck(intDateA,intDateB)									-- Check date chronology and return proportional points score
+	return math.floor( math.min( ( intDateA - intDateB ), 0 ) / IntChronMagDays )
+end -- function IntDateChronCheck
+
+function IntScoreDateChron(tblIndiA,tblIndiB)									-- Calculate the Score for the Chronology of Event Dates i.e. Is Birth after Baptism after Marriage after Death ?
+	local intLowerBirthA = IntLower(tblIndiA.Birth)								-- Lower Date for each Event for both Individuals
+	local intLowerBirthB = IntLower(tblIndiB.Birth)
+	local intLowerBapChA = IntLower(tblIndiA.BapCh)
+	local intLowerBapChB = IntLower(tblIndiB.BapCh)
+	local intLowerMarryA = IntLower(tblIndiA.Marry)
+	local intLowerMarryB = IntLower(tblIndiB.Marry)
+	local intLowerDeathA = IntLower(tblIndiA.Death)
+	local intLowerDeathB = IntLower(tblIndiB.Death)
+	local intUpperBirthA = IntUpper(tblIndiA.Birth)								-- Upper Date for each Event for both Individuals
+	local intUpperBirthB = IntUpper(tblIndiB.Birth)
+	local intUpperBapChA = IntUpper(tblIndiA.BapCh)
+	local intUpperBapChB = IntUpper(tblIndiB.BapCh)
+	local intUpperMarryA = IntUpper(tblIndiA.Marry)
+	local intUpperMarryB = IntUpper(tblIndiB.Marry)
+	local intUpperDeathA = IntUpper(tblIndiA.Death)
+	local intUpperDeathB = IntUpper(tblIndiB.Death)
+
+	local intScore =
+		IntDateChronCheck( intUpperBirthA, intLowerBirthB ) +					-- Individual A latest birth before Individual B earliest birth ~ V2.3
+		IntDateChronCheck( intUpperBirthB, intLowerBirthA ) +					-- Individual B latest birth before Individual A earliest birth ~ V2.3
+		IntDateChronCheck( intUpperBapChA, intLowerBirthB ) +					-- Individual A baptised before Individual B born
+		IntDateChronCheck( intUpperBapChB, intLowerBirthA ) +					-- Individual B baptised before Individual A born
+		IntDateChronCheck( intUpperMarryA, intLowerBirthB ) +					-- Individual A married before Individual B born
+		IntDateChronCheck( intUpperMarryB, intLowerBirthA ) +					-- Individual B married before Individual A born
+		IntDateChronCheck( intUpperDeathA, intLowerBirthB ) +					-- Individual A died before Individual B born
+		IntDateChronCheck( intUpperDeathB, intLowerBirthA ) +					-- Individual B died before Individual A born
+
+		IntDateChronCheck( intUpperBapChA, intLowerBapChB ) +					-- Individual A latest baptised before Individual B earliest baptised ~ V2.3
+		IntDateChronCheck( intUpperBapChB, intLowerBapChA ) +					-- Individual B latest baptised before Individual A earliest baptised ~ V2.3
+		IntDateChronCheck( intUpperMarryA, intLowerBapChB ) +					-- Individual A married before Individual B baptised
+		IntDateChronCheck( intUpperMarryB, intLowerBapChA ) +					-- Individual B married before Individual A baptised
+		IntDateChronCheck( intUpperDeathA, intLowerBapChB ) +					-- Individual A died before Individual B baptised
+		IntDateChronCheck( intUpperDeathB, intLowerBapChA ) +					-- Individual B died before Individual A baptised
+
+		IntDateChronCheck( intUpperMarryA, intLowerMarryB ) +					-- Individual A latest marriage before Individual B earliest marriage ~ V2.3
+		IntDateChronCheck( intUpperMarryB, intLowerMarryA ) +					-- Individual B latest marriage before Individual A earliest marriage ~ V2.3
+		IntDateChronCheck( intUpperDeathA, intLowerMarryB ) +					-- Individual A died before Individual B married
+		IntDateChronCheck( intUpperDeathB, intLowerMarryA ) +					-- Individual B died before Individual A married
+
+		IntDateChronCheck( intUpperDeathA, intLowerDeathB ) +					-- Individual A latest died before Individual B earliest died ~ V2.3
+		IntDateChronCheck( intUpperDeathB, intLowerDeathA )						-- Individual B latest died before Individual A earliest died ~ V2.3
+
+	if intScore > IntChronTolerance then
+		local intMother = tblIndiB.Mother
+		if intMother then
+			tblEvent = TblData[intMother]
+			intScore = intScore + 
+				IntDateChronCheck( intUpperBirthA, IntLower(tblEvent.Birth)+IntPubertyDays ) +	-- Individual A born before Mother of B mature
+				IntDateChronCheck( IntUpper(tblEvent.Birth)+IntFertileDays, intLowerBirthA ) +	-- Mother of B infertile before Individual A born
+				IntDateChronCheck( IntUpper(tblEvent.Death), intLowerBirthA )						-- Mother of B died before Individual A born
+		end
+		local intMother = tblIndiA.Mother
+		if intMother then
+			tblEvent = TblData[intMother]
+			intScore = intScore + 
+				IntDateChronCheck( intUpperBirthB, IntLower(tblEvent.Birth)+IntPubertyDays ) +	-- Individual B born before Mother of A mature
+				IntDateChronCheck( IntUpper(tblEvent.Birth)+IntFertileDays, intLowerBirthA ) +	-- Mother of A infertile before Individual B born
+				IntDateChronCheck( IntUpper(tblEvent.Death), intLowerBirthA )						-- Mother of A died before Individual B born
+		end
+		local intFather = tblIndiB.Father
+		if intFather then
+			tblEvent = TblData[intFather]
+			intScore = intScore + 
+				IntDateChronCheck( intUpperBirthA, IntLower(tblEvent.Birth)+IntPubertyDays ) +	-- Individual A born before Father of B mature
+				IntDateChronCheck( IntUpper(tblEvent.Death), intLowerBirthA-IntPregnantDays )	-- Father of B died before Individual A conceived
+		end
+		local intFather = tblIndiA.Father
+		if intFather then
+			tblEvent = TblData[intFather]
+			intScore = intScore + 
+				IntDateChronCheck( intUpperBirthB, IntLower(tblEvent.Birth)+IntPubertyDays ) +	-- Individual B born before Father of A mature
+				IntDateChronCheck( IntUpper(tblEvent.Death), intLowerBirthB-IntPregnantDays )	-- Father of A died before Individual B conceived
+		end
+		local intChild1 = tblIndiB.Child1
+		if intChild1 then
+			tblEvent = TblData[intChild1]
+			intScore = intScore + 
+				IntDateChronCheck( intUpperDeathA, IntLower(tblEvent.Birth)-IntPregnantDays )	-- Individual A died before Child of B conceived
+		end
+		local intChild1 = tblIndiA.Child1
+		if intChild1 then
+			tblEvent = TblData[intChild1]
+			intScore = intScore + 
+				IntDateChronCheck( intUpperDeathB, IntLower(tblEvent.Birth)-IntPregnantDays )	-- Individual B died before Child of A conceived
+		end
+	end
+	return intScore
+end -- function IntScoreDateChron
+
+function IntScoreGenGap(ptrIndiA,ptrIndiB)										-- Calculate the Score for Comparing Gender Gap
+	local intGensUp = fhCallBuiltInFunction("RelationCode",ptrIndiA,ptrIndiB,"GENS_UP",1)		-- Always positive or nil if unrelated
+	local intGensDn = fhCallBuiltInFunction("RelationCode",ptrIndiA,ptrIndiB,"GENS_DOWN",1)	-- Always positive or nil if unrelated
+	if intGensUp and intGensDn then
+		local intGenGap = intGensUp + intGensDn - IntGenGapRelative			-- Spouse = -6, Parent:Child = -5, Sibling/Gparent:Gchild = -4, -3, -2, -1 , 0 , 1, etc
+		return math.min( intGenGap * IntGenGapDeduction, 0 ), intGensUp, intGensDn
+	end
+	return 0, intGensUp or "", intGensDn or ""
+end -- function IntScoreGenGap
+
+function SortResults(tblResults)													-- Sort the Results into Descending Order of Full Score and then by Individual Score
+	table.sort( tblResults, function(tblA,tblB) if tblA.FullScore ~= tblB.FullScore then return tblA.FullScore > tblB.FullScore else return tblA.IndiScore > tblB.IndiScore end end )
+end -- function SortResults
+
+-- Find Duplicate Records --
+function FindDuplicateRecords(intTotal,flgDiag,flgSpan)						-- Total records, Diagnostic mode, with Timespans
+
+	local tblData = TblData															-- Data table of Record Id to include in candidate checks
+	local tblRecId = {}																	-- Individual Record Id pointers to Individual Record Data saved for comparisons
+	local tblResults = {}																-- Results for Individual Record matches
+	local intMinimum = IntLeastResults												-- Minimum initial score to retain in Results
+	local isResultOK = true															-- Flag if completed run with Result Set
+	local intStartTime = os.time()													-- Time search started for Result Set duration Message 
+	local intComparisons = intTotal * ( intTotal-1 ) / 2						-- Number of Individual versus Individual comparisons
+	local intProgressStep = 0															-- Progress count of inner loop Individual comparisons
+	local intIndThreshold = TblNameThreshold[IntIndivi]
+	local intIndiScoreMin = IntIndiScoreMin
+	local intLeastResults = IntLeastResults
+	local intLimitResults = IntLimitResults
+	local intPruneResults = IntPruneResults
+	local intProgBarStart = IntProgBarStart
+	if flgDiag then
+		intIndThreshold = -100 -- points											-- Adjusted values for Diagnostic Mode to retain many more Results
+		intIndiScoreMin = -100 -- points
+		intLeastResults = -100 -- points
+		intLimitResults =  200 -- rows
+		intPruneResults = intLimitResults * 2
+		intProgBarStart = intProgBarStart / 10
+	end
+
+	local tblGauge = {																	-- Pass parameters into new Progress Bar prototype
+		Font	= StrFontBody,
+		Button	= StrRed,
+		Behind	= StrWhite,
+		ShowX	= IntDataX,
+		ShowY	= IntDataY	}
+	ProgressBar = NewProgressBar(tblGauge)											-- Create the ProgressBar functions
+	if intComparisons > intProgBarStart then
+		ProgressBar.Start("Finding Duplicates",intComparisons)					-- Optionally start Progress Bar
+	end
+
+	TblSoundex = { }																	-- Soundex dictionary codes cache of previously coded Names & Places
+	if FlgFileExists(StrSoundexFile) then
+		ProgressBar.Message("Loading Soundex Cache")
+		TblSoundex, StrErr = table.load(StrSoundexFile)							-- Load Soundex dictionary codes cache table
+	end
+	StrSoundex = NewSoundex(TblSoundex)												-- Soundex Calculator using Soundex dictionary codes cache
+
+	local ptrIndiA = fhNewItemPtr()
+	ptrIndiA:MoveToFirstRecord("INDI")
+	while ptrIndiA:IsNotNull() do													-- Loop through every Individual Record
+		local intDataA	= IntKeyData(ptrIndiA)										-- Save key Individual Record Data against Record Id
+		table.insert(tblRecId,intDataA)												-- Save the Data Record Id in consecutively indexed table
+		local tblIndiA	= tblData[intDataA]											-- Save key Data for relatives and save their Record Id with this Individual
+		tblIndiA.Father	= IntKeyData(fhGetItemPtr(ptrIndiA,"~.~FATH>"))
+		tblIndiA.Mother	= IntKeyData(fhGetItemPtr(ptrIndiA,"~.~MOTH>"))
+		tblIndiA.Spouse	= IntKeyData(fhGetItemPtr(ptrIndiA,"~.~SPOU>"))
+		tblIndiA.Child1	= IntKeyData(fhGetItemPtr(ptrIndiA,"~.~CHIL>"))
+		SynthesiseDates(tblIndiA)														-- Synthesise missing Event Dates from other Events
+		for intIndiB = 1, #tblRecId - 1 do											-- Loop through prior Individual Record entries
+			local intDataB = tblRecId[intIndiB]										-- Record Id from consecutively indexed table
+			local tblIndiB = tblData[intDataB]										-- Lookup Individual Record Data
+			if tblIndiA.Chosen or tblIndiB.Chosen then							-- Only check Records that were Chosen in GUI
+				local intIndiNames = IntScoreNamesData(tblIndiA.Names,tblIndiB.Names,IntIndivi)
+				if intIndiNames >= intIndThreshold then							-- If enough Individual Names match, assess score for Individual BMD Events, etc
+					local intIndiBirth	= IntScoreEventData(tblIndiA.Birth,tblIndiB.Birth)
+					local intIndiBapCh	= IntScoreEventData(tblIndiA.BapCh,tblIndiB.BapCh)
+					local intIndiMarry	= IntScoreEventData(tblIndiA.Marry,tblIndiB.Marry)
+					local intIndiDeath	= IntScoreEventData(tblIndiA.Death,tblIndiB.Death)
+					local intIndiScore = intIndiNames + intIndiBirth + intIndiBapCh	+ intIndiMarry + intIndiDeath
+					if intIndiScore >= intIndiScoreMin then						-- If Individual Score exceeds minimum, assess score for Relatives, Gender, etc
+						local intFathScore, intFathNames, intFathBirth, intFathBapCh, intFathMarry, intFathDeath = IntScoreRelatives(tblIndiA.Father,tblIndiB.Father,IntFather)
+						local intMothScore, intMothNames, intMothBirth, intMothBapCh, intMothMarry, intMothDeath = IntScoreRelatives(tblIndiA.Mother,tblIndiB.Mother,IntMother)
+						local intSpouScore, intSpouNames, intSpouBirth, intSpouBapCh, intSpouMarry, intSpouDeath = IntScoreRelatives(tblIndiA.Spouse,tblIndiB.Spouse,IntSpouse)
+						local intChilScore, intChilNames, intChilBirth, intChilBapCh, intChilMarry, intChilDeath = IntScoreRelatives(tblIndiA.Child1,tblIndiB.Child1,IntChild1)
+						local intGendScore, intIndivGend, intChildGend = IntScoreGender(tblIndiA,tblIndiB)
+						local intFullScore	= intIndiScore + intFathScore + intMothScore + intSpouScore + intChilScore + intGendScore
+						if intFullScore >= intMinimum then							-- Continue if score is above lowest retained Results entry
+							local ptrIndiB	= tblIndiB.Indiv						-- Get other Individual Record pointer
+							local intDateChron = IntScoreDateChron(tblIndiA,tblIndiB)									-- Check date chronology
+							local intFamGenGap, intFamGensUp, intFamGensDn = IntScoreGenGap(ptrIndiA,ptrIndiB)	-- Only check generation gap now as it has a high run time overhead
+							if intDateChron > IntChronTolerance and intFamGenGap > IntFamGenGapMax then			-- Exclude major chronology mismatch, and exclude spouse (including spouse's spouses), parent/child, sibling, gparent/gchild
+								intFullScore = intFullScore + intDateChron + intFamGenGap
+								if intFullScore >= intMinimum then
+									local isCandidate = true
+									for i, tblNonDups in ipairs( TblNonDups ) do
+										if intDataA == tblNonDups.RecordIdA and intDataB == tblNonDups.RecordIdB then
+											isCandidate = false							-- Exclude Non-Duplicate pairs
+											break
+										end
+									end
+									if isCandidate then
+										table.insert( tblResults,
+											{
+											FullScore=intFullScore, RecordIdA=intDataA, RecordIdB=intDataB,
+											IndiScore=intIndiScore, IndiNames=intIndiNames, IndiBirth=intIndiBirth, IndiBapCh=intIndiBapCh, IndiMarry=intIndiMarry, IndiDeath=intIndiDeath,
+											FathScore=intFathScore, FathNames=intFathNames, FathBirth=intFathBirth, FathBapCh=intFathBapCh, FathMarry=intFathMarry, FathDeath=intFathDeath,
+											MothScore=intMothScore, MothNames=intMothNames, MothBirth=intMothBirth, MothBapCh=intMothBapCh, MothMarry=intMothMarry, MothDeath=intMothDeath,
+											SpouScore=intSpouScore, SpouNames=intSpouNames, SpouBirth=intSpouBirth, SpouBapCh=intSpouBapCh, SpouMarry=intSpouMarry, SpouDeath=intSpouDeath,
+											ChilScore=intChilScore, ChilNames=intChilNames, ChilBirth=intChilBirth, ChilBapCh=intChilBapCh, ChilMarry=intChilMarry, ChilDeath=intChilDeath,
+											DateChron=intDateChron, FamGenGap=intFamGenGap, FamGensUp=intFamGensUp, FamGensDn=intFamGensDn,
+											GendScore=intGendScore, IndivGend=intIndivGend, ChildGend=intChildGend,
+											} )
+										if #tblResults >= intPruneResults then		-- Prune low scores from Results to avoid exceeding memory
+											SortResults(tblResults)
+											for intEntry = intLimitResults + 1, #tblResults do table.remove(tblResults) end
+											intMinimum = tblResults[#tblResults].FullScore
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		ProgressBar.Message("Individual Record Id "..intDataA)					-- Report progress
+		ProgressBar.Step(intProgressStep)
+		intProgressStep = intProgressStep + 1										-- Each inner loop performs incrementing number of comparisons
+		if ProgressBar.Stop() then													-- Break out of outer loop
+			isResultOK = false
+			break
+		end
+		ptrIndiA:MoveNext()
+	end
+
+	ProgressBar.Message("Saving Soundex Cache")									-- Save Soundex dictionary codes cache table
+	table.save(TblSoundex,StrSoundexFile)
+
+	ProgressBar.Message("Composing Result Set")
+	SortResults(tblResults)															-- Sort the final results
+
+	local dateOrigin	= fhNewDate(0001,01,10):GetDatePt1()					-- Date origin for Timespan Dates is 10-Jan-0001 = 1-Jan-0001 + 9 days for Gregorian calendar offset
+	local dateTimespan	= fhNewDate(0000)											-- Date Timespan pointer for Timespan Date entries
+
+	for intEntry = 1, #tblResults do												-- Extract highest scoring entries & populate table with Timespan Dates
+		local tblEntry = tblResults[intEntry]										-- Timespan Dates only added now to avoid slowing down main search loop above 
+		if tblEntry then intFullScore = tblEntry.FullScore end
+		if intFullScore < intLeastResults
+		or intEntry > intLimitResults then
+			table.remove(tblResults)													-- When low Score or Results limit reached, purge remainder of results
+		else
+			intRecordIdA = tblEntry.RecordIdA
+			intRecordIdB = tblEntry.RecordIdB
+			-- Populate this Entry in Results table with Event Date Timespans
+			for strEvent, strPrefix in pairs( { Birth="B_", BapCh="C_", Marry="M_", Death="D_" } ) do
+				for strRecId, intRecId in pairs( { A_=intRecordIdA, B_=intRecordIdB } ) do
+					local strIndex = strPrefix..strRecId.."Span"
+					local tblIndi  = tblData[intRecId]
+					local tblEvent = tblIndi[strEvent]								-- Get Lower/Upper Timespan Dates for each Event for both Records
+					local strType = "  Synth"
+					if tblEvent then													-- Event Timespan Date exists
+						if tblEvent.Place then strType = "  Actual" end			-- Date is Actual and not Synthetic
+						local intLower = tblEvent.Lower
+						local intUpper = tblEvent.Upper
+						if intLower == intUpper then									-- Lower = Upper so Simple Date
+							dateTimespan:SetSimpleDate(fhCallBuiltInFunction("CalcDate",dateOrigin,0,0,intLower))
+						else																-- Lower < Upper so Date Range
+							dateTimespan:SetRange("between",fhCallBuiltInFunction("CalcDate",dateOrigin,0,0,intLower),fhCallBuiltInFunction("CalcDate",dateOrigin,0,0,intUpper))
+						end
+						tblEntry[strIndex] = dateTimespan:GetDisplayText("COMPACT")..strType
+					else
+						tblEntry[strIndex] = " "										-- Event Timespan Date missing
+					end
+				end
+			end
+			ProgressBar.Step(intProgressStep)
+		end
+	end
+	table.save(tblResults,StrResultsFile)											-- Save results so can show again later
+
+	if isResultOK then																	-- Dislay Result Set unless Progress Bar was Stopped
+		isResultOK = DisplayResultSet(tblResults,flgDiag,flgSpan,intStartTime)
+	end
+
+	ProgressBar.Close()																	-- Close the Progress Bar and retrieve its window position
+	IntDataX = tblGauge.ShowX
+	IntDataY = tblGauge.ShowY
+
+	return isResultOK
+end -- function FindDuplicateRecords
+
+function DisplayResultSet(tblResults,flgDiag,flgSpan,intStartTime)			-- Display the Result Set in FH
+
+	if #tblResults == 0 then
+		iup.Alarm("No Duplicate Individuals","No duplicate Individual Records found.","OK")
+		return false
+	end
+
+	local tblColumnKey =
+	{	--	 Column Title			,	Index		,	Type	,Width,	Alignment	-- Result Set Column parameters allow easy changes
+		{	"Individual"				, "IndiScore"	},
+		{	"I-Names"					, "IndiNames"	},
+		{	"I-Birth"					, "IndiBirth"	},
+		{	"I-Birth Timespan-A "	, "B_A_Span"	, "text"	,142 , "align_right" },	-- Birth Timespan Record A
+		{	"I-Birth Timespan-B "	, "B_B_Span"	, "text"	,142 , "align_right" },	-- Birth Timespan Record B
+		{	"I-BapCh"					, "IndiBapCh"	},
+		{	"I-BapCh Timespan-A "	, "C_A_Span"	, "text"	,142 , "align_right" },	-- Bap/Chr Timespan Record A
+		{	"I-BapCh Timespan-B "	, "C_B_Span"	, "text"	,142 , "align_right" },	-- Bap/Chr Timespan Record B
+		{	"I-Marry"					, "IndiMarry"	},
+		{	"I-Marry Timespan-A "	, "M_A_Span"	, "text"	,142 , "align_right" },	-- Marry Timespan Record A
+		{	"I-Marry Timespan-B "	, "M_B_Span"	, "text"	,142 , "align_right" },	-- Marry Timespan Record B
+		{	"I-Death"					, "IndiDeath"	},
+		{	"I-Death Timespan-A "	, "D_A_Span"	, "text"	,142 , "align_right" },	-- Death Timespan Record A
+		{	"I-Death Timespan-B "	, "D_B_Span"	, "text"	,142 , "align_right" },	-- Death Timespan Record B
+		{	"Father"					, "FathScore"	},
+		{	"F-Names"					, "FathNames"	},
+		{	"F-Birth"					, "FathBirth"	},
+		{	"F-BapCh"					, "FathBapCh"	},
+		{	"F-Marry"					, "FathMarry"	},
+		{	"F-Death"					, "FathDeath"	},
+		{	"Mother"					, "MothScore"	},
+		{	"M-Names"					, "MothNames"	},
+		{	"M-Birth"					, "MothBirth"	},
+		{	"M-BapCh"					, "MothBapCh"	},
+		{	"M-Marry"					, "MothMarry"	},
+		{	"M-Death"					, "MothDeath"	},
+		{	"Spouse"					, "SpouScore"	},
+		{	"S-Names"					, "SpouNames"	},
+		{	"S-Birth"					, "SpouBirth"	},
+		{	"S-BapCh"					, "SpouBapCh"	},
+		{	"S-Marry"					, "SpouMarry"	},
+		{	"S-Death"					, "SpouDeath"	},
+		{	"Child"					, "ChilScore"	},
+		{	"C-Names"					, "ChilNames"	},
+		{	"C-Birth"					, "ChilBirth"	},
+		{	"C-BapCh"					, "ChilBapCh"	},
+		{	"C-Marry"					, "ChilMarry"	},
+		{	"C-Death"					, "ChilDeath"	},
+		{	"Chrono"					, "DateChron"	},
+		{	"Gen.Gap"					, "FamGenGap"	},
+		{	"Gens-Up"					, "FamGensUp"	},
+		{	"Gens-Dn"					, "FamGensDn"	},
+		{	"Gender"					, "GendScore"	},
+		{	"I-Gend"					, "IndivGend"	},
+		{	"C-Gend"					, "ChildGend"	},
+	}
+	local intFullScore	= 0																-- Full Score
+	local tblFullScore	= {}
+	local tblPercentage	= {}
+	local intRecordIdA	= 0																-- Record Id A & Individual A
+	local tblRecordIdA	= {}
+	local tblPossibleA	= {}
+	local intRecordIdB	= 0																-- Record Id B & Individual B
+	local tblRecordIdB	= {}
+	local tblPossibleB	= {}
+	local tblResultSet	= {}															-- Table of Result Set Columns for Diagnostic sub-scores
+
+	local intMaxScore = 0
+	for intRelation = IntIndivi, IntChild1 do										-- Max score for Percentage calculation = Event*4 & Name maxima for each relation
+		intMaxScore = intMaxScore + (IntEventMaximum * 4) + TblNameMaximum[intRelation]
+	end
+
+	for intEntry = 1, #tblResults do												-- Create Result Set Column tables
+		local tblEntry = tblResults[intEntry]
+		intRecordIdA = tblEntry.RecordIdA
+		local ptrPossibleA = fhNewItemPtr()											-- Record Id and Pointer of Individual A
+		ptrPossibleA:MoveToRecordById("INDI",intRecordIdA)
+		intRecordIdB = tblEntry.RecordIdB
+		local ptrPossibleB = fhNewItemPtr()											-- Record Id and Pointer of Individual B
+		ptrPossibleB:MoveToRecordById("INDI",intRecordIdB)
+		intFullScore = tblEntry.FullScore
+		table.insert(tblPercentage,math.floor(intFullScore*100/intMaxScore)) -- Percentage Full Score
+		table.insert(tblRecordIdA,intRecordIdA)									-- Individual Rec Id A
+		table.insert(tblPossibleA,ptrPossibleA)									-- Individual Record A
+		table.insert(tblRecordIdB,intRecordIdB)									-- Individual Rec Id B
+		table.insert(tblPossibleB,ptrPossibleB)									-- Individual Record B
+		table.insert(tblFullScore,intFullScore)									-- Points Full Score
+		for i, tblColumn in ipairs( tblColumnKey ) do
+			local strIndex = tblColumn[2]
+			if intEntry==1 then tblResultSet[strIndex] = {} end					-- Create Diagnostic sub-score Column tables
+			table.insert(tblResultSet[strIndex],tblEntry[strIndex])
+		end
+	end
+	local intSize = #tblFullScore													-- Output primary Result Set Columns unconditionally
+	local strMessage = ""
+	if intStartTime then
+		local intTime = os.difftime(os.time(),intStartTime)
+		strMessage = " in "..intTime.." seconds"
+	end
+	strMessage = "found "..intSize.." candidates"..strMessage
+	if intSize == 1 then strMessage = strMessage:gsub("candidates","candidate") end
+	if intTime == 1 then strMessage = strMessage:gsub("seconds","second") end
+	fhOutputResultSetTitles(StrPlugin..StrVersion..strMessage)
+	fhOutputResultSetColumn("Percent"	, "integer"	, tblPercentage, intSize,  31, "align_mid" )
+	fhOutputResultSetColumn("Rec Id A"	, "integer"	, tblRecordIdA , intSize,  31, "align_mid" )
+	fhOutputResultSetColumn("Record A"	, "item"		, tblPossibleA , intSize, 140, "align_left")
+	fhOutputResultSetColumn("Rec Id B"	, "integer"	, tblRecordIdB , intSize,  31, "align_mid" )
+	fhOutputResultSetColumn("Record B"	, "item"		, tblPossibleB , intSize, 140, "align_left")
+	fhOutputResultSetColumn(" Total "	, "integer"	, tblFullScore , intSize,  31, "align_mid" )
+	if intSize > 0 then
+		for i, tblColumn in ipairs( tblColumnKey ) do							-- Output Diagnostic sub-score Columns only if they exist
+			local strTitle	= tblColumn[1]
+			local strIndex	= tblColumn[2]
+			local strType	= tblColumn[3]
+			local intWidth	= tblColumn[4]
+			local strAlign	= tblColumn[5]
+			if flgDiag or not strTitle:match("%-") then							-- Only output Diagnostic or Timespan columns if requested
+				if flgSpan or not strTitle:match("Timespan") then
+					if strType and intWidth and strAlign then
+						fhOutputResultSetColumn(strTitle, strType, tblResultSet[strIndex], intSize, intWidth, strAlign )
+					else
+						fhOutputResultSetColumn(strTitle, "integer", tblResultSet[strIndex], intSize, 31, "align_mid" )
+					end
+				end
+			end 
+		end
+	end
+	return true
+end -- function DisplayResultSet
+
+-- Main Code Section Starts Here --
+
+	fhInitialise(5,0,0,"save_recommended")
+
+	PresetGlobalConstants()			-- Preset global data constants
+
+	CheckVersionInStore(StrVersion)	-- Notify if later Version
+
+	ResetDefaultSettings()				-- Preset default sticky settings
+
+	StrLast = StrDate					-- Initial previous run Date
+
+	IntFontSet = IntFontPlain			-- Font Face & Style default
+
+	LoadSettings(StrStickyFile)		-- Load sticky data settings
+
+	GUI_MainDialogue()					-- Invoke graphical user interface
+
+	SaveSettings(StrStickyFile)		-- Save sticky data settings

@@ -1,12 +1,14 @@
 --[[
 @Title: Check Installed Plugins Against The Store
 @Author: Jane Taubman
-@Version: 2.0
-@LastUpdated: May 2012
+@Version: 2.4
+@LastUpdated: March 2014
 @Description: Checks currently installed plugins against those currently in the store and optionally downloads and installs later versions.
 
 V2.0 Added Author Column and updated to show the status of all plugins in the main plug directory.  
-
+V2.1 Add Superseded support
+V2.2 Improve version checking where the component numbers are greater than 9
+V2.3/2.4 trim line endings.
 ]]
 require('luacom')
 require('lfs')
@@ -17,8 +19,10 @@ function main()
     local tblStoreVer = {}
     local tblStatusDesc = {}
     local tblAuthor = {}
-    local tblCount = {0,0,0,0,0,0}
-    local tblStatus = {'A. Newer Than Store','B. Upgraded','C. New Version Available','D. Up To Date','E. Not In Store','F. No Version'}
+    local tblMsg = {}
+    local tblCount = {0,0,0,0,0,0,0}
+    local tblStatus = {'A. Newer Than Store','B. Upgraded', 'C. New Version Available',
+                       'D. Up To Date','E. Not In Store','F. No Version','G. Superseded'}
     pluginDir = fhGetContextInfo('CI_APP_DATA_FOLDER')..'\\plugins\\'
     local count = 0
     for filename,attr in dirtree(pluginDir) do
@@ -42,10 +46,9 @@ function main()
             local versionStore,id = nil,nil
             if bforcecheck then version = version or '0' end
             if version then
-                versionStore,id = checkVersionInStore('file',name)
-                if versionStore == '' then versionStore = nil end
+                versionStore,id,msg = checkVersionInStore('file',name)
                 if version ~= versionStore then
-                    if versionStore ~= nil and version < versionStore then
+                    if versionStore ~= nil and cvtVer(version) < cvtVer(versionStore) then
                         local res = fhMessageBox('Newer version of '..name:gsub('%.fh_lua','')..' found, would you like to upgrade','MB_YESNO','MB_ICONQUESTION')
                         if res == 'Yes' then
                             updatePlugin(id)
@@ -59,7 +62,7 @@ function main()
                 if versionStore and version == versionStore then
                     iStatus = 4
                 else
-                    if versionStore and version > versionStore then
+                    if versionStore and cvtVer(version) > cvtVer(versionStore) then
                         iStatus = 1
                     else
                         iStatus = 5
@@ -67,11 +70,16 @@ function main()
                 end
                 end
             end
+            if msg then
+               fhMessageBox(name:gsub('%.fh_lua','')..' '..msg)
+               iStatus = 7 
+            end
             table.insert(tblPlugin,name:match('(.+)%.fh_lua'))
             table.insert(tblCurVer,version or ' ')
             table.insert(tblStoreVer,versionStore or ' ')
             table.insert(tblStatusDesc,tblStatus[iStatus] or ' ')
             table.insert(tblAuthor,author or ' ')
+            table.insert(tblMsg,msg or ' ')
             tblCount[iStatus] = tblCount[iStatus] + 1
         end
     end
@@ -86,13 +94,14 @@ function main()
         strMsg = string.format('%s\nDisplay detailed results?\n',strMsg)
         local res = fhMessageBox(strMsg,'MB_YESNO','MB_ICONQUESTION')
         if res == 'Yes' then
+            fhOutputResultSetTitles("Plug Status Summary", "Plug Status Summary", "Printed Date: %#x")
             -- Output Result Set
             fhOutputResultSetColumn("Status", "text", tblStatusDesc, #tblPlugin, 80, "align_left",1,true)
             fhOutputResultSetColumn("Current", "text", tblCurVer, #tblPlugin, 30, "align_right")
             fhOutputResultSetColumn("Store", "text", tblStoreVer, #tblPlugin, 25, "align_right")
             fhOutputResultSetColumn("Plugin", "text", tblPlugin, #tblPlugin, 250, "align_left",2,true)
-            fhOutputResultSetColumn("Author", "text", tblAuthor, #tblPlugin, 250, "align_left",2,true)
-
+            fhOutputResultSetColumn("Author", "text", tblAuthor, #tblPlugin, 150, "align_left",2,true)
+            fhOutputResultSetColumn("Message", "text", tblMsg, #tblPlugin, 250, "align_left",2,true)
         end
     else
         fhMessageBox('No Plugins Found')
@@ -114,6 +123,7 @@ function updatePlugin(id)
         filename = string.match(http:GetResponseHeader('Content-Disposition'),'="(.*)"')
         print(filename)
         data = http.ResponseBody
+        data = data:gsub("\r\n","\n")  -- Remove CR characters at end of line
         SaveStringToFile(data,pluginDir..'\\'..filename)
         print('Data Size :'..#data)
         print('Content-Length:'..length)
@@ -129,8 +139,9 @@ function checkVersionInStore(type,value)
 1: String, must be either 'id' or 'name' or file
 2: String where name search or number where id search
 @Returns:
-1: nil where value not found or parameter 1 is invalid,
-or the value of the plugins version field
+1: nil where value not found or parameter 1 is invalid, or the value of the plugins version field
+2: the reference
+3: where an error was returned the message following the "Error:"
 ]]
     if type ~= 'id' and type ~= 'name' and type ~= 'file' then
         return nil
@@ -142,17 +153,40 @@ or the value of the plugins version field
         http:Open("GET",strRequest,false)
         http:Send()
         local strReturn = http.Responsebody
-        local ver = ''
-        local ref = ''
+        print(strReturn)
+        local ver,ref,msg 
         if strReturn ~= nil then
             ver,ref = strReturn:match('(%d.*),(%d*)')
+        if strReturn:sub(1,5) == 'Error' then
+           msg = strReturn:sub(7)
         end
-        return ver,ref
+        end
+        print(msg)
+        return ver,ref,msg
         
     else
         return nil
     end
 end
+
+function cvtVer(s)
+if s:lower() == 'fh' then
+   s = table.concat({fhGetAppVersion()},'.')
+end
+local ver,factor,max = 0,10000,3
+local t = {}
+for word in s:gmatch("%d+") do
+ table.insert(t,tonumber(word)) 
+end
+for j = 1,max do
+t[j] = t[j] or 0
+ver = ver + (t[j] * factor^(max-j))
+end
+return ver
+end
+
+
+
 function dirtree(dir)
     assert(dir and dir ~= "", "directory parameter is missing or empty")
     if string.sub(dir, -1) == "\\" then

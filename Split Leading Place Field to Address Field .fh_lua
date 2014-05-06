@@ -1,0 +1,108 @@
+--[[
+@Title: Split Leading Placename to Address Field
+@Author: Jane Taubman
+@LastUpdated: September 2013
+@Description: 
+Where no Address Field exists for a Fact and there is more than 1 part to the placename,
+split the first part of the Place name and put it in the Address field.
+]]
+    iCount = 0
+    tblFact    = {}
+    tblRecord  = {}
+    tblAddress = {}
+
+function main ()
+    local msg = [[
+This plugin will split all multi-part places where there is no address field.
+It will move the first part to the address field.
+
+Do you want to continue?'
+                ]]
+    local ret = fhMessageBox(msg,'MB_YESNO','MB_ICONEXCLAMATION')
+    if ret == 'Yes' then
+        DoAllItems('PLAC',splitPlace)
+        if iCount == 0 then
+            strMessage = 'No Places were changed'
+        else
+            strMessage = iCount..' Places updated'
+        end
+        fhMessageBox(strMessage)
+    end
+    fhOutputResultSetColumn("Record", "item", tblRecord, #tblFact, 180, "align_left", 1, true)
+    fhOutputResultSetColumn("Fact", "item", tblFact, #tblFact, 180, "align_left", 1, true)
+    fhOutputResultSetColumn("Address", "item", tblAddress, #tblFact, 180, "align_left", 1, true)
+end
+
+function DoAllItems(strItemTag,action)
+    -- strTag: Tag to Find
+    -- action: function to perform
+    local iCount = fhGetRecordTypeCount() -- Get Count of Record types
+    -- Loop through Record Types
+    local ii = 0
+    local ptr = fhNewItemPtr()
+    for ii =1,iCount do
+        strRecType = fhGetRecordTypeTag(ii)
+        ptr:MoveToFirstRecord(strRecType)
+        while ptr:IsNotNull() do
+            strPtrTag = fhGetTag(ptr)
+            if strPtrTag == strItemTag then
+                action(ptr)
+            end
+            ptr:MoveNextSpecial()
+        end
+    end
+end
+
+function splitPlace(ptr)
+    ptrAddr = fhNewItemPtr()
+    ptrParent = fhNewItemPtr()
+    ptrRecord = fhNewItemPtr()
+    ptrParent:MoveToParentItem(ptr)
+    ptrAddr:MoveTo(ptrParent,'~.ADDR')
+    if ptrAddr:IsNull() then
+
+        ptrAddr = fhCreateItem('ADDR',ptrParent,true)
+        if ptrAddr:IsNotNull() then
+        local sPlace = fhGetItemText(ptr,'~')
+        local fields = split(sPlace,',')
+        if #fields > 1 then
+            iCount = iCount + 1
+            local strNewAddress = trim(fields[1])
+            table.remove(fields,1)
+            sPlace = trim(table.concat(fields,','))
+            fhSetValueAsText(ptrAddr,strNewAddress)
+            fhSetValueAsText(ptr,sPlace)
+            ptrRecord:MoveToRecordItem(ptrParent)
+            table.insert(tblFact,ptrParent:Clone())
+			  table.insert(tblRecord,ptrRecord:Clone())
+			  table.insert(tblAddress,ptrAddr:Clone())
+        end
+        end
+    end
+end
+function trim(s)
+  return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+function split(s,re)
+    local i1 = 1
+    local ls = {}
+    local append = table.insert
+    if not re then re = '%s+' end
+    if re == '' then return {s} end
+    while true do
+        local i2,i3 = s:find(re,i1)
+        if not i2 then
+            local last = s:sub(i1)
+            if last ~= '' then append(ls,last) end
+            if #ls == 1 and ls[1] == '' then
+                return {}
+            else
+                return ls
+            end
+        end
+        append(ls,s:sub(i1,i2-1))
+        i1 = i3+1
+    end
+end
+------------------------------------------------------ Main Code
+main()

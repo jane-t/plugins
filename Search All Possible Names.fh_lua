@@ -76,7 +76,7 @@ end
 function chkRow(sSurname,sGiven,ptrIndi,ptrFam,type)
     if comparestring(sSurname,strSurname,bUseSoundex) and comparestring(sGiven,strFirstName,bUseSoundex) then
         count = count + 1
-        tblSurname[count] = sSurname
+        tblSurname[count] = sSurname:upper()
         tblGivenAll[count] = sGiven
         tblSoundex[count] = soundexall(tblSurname[count])..' '..soundexall(tblGivenAll[count])
         tblRecord[count] = ptrIndividual:Clone()

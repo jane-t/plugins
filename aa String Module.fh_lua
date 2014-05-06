@@ -1,0 +1,10 @@
+function string.titlecase(s)
+local function tchelper(first, rest)
+  return first:upper()..rest:lower()
+end
+return(s:gsub("(%a)([%w_']*)", tchelper))
+end
+
+sMixed = 'THis iS MixeD upCAse'
+s2 = sMixed:titlecase()
+print(s2) 

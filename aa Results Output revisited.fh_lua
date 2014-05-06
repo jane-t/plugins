@@ -1,0 +1,84 @@
+--[[
+@Title: Results Output revisited
+@Author: Jane Taubman
+@Version: 2.0
+@LastUpdated: 
+@Description: 
+]]
+
+function main()
+    local tblResults = createResultTable()
+    -- Define Columns
+    tblResults.indi  = {title='Record'}
+    tblResults.id    = {type='integer',align='align_right',width=20} 
+    tblResults.death = {title='Death'}
+    tblResults.name  = {title='Name',type='text'}
+    tblResults.birth = {title='Birth',width=40}
+    
+    pi = fhNewItemPtr() -- declare pointer
+    pi:MoveToFirstRecord("INDI") -- and set to the first record.
+    while pi:IsNotNull() do
+        -- Add Row
+        tblResults:newRow()
+        -- Set Columns
+        tblResults.indi:set(pi:Clone())
+        tblResults.name:set(fhGetDisplayText(pi))
+        tblResults.birth:set(fhGetItemPtr(pi,'~.BIRT.DATE'))
+        tblResults.death:set(fhGetItemPtr(pi,'~.DEAT.DATE'))
+        tblResults.id:set(fhGetRecordId(pi)) 
+        pi:MoveNext()
+    end
+    fhOutputResultSetTitles("All Individuals", "All Individuals", "Item List Example Date: %#x")
+    tblResults:outputResults()
+end
+
+function createResultTable()
+    local tblOutput_mt = {} -- create metatable
+    local iC = 0 -- Define count of lines
+    local tblOutput = {} -- Define Columns Table
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__index = self
+    tblOutput_mt.__newindex = 
+      function (t,k,v)
+        -- Set Values to Defaults if not supplied
+        if v.content == nil then v.content = {} end
+        if v.title == nil then v.title = k end
+        if v.type == nil then v.type = 'item' end
+        if v.width == nil then v.width = 140 end
+        if v.align == nil then v.align = 'align_left' end
+        v.set = 
+              function(self,value)
+                 self.content[iC] = value
+              end
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+      end
+    tblOutput_mt.__call = 
+       function (t)
+         local i = 0
+         local m = getmetatable(t)
+         local n = table.getn(m.seq)
+         return function ()
+            i = i + 1
+            if i <= n then 
+               return t[m.seq[i]] 
+            end
+        end
+      end
+    function tblOutput:newRow()
+        iC = iC + 1
+    end
+    
+    function tblOutput:outputResults()
+        for l in self() do
+            fhOutputResultSetColumn(l.title, l.type, l.content, iC, l.width,l.align)
+        end
+    end
+    setmetatable(tblOutput, tblOutput_mt)
+    return tblOutput
+end
+----------------------------------------------------- Do Main Function
+main()

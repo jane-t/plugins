@@ -1,0 +1,31 @@
+function initcount()
+local count = 0
+local counter = {}
+counter.value = 0
+counter.inc = function(val) 
+        counter.value = counter.value + (val or 1)  
+        return counter.value
+     end
+counter.dec = function(val) 
+        counter.value = counter.value - (val or 1)  
+        return counter.value
+     end
+return counter
+end
+
+c1 = initcount()
+c2 = initcount()
+print(c1.value)
+print(c1.inc(3))
+print(c1.inc())
+print(c1.inc())
+print(c1.inc(2))
+print(c1.dec(5))
+print(c1.value)
+print(c2.value)
+print(c2.inc())
+print(c2.inc())
+print(c2.dec())
+print(c2.value)
+print(c1.value)
+

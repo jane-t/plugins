@@ -1,0 +1,26 @@
+--[[
+@Title: iipairs 
+@Author: Jane Taubman  
+@Version: 0.0
+@LastUpdated: 
+@Description: Returns an indexed array in reverse order
+]]
+
+function main()
+        for i,v,c in iipairs({11,12,13,14,15,16}) do
+        print(i,v,c)
+    end
+end
+------------------------------------------------------ functions
+function iipairs(tbl)
+    local iPos
+    local iNext = #tbl
+    return function()
+        iPos = iNext
+        iNext = iPos - 1
+        if iPos == 0 then return end
+        return iPos,tbl[iPos],'X'
+    end
+end
+------------------------------------------------------ main
+main()

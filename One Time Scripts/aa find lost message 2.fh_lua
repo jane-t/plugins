@@ -1,0 +1,199 @@
+--[[
+@Title: Random password generator
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: August 2013 
+@Description: Generates random strings
+]]
+
+require 'lfs'
+
+function main()
+    local mbfile = "D:\\temp\\list2.txt"
+    local outfile = "D:\\temp\\lostarchive.txt"
+    local list = loadfile(mbfile)
+	local index = {}
+    for i,v in ipairs(list) do		
+  		local _,_,ref =  v:find('(%d-)|')
+       index[ref] = true
+	end     
+
+-- Output Line 
+-- 6627|sizing of main window|Bill Henshaw|BillH|bhenshaw@comcast.net|12/07/12 - 22:18:51|14|323|Bill Henshaw|thumbup|0
+
+
+
+pluginDir = 'C:\\Users\\JANE\\Desktop\\forum\\messages'
+local export = {}
+for filename,attr in dirtree(pluginDir) do
+    if attr.error then
+        print('filename:'..filename..' caused error '..attr.error)
+    else
+        if attr.mode == 'file' then
+           a,b,c = splitfilename(filename)
+           if c == 'txt' then
+			f = b:gsub('.txt','')
+           if index[f] ~= true and filename ~= nil then
+
+				local message = loadfile(filename)
+				local data = ParseCSVLine(message[1],'|')
+			 	line = table.concat({f,data[1],data[2],data[5],data[3],data[4],0,0,data[2],0,0},'|')
+				table.insert(export,line)
+            end
+			end
+        end
+    end
+end
+	SaveStringToFile(table.concat(export,'\n'),outfile)
+
+    end
+
+function splitfilename(strfilename)
+	-- Returns the Path, Filename, and Extension as 3 values
+	return string.match(strfilename, "(.-)([^\\]-([^\\%.]+))$")
+end
+
+function loadfile(file)
+    local file = io.open(file, "r");
+    local arr = {}
+    for line in file:lines() do
+        table.insert (arr, line);
+    end
+    return arr
+end
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if not fileHandle then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+ 
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+
+function ParseCSVLine (line,sep)
+    local res = {}
+    local pos = 1
+    sep = sep or ','
+    while true do
+        local c = string.sub(line,pos,pos)
+        if (c == "") then break end
+        if (c == '"') then
+            -- quoted value (ignore separator within)
+            local txt = ""
+            repeat
+            local startp,endp = string.find(line,'^%b""',pos)
+            txt = txt..string.sub(line,startp+1,endp-1)
+            pos = endp + 1
+            c = string.sub(line,pos,pos)
+            if (c == '"') then txt = txt..'"' end
+            -- check first char AFTER quoted string, if it is another
+            -- quoted string without separator, then append it
+            -- this is the way to "escape" the quote char in a quote. example:
+            -- value1,"blub""blip""boing",value3 will result in blub"blip"boing for the middle
+            until (c ~= '"')
+            table.insert(res,txt)
+            assert(c == sep or c == "")
+            pos = pos + 1
+        else
+            -- no quotes used, just look for the first separator
+            local startp,endp = string.find(line,sep,pos)
+            if (startp) then
+                table.insert(res,string.sub(line,pos,startp-1))
+                pos = endp + 1
+            else
+                -- no separator found -> use rest of string and terminate
+                table.insert(res,string.sub(line,pos))
+                break
+            end
+        end
+    end
+    return res
+end
+local Chars = {}
+for Loop = 0, 255 do
+    Chars[Loop+1] = string.char(Loop)
+end
+local String = table.concat(Chars)
+local Built = {['.'] = Chars}
+local AddLookup = function(CharSet)
+    local Substitute = string.gsub(String, '[^'..CharSet..']', '')
+    local Lookup = {}
+    for Loop = 1, string.len(Substitute) do
+        Lookup[Loop] = string.sub(Substitute, Loop, Loop)
+    end
+    Built[CharSet] = Lookup
+    return Lookup
+end
+
+function string.random(Length, CharSet)
+    -- Length (number)
+    -- CharSet (string, optional); e.g. %l%d for lower case letters and digits
+    local CharSet = CharSet or '.'
+    if CharSet == '' then
+        return ''
+    else
+        local Result = {}
+        local Lookup = Built[CharSet] or AddLookup(CharSet)
+        local Range = table.getn(Lookup)
+        for Loop = 1,Length do
+            Result[Loop] = Lookup[math.random(1, Range)]
+        end
+        return table.concat(Result)
+    end
+end
+
+function cvtdate(datestr)
+local mth = {"January","February","March","April","May","June","July","August","September","October","November","December"}
+local _,_,y,m,d = datestr:find('(%d+)%-(%d+)%-(%d+)')
+if m == nil then m = 12 end
+if d == nil then d = 30 end
+if y == nil then y = 2002 end
+
+return d..' '..mth[tonumber(m)]..' '..y
+end
+
+
+function dirtree(dir)
+    assert(dir and dir ~= "", "directory parameter is missing or empty")
+    if string.sub(dir, -1) == "/" then
+        dir=string.sub(dir, 1, -2)
+    end
+    local function yieldtree(dir)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                entry=dir.."\\"..entry
+                local attr,err=lfs.attributes(entry)
+                if attr == nil then attr = {mode='attrfail',error=err} end
+                coroutine.yield(entry,attr)
+                if attr.mode == "directory" then
+                    yieldtree(entry)
+                end
+            end
+        end
+    end
+    return coroutine.wrap(function() yieldtree(dir) end)
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+main()

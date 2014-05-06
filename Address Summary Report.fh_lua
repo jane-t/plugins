@@ -1,0 +1,183 @@
+--[[
+@Title:	Address Summary Report
+@Author:	Peter Richmond
+@LastUpdated:	06Mar2012
+@Version:			1.3
+@Description:	Counts and Lists All Addresses in the File.
+	Similar to FH Standard report "Data - Addresses" but:
+	(a) Each Address (including multi-line) is shown on a single line. 
+	(b) Leading numbers can be either sorted numerically or ignored for primary sort.
+	(c) Count is to the left of the Address.
+	(d) (V1.1) Option to append relevant Place (if present) to each Address.
+	(e) (V1.2) Option to sort and display Address (and Place if appended) with Parts reversed.
+	(V1.3) Number handling improved and a bug fixed.
+]]
+
+require("iuplua")
+
+-- Dialog for user to specify required sortation.
+sTitle = "Address Summary Report"
+sOption1 = "Leading Numbers Numerically"
+sOption2 = "Ignore Leading Numbers"
+sOption3 = "Address Parts Reversed"
+iOption = 0
+iPlace = 0
+bOK, iOption, iPlace = iup.GetParam(sTitle, param_action,
+"Please specify required sortation: %o|"..sOption1.."|"..sOption2.."|"..sOption3.."|\n" ..
+"Append Place (if present) to Address?: %b[No,Yes]\n",
+iOption, iPlace)
+
+if bOK then
+	if iOption == 0 then
+		iNsort = 1
+		iAsort = 2
+		sSubtitle = sOption1
+	else
+		iNsort = 2
+		iAsort = 1
+		sSubtitle = sOption2
+	end
+
+	tTypes = {"INDI","FAM","REPO","SUBM"}	-- Record Types that may contain ADDR tags
+	tAddresses = {}		-- Define array for Addresss
+	pi = fhNewItemPtr()		-- declare pointer
+	pi2 = fhNewItemPtr()	-- declare pointer
+
+	for iType,sTypeDesc in ipairs(tTypes) do		-- Scan the four Record Types
+		pi:MoveToFirstRecord(sTypeDesc)
+		while pi:IsNotNull() do
+			sType = fhGetTag(pi)
+			if sType == 'ADDR' then
+				sAddr = fhGetValueAsText(pi)
+				if (sAddr ~= nil) and (sAddr ~= "") then		-- Process a non-blank Address
+					sResult = string.gsub(sAddr, ",?\n", string.char(7))		-- Blob for newline
+
+					if iPlace == 1 then		-- Append Place to Address
+						pi:MoveToParentItem(pi)	-- i.e. Fact for current Address
+						pi2:MoveTo(pi,"~.PLAC")	-- i.e. Place for current Fact
+						sPlac = fhGetValueAsText(pi2)
+						if (sPlac ~= nil) and (sPlac ~= "") then
+							sResult = sResult .. " " .. string.char(8) .. " " .. sPlac
+						end
+						pi:MoveNext()
+						if pi:IsNull() then		-- Avoid premature termination of loop
+							pi:MoveToRecordItem(pi2)
+							pi:MoveNext()
+						end
+					end
+
+					-- Add the Address Result to the list
+					if (tAddresses[sResult] == nil) then
+						tAddresses[sResult] = 1
+					else
+						tAddresses[sResult] = tAddresses[sResult] + 1
+					end
+				end
+			end
+			pi:MoveNextSpecial()
+		end
+	end
+
+	-- Build Tables for the result set columns for Address and Count
+	tAddress = {}
+	tCount = {}
+	tNumber = {}
+	tRest = {}
+	tSortNum = {}
+	ii = 0		-- line counter for result tables
+	iMax = 40		--	inital (minimum) value for length of Address
+	iMax2 = 5		--	inital (minimum) value for length of Number
+	for sAddress, iCount in pairs(tAddresses) do
+		ii = ii + 1
+		tCount[ii] = iCount
+		-- Separate any leading Number from Rest of Address:
+		sNumber, iNumber, sPre, sRest = string.match(sAddress, "^(%p*(%d+)[^%c%s]*[ %p%d]*)%s+(%W*)(.*)")
+		if sNumber == nil then
+			sNumber = "" 
+		end
+		sNumEnd = string.sub(sNumber, -2)		-- move ordinals from Number to Rest of Address
+		if (sNumEnd == "st") or (sNumEnd == "nd") or (sNumEnd == "rd") or (sNumEnd == "th") then
+			sRest = sNumber .. " " .. sRest
+			sNumber = ""
+			iNumber = 0
+		end
+		sNumber = string.gsub(sNumber, "&", "&&")		-- ensure ampersand displays OK
+		if iNumber == nil then
+			iNumber = 0
+			sPre, sRest = string.match(sAddress, "^(%W*)(.*)")
+		end
+
+		if iOption == 2 then		-- Reverse the order of Address (& Place) parts
+			tPart = {}	-- Table for Parts of Address ( & Place)
+			tSep = {}		-- Table for Separators between Parts		
+			iParts = 0	-- Count of Parts
+			iSeps = 0		-- Count of Separators
+			for sPart in string.gmatch(sAddress, "[^,%c]+") do
+				iParts = iParts + 1
+				if sPart == nil then sPart = "" end
+				tPart[iParts] = string.match(sPart, "^%s*(.*)%s*$")
+			end	
+			for sSep in string.gmatch(sAddress, "[,%c]+") do
+				iSeps = iSeps + 1
+				tSep[iSeps] = sSep
+			end	
+			while iParts - iSeps <= 0 do		-- ensure 1 more Parts than Separators
+				iParts = iParts + 1
+				tPart[iParts] = ""
+			end
+			
+			sRev = tPart[iParts]		-- Start with last Part of Address (& Place)
+			while iSeps > 0 do		-- Process Separators and Parts in reverse order
+				iParts = iParts - 1
+				sRev = sRev .. tSep[iSeps] .. tPart[iParts]
+				iSeps = iSeps - 1
+			end
+			sRev = string.gsub(sRev, ",", ", ")
+			-- Reverse sRest for sorting
+			sRevRest = ""
+			for sPart in string.gmatch(sRest, "[^,%c]+") do
+				if sPart == nil then sPart = "" end
+				sPart = string.match(sPart, "^%s*(.*)%s*$")
+				sRevRest = sPart .. ", " .. sRevRest
+			end
+		end
+
+		-- Populate output Tables:
+		tSortNum[ii] = string.format("%10u", iNumber)
+		if iOption ~= 2 then
+			tRest[ii] = ' ' .. sRest		-- having removed non-alphabetic prefix for sorting
+			tNumber[ii] = sNumber
+			tAddress[ii] = ' ' .. string.gsub(sPre .. sRest, string.char(8), " " .. string.char(133) .. " ")
+			iLen2 = string.len(tNumber[ii])
+			if iLen2 > iMax2 then		-- Sets maximum address length
+				iMax2 = iLen2 
+			end
+		else
+			tRest[ii] = ' ' .. sRevRest
+			tAddress[ii] = ' ' .. string.gsub(sRev, string.char(8), " " .. string.char(133) .. " ")
+		end
+		iLen = string.len(tAddress[ii])
+		if iLen > iMax then		-- Sets maximum address length
+			iMax = iLen 
+		end
+	end
+	sAddCol = " Address"
+	if iPlace == 1 then
+		sAddCol = sAddCol .. " " .. string.char(133) .. " Place"
+		sSubtitle = sSubtitle .. " (with Place appended)"
+	end
+	if iOption == 2 then
+		sAddCol = sAddCol .. " - Reversed"
+		sSubtitle = sSubtitle .. " - Reversed"
+	end
+	iWid = 4 * iMax		-- Sets Address column width
+	iWid2 = 4 * iMax2		-- Sets Number column width
+	fhOutputResultSetTitles(sTitle, sTitle, sSubtitle .. "     %#c")
+	fhOutputResultSetColumn('Count', 'integer', tCount,  ii, 24, 'align_right')
+	if iOption ~= 2 then
+		fhOutputResultSetColumn('No.', 'text', tNumber, ii, iWid2, 'align_right')
+	end
+	fhOutputResultSetColumn(sAddCol, 'text', tAddress, ii, iWid, 'align_left')
+	fhOutputResultSetColumn('', 'text', tRest, ii, 1, 'align_left', iAsort)	-- Only for sorting
+	fhOutputResultSetColumn('', 'text', tSortNum, ii, 1, 'align_right', iNsort)	-- Only for sorting
+end

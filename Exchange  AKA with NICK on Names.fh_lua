@@ -1,5 +1,5 @@
 --[[
-@Title: Exchange _AKA for NICK
+@Title: Exchange _ALIA for NICK
 @Author: Jane Taubman
 @LastUpdated: June 2011
 @Description:
@@ -12,7 +12,7 @@ pnick = fhNewItemPtr()
 pname = fhNewItemPtr()
 pi:MoveToFirstRecord("INDI")
 while not pi:IsNull() do
-	paka:MoveTo(pi,'~.NAME._AKA')
+	paka:MoveTo(pi,'~._ALIA')
 	if not paka:IsNull() then
 		strName = fhGetValueAsText(paka)
 		pname:MoveTo(pi,'~.NAME')  

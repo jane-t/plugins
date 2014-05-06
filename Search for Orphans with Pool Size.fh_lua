@@ -1,0 +1,79 @@
+--[[
+@Title: Search for Orphans with Pool Size
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: April 2013 
+@Description: 
+]]
+function main()
+local tblPool = {}
+for pi in records('INDI') do
+    local iPool = fhCallBuiltInFunction('RelationPool',pi)
+print(iPool)
+   -- tblPool[iPool] = tblPool[iPool]  or 1
+   -- tblPool[iPool] = tblPool[iPool] + 1
+  
+end
+tblOutput,iC = createResultTable()
+-- Define Columns
+tblOutput.indi = {title='Record',type='item',width=140,align='align_left',content={}}
+tblOutput.name = {title='Name',type='text',width=140,align='align_left',content={}}
+tblOutput.birth = {title='Birth',type='item',width=140,align='align_left',content={}}
+tblOutput.death = {title='Death',type='item',width=140,align='align_left',content={}}
+ 
+pi = fhNewItemPtr()  -- declare pointer 
+pi:MoveToFirstRecord("INDI") -- and set to the first record.
+while pi:IsNotNull() do
+   --  Add Columns
+   iC = iC + 1
+   tblOutput.indi.content[iC] = pi:Clone()   
+   tblOutput.name.content[iC] = fhGetDisplayText(pi)
+   tblOutput.birth.content[iC] = fhGetItemPtr(pi,'~.BIRT.DATE')
+   tblOutput.death.content[iC] = fhGetItemPtr(pi,'~.DEAT.DATE')
+ 
+   pi:MoveNext()
+end
+fhOutputResultSetTitles("All Individuals", "All Individuals", "Item List Example Date: %#x")
+for t in tblOutput() do
+   fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+end
+
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+function createResultTable()
+-- create metatable
+local tblOutput_mt = {}
+tblOutput_mt.col = 0
+tblOutput_mt.seq = {}
+tblOutput_mt.__newindex = function (t,k,v)
+    rawset(t,k,v) -- update original table
+    local m = getmetatable(t)
+    m.col = m.col + 1
+    table.insert(m.seq,k)
+end
+tblOutput_mt.__call = function (t)
+    local i = 0
+    local m = getmetatable(t)
+    local n = table.getn(m.seq)
+    return function ()
+        i = i + 1
+        if i <= n then return t[m.seq[i]] end
+    end
+end
+local tblOutput = {}  -- Define Columns Table
+setmetatable(tblOutput, tblOutput_mt)
+local iC = 0          -- Define count of lines
+return tblOutput,iC
+end
+------------------------------------------------- Call main
+main()

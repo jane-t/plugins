@@ -1,0 +1,275 @@
+--[[
+@Title: Build CSS Tree From Record
+@Author: Jane Taubman
+@Version: 0.2
+@LastUpdated: October 2013 
+@Description: 
+]]
+
+function main()
+    local pi = getrecord()
+    if pi == nil then return end
+    local descendants = {}
+    tHtml = {}
+    -- Add Parents
+    local ptrFath = fhNewItemPtr()
+    local ptrMoth = fhNewItemPtr()
+    local fData,mData
+    ptrFath:MoveTo(pi,'INDI.~FATH[1]>')
+    ptrMoth:MoveTo(pi,'INDI.~MOTH[1]>')
+    bParents = false
+    if ptrFath:IsNotNull() or ptrMoth:IsNotNull() then
+        bParents = true
+        if ptrFath:IsNotNull() then
+            fData = buildData(ptrFath,'parent')
+        end
+        if ptrMoth:IsNotNull() then
+            mData = buildData(ptrMoth,'parent')
+            addHtml('<ul>','<li>',fData,mData)
+        end
+    end
+    -- Add Root
+    local sData = buildData(pi,'root')
+    addHtml('<ul>','<li>',sData)
+    descendants[1] = {fhGetRecordId(pi), pi:Clone(),sData,getchildren(pi)}
+    addHtml('</li>','</ul>')
+    if bParents then
+        addHtml('</li>','</ul>')
+    end
+    local sTree = table.concat(tHtml,'\n')
+    sPage = htmlTemplate:gsub('{tree}',sTree)
+    sPage = sPage:gsub('{title}',fhGetItemText(pi,'~.NAME'))
+    sFile = string.gsub(fhGetPluginDataFileName(),'%.dat','%.html')
+    
+    SaveStringToFile(sPage,sFile)
+    fhShellExecute(sFile)
+end
+--------------------------------------------------------------------------- Functions
+local cLevel = 0
+
+function getchildren(pi)
+    cLevel = cLevel + 1
+    local children = {}
+    local ptrChild = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+    -- Loop Family as Spouse
+    ptrFamily:MoveTo(pi,'~.FAMS')
+    local bChild = false
+    local iC = 0
+    while ptrFamily:IsNotNull() do
+        ptrFamilyRecord = fhGetValueAsLink(ptrFamily)
+        -- Loop Children
+        iC = iC + 1
+        ptrChild:MoveTo(ptrFamilyRecord,'~.CHIL')
+        if ptrChild:IsNotNull() and not(bChild) then
+            addHtml('<ul>')
+            bChild = true
+        end
+        while ptrChild:IsNotNull() do
+            local ptrChildRecord = fhGetValueAsLink(ptrChild)
+            if ptrChildRecord:IsNotNull() then
+                addHtml('<li>')
+                local sData = buildData(ptrChildRecord,'child',iC)
+                addHtml(sData)
+                local tChild = {}
+                if cLevel < 2 then
+                    tChild = getchildren(ptrChildRecord)
+                end
+                table.insert(children,{fhGetRecordId(ptrChildRecord), ptrChildRecord:Clone(),sData,tChild})
+                addHtml('</li>')
+            end
+            ptrChild:MoveNext('SAME_TAG')
+        end
+        
+        ptrFamily:MoveNext('SAME_TAG')
+    end
+    if bChild then table.insert(tHtml,'</ul>') end
+    cLevel = cLevel - 1
+    return children
+end
+
+function addHtml(...)
+    local t = {...}
+    for _,value in ipairs(t) do
+        table.insert(tHtml,value)
+    end
+end
+
+function buildData(pd,sType,iFam)
+    sType = sType or ''
+    iFam = iFam or 0
+    local ptrFamily = fhNewItemPtr()    
+    local ptrFamilyRec = fhNewItemPtr()  
+    local sFam = ''
+    if iFam > 1 then sFam = '('..iFam..')' end
+    local strData = '<a href="indi'..fhGetRecordId(pd)..'.html" class="'..sType..'">'..fhGetItemText(pd,'~.NAME')..sFam..
+    '<br />'..fhCallBuiltInFunction('lifedates',pd)
+    local iC = 0
+     ptrFamily:MoveTo(pd,'~.FAMS')
+    while ptrFamily:IsNotNull() do
+    iC = iC + 1
+    sSpouse = fhGetItemText(pd,'~.~SPOU['..iC..']>NAME')
+    if sSpouse ~= '' and sType ~= 'parent' then
+        strData = strData ..'<br />Spouse'
+if iC > 1 then
+   strData = strData..'('..iC..')'
+end
+   ptrFamilyRec = fhGetValueAsLink(ptrFamily)
+   strData = strData..': '..sSpouse..'<br/> Married: '..fhGetItemText(ptrFamilyRec,'~.MARR.DATE') --INDI.FAMS[1]>MARR[1].DATE
+    end
+ptrFamily:MoveNext('SAME_TAG')
+    end
+    strData = strData..'</a>'
+    return strData
+end
+
+function getrecord()
+    local plist = fhGetCurrentRecordSel('INDI')
+    if #plist == 0 then
+        plist = fhPromptUserForRecordSel('INDI',1)
+    end
+    return plist[1]
+end
+-- Open File and return Handle --
+
+function OpenFile(strFileName,strMode)
+    local fileHandle, strError = io.open(strFileName,strMode)
+    if not fileHandle then
+        error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..tostring(strError).." \n")
+    end
+    return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+
+function SaveStringToFile(strString,strFileName)
+    local fileHandle = OpenFile(strFileName,"w")
+    fileHandle:write(strString)
+    assert(fileHandle:close())
+end -- function SaveStringToFile
+htmlTemplate =[[
+<!DOCTYPE HTML>
+<html>
+  <head>
+  <meta http-equiv="content-type" content="text/html; charset=windows-1250">
+  <title>{title}</title>
+  <style>
+  /*Now the CSS*/
+* {margin: 0; padding: 0;}
+.treewrapper {
+ margin: 10px; padding: 20px;  width: auto;  white-space: nowrap; overflow-x: scroll;   overflow-x: scroll;
+}
+.tree { width: 500%; }
+.tree ul {
+	padding-top: 20px; position: relative;
+	
+	transition: all 0.5s;
+	-webkit-transition: all 0.5s;
+	-moz-transition: all 0.5s;
+}
+.tree li {
+	float: left; text-align: center;
+	list-style-type: none;
+	position: relative;
+	padding: 20px 5px 0 5px;
+	
+	transition: all 0.5s;
+	-webkit-transition: all 0.5s;
+	-moz-transition: all 0.5s;
+}
+/*We will use ::before and ::after to draw the connectors*/
+.tree li::before, .tree li::after{
+	content: '';
+	position: absolute; top: 0; right: 50%;
+	border-top: 1px solid #ccc;
+	width: 50%; height: 20px;
+}
+.tree li::after{
+	right: auto; left: 50%;
+	border-left: 1px solid #ccc;
+}
+/*We need to remove left-right connectors from elements without 
+any siblings*/
+.tree li:only-child::after, .tree li:only-child::before {
+	display: none;
+}
+/*Remove space from the top of single children*/
+.tree li:only-child{ padding-top: 0;}
+/*Remove left connector from first child and 
+right connector from last child*/
+.tree li:first-child::before, .tree li:last-child::after{
+	border: 0 none;
+}
+/*Adding back the vertical connector to the last nodes*/
+.tree li:last-child::before{
+	border-right: 1px solid #ccc;
+	border-radius: 0 5px 0 0;
+	-webkit-border-radius: 0 5px 0 0;
+	-moz-border-radius: 0 5px 0 0;
+}
+.tree li:first-child::after{
+	border-radius: 5px 0 0 0;
+	-webkit-border-radius: 5px 0 0 0;
+	-moz-border-radius: 5px 0 0 0;
+}
+/*Time to add downward connectors from parents*/
+.tree ul ul::before{
+	content: '';
+	position: absolute; top: 0; left: 50%;
+	border-left: 1px solid #ccc;
+	width: 0; height: 20px;
+}
+.tree li a{
+	border: 1px solid #ccc;
+	padding: 5px 10px;
+	text-decoration: none;
+	color: #666;
+	font-family: arial, verdana, tahoma;
+	font-size: 11px;
+	display: inline-block;
+	
+	border-radius: 5px;
+	-webkit-border-radius: 5px;
+	-moz-border-radius: 5px;
+	
+	transition: all 0.5s;
+	-webkit-transition: all 0.5s;
+	-moz-transition: all 0.5s;
+}
+/*Time for some hover effects*/
+/*We will apply the hover effect the the lineage of the element also*/
+.tree li a:hover, .tree li a:hover+ul li a {
+	background: #c8e4f8; color: #000; border: 1px solid #94a0b4;
+}
+/*Connector styles on hover*/
+.tree li a:hover+ul li::after, 
+.tree li a:hover+ul li::before, 
+.tree li a:hover+ul::before, 
+.tree li a:hover+ul ul::before{
+	border-color:  #94a0b4;
+}
+/*Thats all. I hope you enjoyed it.
+Thanks :)*/
+
+/* Box Colours */
+.parent {background: lightblue}
+.root {background: ivory}
+.child {background: lightgrey}
+
+</style>
+  </head>
+  <body>
+     <!--
+We will create a family tree using just CSS(3)
+The markup will be simple nested lists
+-->
+<div class="treewrapper">
+<div class="tree">
+{tree}
+</div>
+</div>
+  </body>
+</html>
+]]
+------------------------------------------------------------------- Run Main
+main()

@@ -1,0 +1,71 @@
+--[[
+@Title: Strip Notes from File
+@Author: Jane Taubman
+@Version: 0.1
+@LastUpdated: Dec 2013 
+@Description: Delete all Note Records and Local Notes from a File.
+]]
+----------------------------------------------------- Function Delete Records
+function dltRecords(type)
+    local ptr = fhNewItemPtr()
+    local dltptr = fhNewItemPtr()
+    
+    ptr:MoveToFirstRecord(type)
+    while ptr:IsNotNull() do
+        dltptr:MoveTo(ptr)
+        ptr:MoveNext()
+        fhDeleteItem(dltptr)
+    end
+end
+-------------------------------------------------------------------------------- Check for Project and Warn if in Project Mode
+if fhGetContextInfo('CI_APP_MODE') == 'Project Mode' then
+    ret = fhMessageBox(
+    [[ Warning:
+This plugin is designed to delete data from the current file.
+You currently have a Project open. 
+Please confirm you want to delete the notes from ]]..fhGetContextInfo('CI_PROJECT_NAME'),
+    'MB_OKCANCEL',
+    'MB_ICONEXCLAMATION')
+    if ret ~= 'OK' then
+        return
+    end
+end
+-------------------------------------------------------------------------- Process File
+ptrRecord = fhNewItemPtr()
+ptrField = fhNewItemPtr()
+ptrClear = fhNewItemPtr()
+tblDeleteList = {}
+tblFamilyList = {}
+ptrRecord:MoveToFirstRecord('INDI')
+while ptrRecord:IsNotNull() do
+    ptrField:MoveToFirstChildItem(ptrRecord)
+    while ptrField:IsNotNull() do
+        if (fhGetTag(ptrField) == 'NOTE' or fhGetTag(ptrField) == 'NOTE2') then
+            table.insert(tblDeleteList,ptrField:Clone())
+        end
+        if fhGetTag(ptrField) == 'FAMS' then
+            table.insert(tblFamilyList,fhGetValueAsLink(ptrField))
+        end
+        ptrField:MoveNext()
+    end
+    ptrRecord:MoveNext()
+end
+---------------------------------------------- Process Family Records With Living Individuals
+for _,item in ipairs(tblFamilyList) do
+    ptrField:MoveToFirstChildItem(item)
+    while ptrField:IsNotNull() do
+        if (fhGetTag(ptrField) == 'NOTE' or fhGetTag(ptrField) == 'NOTE2') then
+            table.insert(tblDeleteList,ptrField:Clone())
+        end
+        ptrField:MoveNext()
+    end
+end
+ret = fhMessageBox('Please Confirm Changes:\n'..#tblDeleteList..' items will be deleted','MB_OKCANCEL')
+if ret=='OK' then
+    for _,item in ipairs(tblDeleteList) do
+        fhDeleteItem(item)
+    end
+
+    tblDeleteList = {}
+    dltRecords('NOTE')
+end

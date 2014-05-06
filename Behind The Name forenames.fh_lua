@@ -1,10 +1,10 @@
 --[[
-@Title: Behind The Name (forenames)
+@Title: Behind The Name forenames
 @Author: Jane Taubman
 @Version: 1.0
 @LastUpdated: October 2013 
 @Description: 
-Launch the Behind the Name Web site for the currently selected Given Names, showing the results in a tabbed dialog.
+Launches the Behind the Name Web site for the currently selected Given Names, showing the results in a tabbed dialog.
 
 Useful for checking unusual names for likely sex and origin.
 

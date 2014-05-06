@@ -1,0 +1,198 @@
+--[[
+@Title: Add Assessment to Citations for a Source
+@Author: Jane Taubman
+@Version: 1.2
+@LastUpdated: March 2014
+@Description: Adds a Certainty Assessment to all citations for a source, optionally over writing existing ones.
+
+1.2 Added ability to set the Entry date as well.
+]]
+
+function main ()
+    local tblOutput,iC = createResultTable()
+    -- Define Columns
+    tblOutput.cite = {title='Citation',type='item',width=140,align='align_left',content={}}
+    tblOutput.field = {title='Field',type='item',width=140,align='align_left',content={}}
+    tblOutput.record = {title='Record',type='item',width=140,align='align_left',content={}}
+    tblOutput.desc = {title='Action',type='text',width=140,align='align_left',content={}}
+
+    function addRow(ptr,desc)
+        local ptrWrk = fhNewItemPtr()
+        iC = iC + 1
+        tblOutput.cite.content[iC] = ptr:Clone()
+        ptrWrk:MoveToParentItem(ptr)
+        tblOutput.field.content[iC] = ptrWrk:Clone()
+        ptrWrk:MoveToRecordItem(ptr)
+        tblOutput.record.content[iC] = ptrWrk:Clone()
+        tblOutput.desc.content[iC] = desc
+    end
+    local tblA = {'Unreliable','Questionable','Secondary Evidence','Primary Evidence','<clear assessment>'}
+    local pList = fhPromptUserForRecordSel('SOUR',1)
+    local ps = pList[1]
+    local psr = fhNewItemPtr()
+    local psa = fhNewItemPtr()
+    local psd = fhNewItemPtr()
+    local pAssessment, pOverwrite,pDate = getParm(fhGetDisplayText(ps))
+    if not(pAssessment) then return end
+    if ps:IsNotNull() then
+        for ptr in allItems() do
+            if fhGetTag(ptr) == 'SOUR' then
+                psr = fhGetValueAsLink(ptr)
+                if psr:IsSame(ps) then
+                    
+                    psa:MoveTo(ptr,'~.QUAY')
+                    if psa:IsNull() then
+                        if pAssessment < 5 then
+                            -- Add Assessment to citation
+                            psa = fhCreateItem('QUAY',ptr,true)
+                            if psa:IsNotNull() then
+                                fhSetValueAsText(psa,tblA[pAssessment])
+                                addRow(ptr,'Added '..tblA[pAssessment])
+                            end
+                        end
+                    else
+                        if pOverwrite then
+                            if pAssessment == 5 then
+                                -- Delete Assessments
+                                fhDeleteItem(psa)
+                                addRow(ptr,'Assessment Deleted')
+                            else
+                                fhSetValueAsText(psa,tblA[pAssessment])
+                                addRow(ptr,'Changed to '..tblA[pAssessment])
+                            end
+                        end
+                    end
+                    if pDate then
+                       psd:MoveTo(ptr,'~.DATA.DATE')
+                       if psd:IsNull() then
+                          -- Create Data if needed and Date
+                          local ptrData = fhNewItemPtr()
+                          ptrData:MoveTo(ptr,'~.DATA')
+                          if ptrData:IsNull() then
+                             ptrData = fhCreateItem('DATA',ptr)
+									
+                          end
+                          psd = fhCreateItem('DATE',ptrData)    
+                          fhSetValueAsDate(psd,pDate)
+                          addRow(ptr,'Entry Date Added '..fhGetItemText(psd))
+                       else
+                          if pOverwrite then
+                             fhSetValueAsDate(psd,pDate)
+                          addRow(ptr,'Entry Date Updated '..fhGetItemText(psd,'~'))
+
+                          end
+                       end
+                    end
+                end
+            end
+        end
+    end
+    if iC > 0 then
+        local sTitle = "Assessments Changed for Source "..fhGetDisplayText(ps)
+        fhOutputResultSetTitles(sTitle , sTitle , "Date: %#x")
+        for t in tblOutput() do
+            fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+        end
+    else
+        fhMessageBox("No Changes Required")
+    end
+end
+--------------------------------------------- functions
+function today()
+	return os.date("%Y"),os.date("%m"),os.date("%d")
+end
+function getParm(sTitle)
+    local pAssessment = 0
+    local pOverwrite = 0
+    local pDate = 0
+    -- Prompt User to Confirm Options
+    local ret, pAssessment, pOverwrite, pDate =
+    iup.GetParam("Add Assessment to "..sTitle, param_action,
+[[
+Set Assessment to: %l|Unreliable|Questionable|Secondary Evidence|Primary Evidence|<clear assessment>|
+Overwrite Existing Assessments and dates: %b
+Set Entry Date: %b
+    ]],
+    pAssessment, pOverwrite,pDate)
+    if not ret then
+        return
+    end
+    pAssessment = pAssessment + 1
+    pOverwrite = (pOverwrite == 1)
+    if pDate == 1 then
+       -- Prompt for Date
+
+		pDate =  fhPromptUserForDate(fhNewDate(today()))
+      if pDate == nil then 
+         return
+      end
+    else
+        pDate = nil
+    end
+    return pAssessment,pOverwrite,pDate
+end
+
+function allItems(...)
+    local iTypeCount = nil
+    local iPos = 1
+    local p1 = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    local tblRecTypes = {}
+    
+    if arg['n'] == 0 then
+        -- No parameter do all Record Types
+        iTypeCount = fhGetRecordTypeCount() -- Get Count of Record types
+        for i = 1,iTypeCount do
+            tblRecTypes[i] = fhGetRecordTypeTag(i)
+        end
+    else
+        -- Got Parameters Process them instead
+        tblRecTypes = arg
+        iTypeCount = arg['n']
+    end
+    p1:MoveToFirstRecord(tblRecTypes[iPos])
+    return function()
+        repeat
+        while p1:IsNotNull() do
+            p2:MoveTo(p1)
+            p1:MoveNextSpecial()
+            if p2:IsNotNull() then
+                return p2
+            end
+        end
+        -- Loop through Record Types
+        iPos = iPos + 1
+        if iPos <= iTypeCount then
+            p1:MoveToFirstRecord(tblRecTypes[iPos])
+        end
+        until iPos > iTypeCount
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+--------------------------------------------- run main
+main()

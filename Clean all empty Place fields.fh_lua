@@ -1,0 +1,81 @@
+--[[
+@Title: Clean All Empty Place Fields
+@Author: Jane Taubman  
+@Version: 0.1
+@LastUpdated: March 2014 
+@Description: Deletes all place fields, where the field is empty or a zero length string.
+]]
+function main()
+   local pRecord = fhNewItemPtr()
+   local pFact = fhNewItemPtr()
+   local tblDltList = {}
+	for ptr in allItems('INDI','FAM') do
+	    if fhGetTag(ptr) == 'PLAC' then
+          local sPlace = fhGetValueAsText(ptr)
+          if sPlace == '' or sPlace == nil then
+             pRecord:MoveToRecordItem(ptr) 
+             pFact:MoveToParentItem(ptr) 
+             print(fhGetDisplayText(pRecord),fhGetDisplayText(pFact))
+             table.insert(tblDltList,ptr:Clone())
+          end
+       end	
+	end
+   for _,ptr in ipairs(tblDltList) do
+		fhDeleteItem(ptr)
+   end
+end
+------------------------------------------------------ functions
+function allItems(...)
+    local iTypeCount = nil
+    local iPos = 1
+    local p1 = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    local tblRecTypes = {}
+ 
+    if arg['n'] == 0 then
+    --  No parameter do all Record Types
+        iTypeCount = fhGetRecordTypeCount() -- Get Count of Record types
+        for i = 1,iTypeCount do
+            tblRecTypes[i] = fhGetRecordTypeTag(i)
+        end
+    else
+        --  Got Parameters Process them instead
+        tblRecTypes = arg
+        iTypeCount = arg['n']
+    end    
+    
+    p1:MoveToFirstRecord(tblRecTypes[iPos])
+    return function()
+        repeat
+        while p1:IsNotNull() do
+            p2:MoveTo(p1)
+            p1:MoveNextSpecial()
+            if p2:IsNotNull() then
+                return p2
+            end
+        end
+        -- Loop through Record Types
+        iPos = iPos + 1
+        if iPos <= iTypeCount then
+            p1:MoveToFirstRecord(tblRecTypes[iPos])
+        end
+        until iPos > iTypeCount
+    end
+end
+
+do
+local printout = {}
+  function print(...)
+     table.insert(printout,table.concat(arg,','))     
+  end
+
+  function dumpPrint()
+   if #printout > 0 then
+
+ _ = iup.GetText(fhGetContextInfo("CI_PLUGIN_NAME") .. ' - Output', table.concat(printout,'\n'))       
+   end
+  end
+end
+------------------------------------------------------ main
+main()
+dumpPrint()

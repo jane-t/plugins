@@ -1,0 +1,67 @@
+--[[
+@Title: Format Script in Clipboard
+@Author: Jane Taubman
+@Version: 1.1
+@LastUpdated: October 2012
+@Description: Reads the contents of the Clipboard and reformats the contents assuming it is a Lua script.
+]]
+-- Get IUP for Clipboard
+require "iuplua" -- Get IUP for Clipboard
+
+function mainfunction()
+    local clipboard = iup:clipboard()
+    local script = ''
+    if clipboard.textavailable then
+        script = clipboard.text
+    else
+        fhMessageBox('Text not found in Clipboard')
+        return
+    end
+    clipboard.text = format(trim(script))
+end
+
+function format(script)
+s=  script:gsub('\n',' ')
+return s
+end
+function trim(s)
+    s = s:gsub('%s+',' ')
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+function removeQuotedStrings(str)
+    local bQuote = false -- End of Quote
+    local bEsc = false -- Escaped Quote
+    local qType = ' ' -- Type of Quote eg ' or "
+    local newstr = {}
+    for sChar in str:gmatch(".") do
+        if ((sChar == '"') or (sChar == "'" )) then
+            if not(bEsc) then
+                if (bQuote and qType == sChar) then bQuote = false -- leave quote mode
+                elseif not(bQuote) then
+                    qType = sChar -- Start of quoted text
+                    bQuote = true
+                end
+            end
+        end
+        if not(bQuote) then
+            table.insert(newstr,sChar)
+        end
+    end
+    return table.concat(newstr)
+end
+
+function fliptable(tbl,value)
+    local newtbl = {}
+    for i,j in pairs(tbl) do
+        local val = value or i
+        newtbl[j] = val
+    end
+    return newtbl
+end
+
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
+------------------------------------------------ End of Functions call Main function
+mainfunction()

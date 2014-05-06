@@ -1,0 +1,3376 @@
+--[[
+@Title:			Lookup Missing Census Facts
+@Author:			Jane Taubman && Keir Strugnell && Bill Henshaw && Mike Tate 
+@Version:			3.1
+@LastUpdated:	2 April 2014 
+@Description:	Searches relations of a selected person for chosen Census Records and produces a web page to search Ancestry or FindMyPast for any missing Census Records.
+					Estimated dates are used, where none are recorded.  Womens married names are used where the Census is after the marriage date (or after the birth of the first child).
+@Version Log:	See end of file.
+]]
+--[[
+@Title:			aa Library Functions Preamble
+@Author:			Mike Tate
+@Version:			1.7
+@LastUpdated:	23 Mar 2014
+@Description:	All the library module functions as preamble for Plugins.
+]]
+
+---[==[
+
+-- Initial +fh+ functions below should eventually become library modules --
+
+--[[
+@Title:			+fh+stringx_v2
+@Author:			Mike Tate
+@LastUpdated:	28 Dec 2013
+@Version:			2.4
+@Description:	Extended string functions to supplement LUA string library.
+@V2.4:				Tolerant of integer & nil parameters just link match & gsub.
+@V1.0:				Initial version.
+]]
+
+local function stringx_v2(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}									-- Local environment table
+package.seeall(fh)								-- Enable all globals
+module(...,package.seeall)					-- Create matching module name
+setfenv(1,fh)									-- All public names are added to local fh table
+
+function ReportVersion()
+	local strMessage = "This is +fh+stringx_v2"
+	print(strMessage)
+	return strMessage
+end
+
+-- Split a string using "," or chosen separator --
+function split(strTxt,strSep)
+	local tblFields = {}
+	local strPattern = string.format("([^%s]+)", strSep or ",")
+	strTxt = tostring(strTxt or "")
+	strTxt:gsub(strPattern, function(strField) tblFields[#tblFields+1] = strField end)
+	return tblFields
+end -- function split
+
+-- Split a string into numbers using " " or "," or "x" separators	-- Any non-number remains as a string
+function splitnumbers(strTxt)
+	local tblNum = {}
+	strTxt = tostring(strTxt or "")
+	strTxt:gsub("([^ ,x]+)", function(strNum) tblNum[#tblNum+1] = tonumber(strNum) or strNum end)
+	return tblNum
+end -- function splitnumbers
+
+-- Hide magic pattern symbols	^ $ ( ) % . [ ] * + - ?
+function plain(strTxt)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character,
+	-- where %% is the % escape, and %1 is the original character capture.
+	strTxt = tostring(strTxt or ""):gsub("(%W)","%%%1")
+	return strTxt
+end -- function plain
+
+-- matches is plain text version of string.match()
+function matches(strTxt,strFind,intInit)
+	strFind = tostring(strFind or ""):gsub("(%W)","%%%1")				-- Hide magic pattern symbols
+	return tostring(strTxt or ""):match(strFind,tonumber(intInit))
+end -- function matches
+
+-- replace is plain text version of string.gsub()
+function replace(strTxt,strOld,strNew,intNum)
+	strOld = tostring(strOld or ""):gsub("(%W)","%%%1")					-- Hide magic pattern symbols
+	return tostring(strTxt or ""):gsub(strOld,function() return strNew end,tonumber(intNum))	-- Hide % capture symbols
+end -- function replace
+
+-- convert is pattern without captures version of string.gsub()
+function convert(strTxt,strOld,strNew,intNum)
+	return tostring(strTxt or ""):gsub(tostring(strOld or ""),function() return strNew end,tonumber(intNum))	-- Hide % capture symbols
+end -- function convert
+
+-- import overloads fh functions into string table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			string[strIndex] = anyValue
+		end
+	end
+end -- function import
+return fh
+
+end -- local function stringx_v2
+
+--[[
+@Module:			fh.tablex_v1
+@Author:			Mike Tate
+@Version:			1.1
+@LastUpdated:	19 Oct 2013
+@Description:	A Table Load Save Module.
+@V1.0:				Initial version 0.94 is Lua 5.1 compatible.
+]]
+
+local function tablex_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+------------------------------------------------------ Start Table Load Save
+-- require "_tableloadsave"
+--[[
+   Save Table to File/Stringtable
+   Load Table from File/Stringtable
+   v 0.94
+   
+   Lua 5.1 compatible
+   
+   Userdata and indices of these are not saved
+   Functions are saved via string.dump, so make sure it has no upvalues
+   References are saved
+   ----------------------------------------------------
+   table.save( table [, filename] )
+   
+   Saves a table so it can be called via the table.load function again
+   table must a object of type 'table'
+   filename is optional, and may be a string representing a filename or true/1
+   
+   table.save( table )
+      on success: returns a string representing the table (stringtable)
+      (uses a string as buffer, ideal for smaller tables)
+   table.save( table, true or 1 )
+      on success: returns a string representing the table (stringtable)
+      (uses io.tmpfile() as buffer, ideal for bigger tables)
+   table.save( table, "filename" )
+      on success: returns 1
+      (saves the table to file "filename")
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   table.load( filename or stringtable )
+   
+   Loads a table that has been saved via the table.save function
+   
+   on success: returns a previously saved table
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   
+   chillcode, http://lua-users.org/wiki/SaveTableToFile
+   Licensed under the same terms as Lua itself.
+]]--
+
+   -- declare local variables
+   --// exportstring( string )
+   --// returns a "Lua" portable version of the string
+   local function exportstring( s )
+      s = string.format( "%q",s )
+      -- to replace
+      s = string.gsub( s,"\\\n","\\n" )
+      s = string.gsub( s,"\r","\\r" )
+      s = string.gsub( s,string.char(26),"\"..string.char(26)..\"" )
+      return s
+   end
+--// The Save Function
+function save(  tbl,filename )
+   local charS,charE = "   ","\n"
+   local file,err
+   -- create a pseudo file that writes to a string and return the string
+   if not filename then
+      file =  { write = function( self,newstr ) self.str = self.str..newstr end, str = "" }
+      charS,charE = "",""
+   -- write table to tmpfile
+   elseif filename == true or filename == 1 then
+      charS,charE,file = "","",io.tmpfile()
+   -- write table to file
+   -- use io.open here rather than io.output, since in windows when clicking on a file opened with io.output will create an error
+   else
+      file,err = io.open( filename, "w" )
+      if err then return _,err end
+   end
+   -- initiate variables for save procedure
+   local tables,lookup = { tbl },{ [tbl] = 1 }
+   file:write( "return {"..charE )
+   for idx,t in ipairs( tables ) do
+      if filename and filename ~= true and filename ~= 1 then
+         file:write( "-- Table: {"..idx.."}"..charE )
+      end
+      file:write( "{"..charE )
+      local thandled = {}
+      for i,v in ipairs( t ) do
+         thandled[i] = true
+         -- escape functions and userdata
+         if type( v ) ~= "userdata" then
+            -- only handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables, v )
+                  lookup[v] = #tables
+               end
+               file:write( charS.."{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( charS.."loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write(  charS..value..","..charE )
+            end
+         end
+      end
+      for i,v in pairs( t ) do
+         -- escape functions and userdata
+         if (not thandled[i]) and type( v ) ~= "userdata" then
+            -- handle index
+            if type( i ) == "table" then
+               if not lookup[i] then
+                  table.insert( tables,i )
+                  lookup[i] = #tables
+               end
+               file:write( charS.."[{"..lookup[i].."}]=" )
+            else
+               local index = ( type( i ) == "string" and "["..exportstring( i ).."]" ) or string.format( "[%d]",i )
+               file:write( charS..index.."=" )
+            end
+            -- handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables,v )
+                  lookup[v] = #tables
+               end
+               file:write( "{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( "loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write( value..","..charE )
+            end
+         end
+      end
+      file:write( "},"..charE )
+   end
+   file:write( "}" )
+   -- Return Values
+   -- return stringtable from string
+   if not filename then
+      -- set marker for stringtable
+      return file.str.."--|"
+   -- return stringttable from file
+   elseif filename == true or filename == 1 then
+      file:seek ( "set" )
+      -- no need to close file, it gets closed and removed automatically
+      -- set marker for stringtable
+      return file:read( "*a" ).."--|"
+   -- close file and return 1
+   else
+      file:close()
+      return 1
+   end
+end
+
+--// The Load Function
+function load( sfile )
+   local tables,err
+   -- catch marker for stringtable
+   if string.sub( sfile,-3,-1 ) == "--|" then
+      tables,err = loadstring( sfile )
+   else
+      tables,err = loadfile( sfile )
+   end
+   if err then return _,err
+   end
+   tables = tables()
+   for idx = 1,#tables do
+      local tolinkv,tolinki = {},{}
+      for i,v in pairs( tables[idx] ) do
+         if type( v ) == "table" and tables[v[1]] then
+            table.insert( tolinkv,{ i,tables[v[1]] } )
+         end
+         if type( i ) == "table" and tables[i[1]] then
+            table.insert( tolinki,{ i,tables[i[1]] } )
+         end
+      end
+      -- link values, first due to possible changes of indices
+      for _,v in ipairs( tolinkv ) do
+         tables[idx][v[1]] = v[2]
+      end
+      -- link indices
+      for _,v in ipairs( tolinki ) do
+         tables[idx][v[2]],tables[idx][v[1]] =  tables[idx][v[1]],nil
+      end
+   end
+   return tables[1]
+end
+
+------------------------------------------------------ End Table Load Save
+
+-- import overloads fh functions into table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			table[strIndex] = anyValue
+		end
+	end
+end -- function import
+
+return fh
+
+end -- local function tablex_v1
+
+--[[
+@Title:			+fh+encoder_v2
+@Author:			Mike Tate
+@LastUpdated:	29 Oct 2013
+@Version:			2.2
+@Description:	Text encoder module for HTML XHTML XML URI UTF8 ISO CP1252 character codings.
+@V2.0:				StrUTF8_Encode() replaced by StrUTF_CP1252() for entire UTF-8 range, plus new StrCP1252_ISO().
+@V1.0:				Initial version.
+]]
+
+local function encoder_v2(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh) 													-- All public names are added to local fh table
+
+function ReportVersion()
+	local strMessage = "This is +fh+encoder_v2"
+	print(strMessage)
+	return strMessage
+end
+
+local br_Tag = "<br />"										-- Markup language break tag default
+local br_Lua = "<br ?/?>"										-- Lua pattern for break tag recognition
+
+local tblCodePage = {}											-- Code Page to XML/XHTML/HTML/URI/UTF8 encodings: http://en.wikipedia.org/wiki/Windows-1252 & 1250 & etc
+
+-- Control characters "\000" to "\031" for URI & Markup "[%c]" encodings are disallowed except for "\t" to "\r"
+
+	tblCodePage["\000"] = ""	-- NUL
+	tblCodePage["\001"] = ""	-- SOH
+	tblCodePage["\002"] = ""	-- STX
+	tblCodePage["\003"] = ""	-- ETX
+	tblCodePage["\004"] = ""	-- EOT
+	tblCodePage["\005"] = ""	-- ENQ
+	tblCodePage["\006"] = ""	-- ACK
+	tblCodePage["\a"] = ""		-- BEL
+	tblCodePage["\b"] = ""		-- BS
+	tblCodePage["\t"] = "+"	-- HT	space  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["\n"] = "%0A"	-- LF	br_Tag in Markup
+	tblCodePage["\v"] = "%0A"	-- VT	br_Tag in Markup
+	tblCodePage["\f"] = "%0A"	-- FF	br_Tag in Markup
+	tblCodePage["\r"] = "%0D"	-- CR	br_Tag in Markup
+	tblCodePage["\014"] = ""	-- SO
+	tblCodePage["\015"] = ""	-- SI
+	tblCodePage["\016"] = ""	-- DLE
+	tblCodePage["\017"] = ""	-- DC1
+	tblCodePage["\018"] = ""	-- DC2
+	tblCodePage["\019"] = ""	-- DC3
+	tblCodePage["\020"] = ""	-- DC4
+	tblCodePage["\021"] = ""	-- NAK
+	tblCodePage["\022"] = ""	-- SYN
+	tblCodePage["\023"] = ""	-- ETB
+	tblCodePage["\024"] = ""	-- CAN
+	tblCodePage["\025"] = ""	-- EM
+	tblCodePage["\026"] = ""	-- SUB
+	tblCodePage["\027"] = ""	-- ESC
+	tblCodePage["\028"] = ""	-- FS
+	tblCodePage["\029"] = ""	-- GS
+	tblCodePage["\030"] = ""	-- RS
+	tblCodePage["\031"] = ""	-- US
+
+-- ASCII characters "\032" to "\127" for URI "[%s%p]" encodings: http://en.wikipedia.org/wiki/URL and http://en.wikipedia.org/wiki/Percent-encoding
+
+	tblCodePage[" "] = "+"		-- or "%20"	Space
+	tblCodePage["!"] = "%21"	-- Reserved character
+	tblCodePage['"'] = "%22"								--	"&quot;" in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["#"] = "%23"	-- Reserved character
+	tblCodePage["$"] = "%24"	-- Reserved character
+	tblCodePage["%"] = "%25"	-- Must be encoded
+	tblCodePage["&"] = "%26"	-- Reserved character	-- "&amp;"  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["'"] = "%27"	-- Reserved character	-- "&apos;" in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["("] = "%28"	-- Reserved character
+	tblCodePage[")"] = "%29"	-- Reserved character
+	tblCodePage["*"] = "%2A"	-- Reserved character
+	tblCodePage["+"] = "%2B"	-- Reserved character
+	tblCodePage[","] = "%2C"	-- Reserved character
+--	tblCodePage["-"] = "%2D"	-- Unreserved character not encoded
+--	tblCodePage["."] = "%2E"	-- Unreserved character not encoded
+	tblCodePage["/"] = "%2F"	-- Reserved character
+--	Digits 0 to 9				-- Unreserved characters not encoded
+	tblCodePage[":"] = "%3A"	-- Reserved character
+	tblCodePage[";"] = "%3B"	-- Reserved character
+	tblCodePage["<"] = "%3C"								-- "&lt;"  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["="] = "%3D"	-- Reserved character
+	tblCodePage[">"] = "%3E"								-- "&gt;"  in Markup	see setURIEncodings() and setMarkupEncodings() below
+	tblCodePage["?"] = "%3F"	-- Reserved character
+	tblCodePage["@"] = "%40"	-- Reserved character
+--	Letters A to Z				-- Unreserved characters not encoded
+	tblCodePage["["] = "%5B"	-- Reserved character
+	tblCodePage["\\"]= "%5C"
+	tblCodePage["]"] = "%5D"	-- Reserved character
+	tblCodePage["^"] = "%5E"
+--	tblCodePage["_"] = "%5F"	-- Unreserved character not encoded
+	tblCodePage["`"] = "%60"
+--	Letters a to z				-- Unreserved characters not encoded
+	tblCodePage["{"] = "%7B"
+	tblCodePage["|"] = "%7C"
+	tblCodePage["}"] = "%7D"
+--	tblCodePage["~"] = "%7E"	-- Unreserved character not encoded
+	tblCodePage["\127"] = ""	-- DEL
+
+-- Code Page 1252 Unicode characters "\128" to "\255" for UTF-8 scheme "[Ä-ˇ]" encodings: http://en.wikipedia.org/wiki/UTF-8
+
+	tblCodePage["Ä"] = string.char(0xE2,0x82,0xAC)	-- "&euro;"
+	tblCodePage["\129"] = ""  -- Undefined
+	tblCodePage["Ç"] = string.char(0xE2,0x80,0x9A)
+	tblCodePage["É"] = string.char(0xC6,0x92)
+	tblCodePage["Ñ"] = string.char(0xE2,0x80,0x9E)
+	tblCodePage["Ö"] = string.char(0xE2,0x80,0xA6)
+	tblCodePage["Ü"] = string.char(0xE2,0x80,0xA0)
+	tblCodePage["á"] = string.char(0xE2,0x80,0xA1)
+	tblCodePage["à"] = string.char(0xCB,0x86)
+	tblCodePage["â"] = string.char(0xE2,0x80,0xB0)
+	tblCodePage["ä"] = string.char(0xC5,0xA0)
+	tblCodePage["ã"] = string.char(0xE2,0x80,0xB9)
+	tblCodePage["å"] = string.char(0xC5,0x92)
+	tblCodePage["\141"] = ""  -- Undefined
+	tblCodePage["é"] = string.char(0xC5,0xBD)
+	tblCodePage["\143"] = ""  -- Undefined
+	tblCodePage["\144"] = ""  -- Undefined
+	tblCodePage["ë"] = string.char(0xE2,0x80,0x98)
+	tblCodePage["í"] = string.char(0xE2,0x80,0x99)
+	tblCodePage["ì"] = string.char(0xE2,0x80,0x9C)
+	tblCodePage["î"] = string.char(0xE2,0x80,0x9D)
+	tblCodePage["ï"] = string.char(0xE2,0x80,0xA2)
+	tblCodePage["ñ"] = string.char(0xE2,0x80,0x93)
+	tblCodePage["ó"] = string.char(0xE2,0x80,0x94)
+	tblCodePage["\152"] = string.char(0xCB,0x9C)	-- Small Tilde
+	tblCodePage["ô"] = string.char(0xE2,0x84,0xA2)
+	tblCodePage["ö"] = string.char(0xC5,0xA1)
+	tblCodePage["õ"] = string.char(0xE2,0x80,0xBA)
+	tblCodePage["ú"] = string.char(0xC5,0x93)
+	tblCodePage["\157"] = ""  -- Undefined
+	tblCodePage["û"] = string.char(0xC5,0xBE)
+	tblCodePage["ü"] = string.char(0xC5,0xB8)
+	tblCodePage["\160"] = string.char(0xC2,0xA0)	-- "&nbsp;"	No Break Space
+	tblCodePage["°"] = string.char(0xC2,0xA1)		-- "&iexcl;"
+	tblCodePage["¢"] = string.char(0xC2,0xA2)		-- "&cent;"
+	tblCodePage["£"] = string.char(0xC2,0xA3)		-- "&pound;"
+	tblCodePage["§"] = string.char(0xC2,0xA4)		-- "&curren;"
+	tblCodePage["•"] = string.char(0xC2,0xA5)		-- "&yen;"
+	tblCodePage["¶"] = string.char(0xC2,0xA6)
+	tblCodePage["ß"] = string.char(0xC2,0xA7)
+	tblCodePage["®"] = string.char(0xC2,0xA8)
+	tblCodePage["©"] = string.char(0xC2,0xA9)
+	tblCodePage["™"] = string.char(0xC2,0xAA)
+	tblCodePage["´"] = string.char(0xC2,0xAB)
+	tblCodePage["¨"] = string.char(0xC2,0xAC)
+	tblCodePage["≠"] = string.char(0xC2,0xAD)		-- "&shy;"	Soft Hyphen
+	tblCodePage["Æ"] = string.char(0xC2,0xAE)
+	tblCodePage["Ø"] = string.char(0xC2,0xAF)
+	tblCodePage["∞"] = string.char(0xC2,0xB0)
+	tblCodePage["±"] = string.char(0xC2,0xB1)
+	tblCodePage["≤"] = string.char(0xC2,0xB2)
+	tblCodePage["≥"] = string.char(0xC2,0xB3)
+	tblCodePage["¥"] = string.char(0xC2,0xB4)
+	tblCodePage["µ"] = string.char(0xC2,0xB5)
+	tblCodePage["∂"] = string.char(0xC2,0xB6)
+	tblCodePage["∑"] = string.char(0xC2,0xB7)
+	tblCodePage["∏"] = string.char(0xC2,0xB8)
+	tblCodePage["π"] = string.char(0xC2,0xB9)
+	tblCodePage["∫"] = string.char(0xC2,0xBA)
+	tblCodePage["ª"] = string.char(0xC2,0xBB)
+	tblCodePage["º"] = string.char(0xC2,0xBC)
+	tblCodePage["Ω"] = string.char(0xC2,0xBD)
+	tblCodePage["æ"] = string.char(0xC2,0xBE)
+	tblCodePage["ø"] = string.char(0xC2,0xBF)
+	tblCodePage["¿"] = string.char(0xC3,0x80)
+	tblCodePage["¡"] = string.char(0xC3,0x81)
+	tblCodePage["¬"] = string.char(0xC3,0x82)
+	tblCodePage["√"] = string.char(0xC3,0x83)
+	tblCodePage["ƒ"] = string.char(0xC3,0x84)
+	tblCodePage["≈"] = string.char(0xC3,0x85)
+	tblCodePage["∆"] = string.char(0xC3,0x86)
+	tblCodePage["«"] = string.char(0xC3,0x87)
+	tblCodePage["»"] = string.char(0xC3,0x88)
+	tblCodePage["…"] = string.char(0xC3,0x89)
+	tblCodePage[" "] = string.char(0xC3,0x8A)
+	tblCodePage["À"] = string.char(0xC3,0x8B)
+	tblCodePage["Ã"] = string.char(0xC3,0x8C)
+	tblCodePage["Õ"] = string.char(0xC3,0x8D)
+	tblCodePage["Œ"] = string.char(0xC3,0x8E)
+	tblCodePage["œ"] = string.char(0xC3,0x8F)
+	tblCodePage["–"] = string.char(0xC3,0x90)
+	tblCodePage["—"] = string.char(0xC3,0x91)
+	tblCodePage["“"] = string.char(0xC3,0x92)
+	tblCodePage["”"] = string.char(0xC3,0x93)
+	tblCodePage["‘"] = string.char(0xC3,0x94)
+	tblCodePage["’"] = string.char(0xC3,0x95)
+	tblCodePage["÷"] = string.char(0xC3,0x96)
+	tblCodePage["◊"] = string.char(0xC3,0x97)
+	tblCodePage["ÿ"] = string.char(0xC3,0x98)
+	tblCodePage["Ÿ"] = string.char(0xC3,0x99)
+	tblCodePage["⁄"] = string.char(0xC3,0x9A)
+	tblCodePage["€"] = string.char(0xC3,0x9B)
+	tblCodePage["‹"] = string.char(0xC3,0x9C)
+	tblCodePage["›"] = string.char(0xC3,0x9D)
+	tblCodePage["ﬁ"] = string.char(0xC3,0x9E)
+	tblCodePage["ﬂ"] = string.char(0xC3,0x9F)
+	tblCodePage["‡"] = string.char(0xC3,0xA0)
+	tblCodePage["·"] = string.char(0xC3,0xA1)
+	tblCodePage["‚"] = string.char(0xC3,0xA2)
+	tblCodePage["„"] = string.char(0xC3,0xA3)
+	tblCodePage["‰"] = string.char(0xC3,0xA4)
+	tblCodePage["Â"] = string.char(0xC3,0xA5)
+	tblCodePage["Ê"] = string.char(0xC3,0xA6)
+	tblCodePage["Á"] = string.char(0xC3,0xA7)
+	tblCodePage["Ë"] = string.char(0xC3,0xA8)
+	tblCodePage["È"] = string.char(0xC3,0xA9)
+	tblCodePage["Í"] = string.char(0xC3,0xAA)
+	tblCodePage["Î"] = string.char(0xC3,0xAB)
+	tblCodePage["Ï"] = string.char(0xC3,0xAC)
+	tblCodePage["Ì"] = string.char(0xC3,0xAD)
+	tblCodePage["Ó"] = string.char(0xC3,0xAE)
+	tblCodePage["Ô"] = string.char(0xC3,0xAF)
+	tblCodePage[""] = string.char(0xC3,0xB0)
+	tblCodePage["Ò"] = string.char(0xC3,0xB1)
+	tblCodePage["Ú"] = string.char(0xC3,0xB2)
+	tblCodePage["Û"] = string.char(0xC3,0xB3)
+	tblCodePage["Ù"] = string.char(0xC3,0xB4)
+	tblCodePage["ı"] = string.char(0xC3,0xB5)
+	tblCodePage["ˆ"] = string.char(0xC3,0xB6)
+	tblCodePage["˜"] = string.char(0xC3,0xB7)
+	tblCodePage["¯"] = string.char(0xC3,0xB8)
+	tblCodePage["˘"] = string.char(0xC3,0xB9)
+	tblCodePage["˙"] = string.char(0xC3,0xBA)
+	tblCodePage["˚"] = string.char(0xC3,0xBB)
+	tblCodePage["¸"] = string.char(0xC3,0xBC)
+	tblCodePage["˝"] = string.char(0xC3,0xBD)
+	tblCodePage["˛"] = string.char(0xC3,0xBE)
+	tblCodePage["ˇ"] = string.char(0xC3,0xBF)
+
+-- Code Page 1250 Unicode characters "\128" to "\255" for UTF-8 scheme "[Ä-ˇ]" encodings: http://en.wikipedia.org/wiki/UTF-8
+
+	tblCodePage["1250"] = {}
+	tblCodePage["1250"]["\131"] = ""  -- Undefined
+	tblCodePage["1250"]["\136"] = ""  -- Undefined
+	tblCodePage["1250"]["å"] = string.char(0xC5,0x9A)
+	tblCodePage["1250"]["ç"] = string.char(0xC5,0xA4)
+	tblCodePage["1250"]["é"] = string.char(0xC5,0xBD)
+	tblCodePage["1250"]["è"] = string.char(0xC5,0xB9)
+	tblCodePage["1250"]["\152"] = ""  -- Undefined
+	tblCodePage["1250"]["ú"] = string.char(0xC5,0x9B)
+	tblCodePage["1250"]["ù"] = string.char(0xC5,0xA5)
+	tblCodePage["1250"]["û"] = string.char(0xC5,0xBE)
+	tblCodePage["1250"]["ü"] = string.char(0xC5,0xBA)
+	tblCodePage["1250"]["°"] = string.char(0xCB,0x87)
+	tblCodePage["1250"]["¢"] = string.char(0xCB,0x98)
+	tblCodePage["1250"]["£"] = string.char(0xC5,0x81)
+	tblCodePage["1250"]["•"] = string.char(0xC4,0x84)
+	tblCodePage["1250"]["™"] = string.char(0xC5,0x9E)
+	tblCodePage["1250"]["Ø"] = string.char(0xC5,0xBB)
+	tblCodePage["1250"]["≤"] = string.char(0xCB,0x9B)
+	tblCodePage["1250"]["≥"] = string.char(0xC5,0x82)
+	tblCodePage["1250"]["π"] = string.char(0xC4,0x85)
+	tblCodePage["1250"]["∫"] = string.char(0xC5,0x9F)
+	tblCodePage["1250"]["º"] = string.char(0xC5,0x7D)
+	tblCodePage["1250"]["Ω"] = string.char(0xCB,0x9D)
+	tblCodePage["1250"]["æ"] = string.char(0xC5,0x7E)
+	tblCodePage["1250"]["ø"] = string.char(0xC5,0xBC)
+-- needs more 1250 codes hereon...
+	tblCodePage["1250"]["∆"] = string.char(0xC4,0x86)
+
+	tblCodePage["1250"]["»"] = string.char(0xC4,0x8C)
+
+	tblCodePage["1250"]["Ê"] = string.char(0xC4,0x87)
+
+	tblCodePage["1250"]["Ë"] = string.char(0xC4,0x8D)
+
+
+-- Set XML/XHTML/HTML "[%c\"&'<>]" Markup encodings: http://en.wikipedia.org/wiki/XML and http://en.wikipedia.org/wiki/HTML
+local function setMarkupEncodings()
+	tblCodePage["\t"] = " "		-- HT	"\t" to "\r" are treated as white space in Markup Languages by default
+	tblCodePage["\n"] = br_Tag	-- LF	
+	tblCodePage["\v"] = br_Tag	-- VT	line break tag	"<br>" or "<br >" or "<br/>" or "<br />" is better
+	tblCodePage["\f"] = br_Tag	-- FF
+	tblCodePage["\r"] = br_Tag	-- CR
+	tblCodePage['"']  = "&quot;"
+	tblCodePage["&"]  = "&amp;"
+	tblCodePage["'"]  = "&apos;"
+	tblCodePage["<"]  = "&lt;"
+	tblCodePage[">"]  = "&gt;"
+end -- local function setMarkupEncodings
+
+-- Set URI/URL/URN "[%s%p]" encodings: http://en.wikipedia.org/wiki/URL and http://en.wikipedia.org/wiki/Percent-encoding
+local function setURIEncodings()
+	tblCodePage["\t"] = "+"		-- HT	space
+	tblCodePage["\n"] = "%0A" 	-- LF	newline
+	tblCodePage["\v"] = "%0A" 	-- VT	newline
+	tblCodePage["\f"] = "%0A" 	-- FF	newline
+	tblCodePage["\r"] = "%0D" 	-- CR	return
+	tblCodePage['"']  = "%22"
+	tblCodePage["&"]  = "%26"
+	tblCodePage["'"]  = "%27"
+	tblCodePage["<"]  = "%3C"
+	tblCodePage[">"]  = "%3E"
+end -- local function setURIEncodings
+
+-- Encode characters according to gsub pattern & lookup table --
+local function strEncode(strText,strPattern,tblPattern)
+	strText = (strText or ""):gsub(strPattern,tblPattern)
+	return strText
+end -- local function strEncode
+
+-- Encode CP characters into UTF8 codes --
+function StrCP_UTF(strText)
+	strText = strEncode(strText,"[\127-ˇ]",tblCodePage)
+	return strText
+end -- function StrCP_UTF
+
+function StrCP1252_UTF(strText)
+	return StrCP_UTF(strText)
+end -- function StrCP1252_UTF
+
+-- Encode CP characters into XML/XHTML/HTML/UTF8 codes --
+function StrCP_XML(strText)
+	setMarkupEncodings()
+	strText = (strText or ""):gsub(br_Lua,"\n")		-- Convert <br> & <br > & <br/> & <br /> to \n that becomes br_Tag
+	strText = strEncode(strText,"[%c\"&'<>\127-ˇ]",tblCodePage)
+	return strText
+end -- function StrCP_XML
+
+function StrCP1252_XML(strText)
+	return StrCP_XML(strText)
+end -- function StrCP1252_XML
+
+-- Encode Item Text characters into XML/HTML/UTF8 codes --
+function StrGetItem_XML(ptrItem,strTags)
+	return StrCP_XML(fhGetItemText(ptrItem,strTags))
+end -- function StrGetItem_XML
+
+-- Encode CP characters into URI codes --
+function StrCP_URI(strText)
+	setURIEncodings()
+	strText = (strText or ""):gsub(br_Lua,"\n")		-- Convert <br> & <br > & <br/> & <br /> to \n that becomes %0A
+	strText = strEncode(strText,"[%c%s%p\127-ˇ]",tblCodePage)
+	return strText
+end -- function StrCP_URI
+
+function StrCP1252_URI(strText)
+	return StrCP_URI(strText)
+end -- function StrCP1252_URI
+
+-- Encode UTF-8 bytes into single CP character -- Legacy from V1.0
+function StrUTF8_Encode(strText)
+	return StrUTF_CP(strText)
+end -- function StrUTF8_Encode
+
+-- Encode UTF-8 bytes into single CP character V2.0 upvalues --
+local strByteRange = "["..string.char(0xC0).."-"..string.char(0xFF).."]"
+local tblBytePoint = {0xC0,0xE0,0xF0,0xF8,0xFC}		-- Byte codes for 2-byte, 3-byte, 4-byte, 5-byte, 6-byte UTF-8
+local tblUTF8 = {}
+for strByte = string.byte("Ä"), string.byte("ˇ") do
+	local strChar = string.char(strByte)				-- Use CodePage to UTF-8 table to populate UTF-8 to CodePage table
+	local strCode = tblCodePage[strChar]
+	tblUTF8[strCode] = strChar
+end
+
+-- Encode UTF-8 bytes into single CP character --
+function StrUTF_CP(strText)
+	strText = strText or ""
+	if strText:match(strByteRange) then					-- If text contains characters that need translating then
+		local intChar = 0									-- Input character index
+		local strChar = ""									-- Current character
+		local strCode = ""									-- UTF-8 multi-byte code
+		local tblLine = {}									-- Translated output line
+		repeat
+			intChar = intChar + 1							-- Step through each character in text
+			strChar = strText:sub(intChar,intChar)
+			if strChar:match(strByteRange) then			-- Convert UTF-8 bytes into CP character
+				strCode = strChar							-- First UTF-8 byte code, whose top bits say how many bytes to append
+				for intByte, strByte in ipairs(tblBytePoint) do
+					if string.byte(strChar) >= strByte then
+						intChar = intChar + 1				-- Append next UTF-8 byte code character
+						strCode = strCode..strText:sub(intChar,intChar)
+					else
+						break
+					end 
+				end
+				strChar = tblUTF8[strCode] or "ø"		-- Translate UTF-8 code into CP character
+			end
+			table.insert(tblLine,strChar)				-- Accumulate output char by char
+		until intChar >= #strText
+		strText = table.concat(tblLine)
+	end
+	return strText
+end -- function StrUTF_CP
+
+function StrUTF_CP1252(strText)
+	return StrUTF_CP(strText)
+end -- function StrUTF_CP1252
+
+-- Encode CP characters into ISO-8859-1 codes --
+function StrCP_ISO(strText)
+	-- Set ISO-8859-1 "[\127-ü]" encodings: http://en.wikipedia.org/wiki/ISO/IEC_8859-1
+	local tblCodePage = { }
+	tblCodePage["\127"] = ""  -- DEL
+	tblCodePage["Ä"] = "EUR"	
+	tblCodePage["\129"] = ""  -- Undefined
+	tblCodePage["Ç"] = "∏"
+	tblCodePage["É"]  = "f"
+	tblCodePage["Ñ"] = "∏∏"
+	tblCodePage["Ö"] = "..."
+	tblCodePage["Ü"] = "+"
+	tblCodePage["á"] = "±"
+	tblCodePage["à"]  = "^"
+	tblCodePage["â"] = "%"
+	tblCodePage["ä"] = "S"
+	tblCodePage["ã"] = "<"
+	tblCodePage["å"] = "OE"
+	tblCodePage["\141"] = ""  -- Undefined
+	tblCodePage["é"] = "Z"
+	tblCodePage["\143"] = ""  -- Undefined
+	tblCodePage["\144"] = ""  -- Undefined
+	tblCodePage["ë"] = "'"
+	tblCodePage["í"] = "'"
+	tblCodePage["ì"] = '"'
+	tblCodePage["î"] = '"'
+	tblCodePage["ï"] = "∫"
+	tblCodePage["ñ"] = "-"
+	tblCodePage["ó"] = "-"
+	tblCodePage["\152"] = "~" -- Small Tilde
+	tblCodePage["ô"] = "TM"
+	tblCodePage["ö"] = "s"
+	tblCodePage["õ"] = ">"
+	tblCodePage["ú"] = "oe"
+	tblCodePage["\157"] = ""  -- Undefined
+	tblCodePage["û"] = "z"
+	tblCodePage["ü"] = "Y"
+	strText = strEncode(strText,"[\127-ü]",tblCodePage)
+	return strText
+end -- local function StrCP_ISO
+
+function StrCP1252_ISO(strText)
+	return StrCP_ISO(strText)
+end -- local function StrCP1252_ISO
+
+-- Set markup language break tag --
+function SetBreakTag(br_New)
+	if not (br_New or ""):match(br_Lua) then			-- Ensure new break tag is "<br>" or "<br >" or "<br/>" or "<br />"
+		br_New = "<br />"
+	end
+	br_Tag = br_New
+end -- function SetBreakTag
+
+require "luacom"
+local function getRegKey(strKey)
+	local luaShell = luacom.CreateObject "WScript.Shell"
+	local strValue 
+	if pcall( function() strValue = luaShell:RegRead(strKey) end ) then
+		return strValue, false
+	else
+		return nil, true
+	end
+end -- local function getRegKey
+
+local strCodePage, isError = getRegKey("HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage\\ACP")
+if isError then
+	error("\nCode Page ACP Registry Key Not Found.\n")
+end
+
+if strCodePage == "1252" then
+	-- do nothing as this is default
+elseif tblCodePage[strCodePage] then
+	for strByte = string.byte("Ä"), string.byte("ˇ") do
+		local strChar = string.char(strByte)				-- Use CodePage to UTF-8 table to populate UTF-8 to CodePage table
+		tblCodePage[strChar] = tblCodePage[strCodePage][strChar] or tblCodePage[strChar]
+	end
+else
+	error("\nCode Page "..strCodePage.." is not supported\n")
+end
+
+return fh
+
+end -- local function encoder_v2
+
+--[[
+@Title:			+fh+general_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	A general functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function general_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "lfs"													-- To access LUA filing system
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+--	return pl.path.isfile(strFileName)
+---[=[
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFileExists
+
+-- Check if folder exists --
+function FlgFolderExists(strFolderName)
+--	return pl.path.isdir(strFolderName)
+---[=[
+	if lfs.attributes(strFolderName:gsub("\\$",""),"mode") == "directory" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFolderExists
+
+-- Check if folder writable --
+function FlgFolderWrite(strFolderName)
+	if FlgFolderExists(strFolderName) then
+		local fileHandle, strError = io.open(strFolderName.."\\xyz.xyz","w")
+		if fileHandle ~= nil then
+			fileHandle:close()
+			os.remove(strFolderName.."\\xyz.xyz")
+			return true
+		end
+	end
+	return false
+end -- function FlgFolderWrite
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if fileHandle == nil then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+	local fileHandle = OpenFile(strFileName,"r")
+	local strString = fileHandle:read("*all")
+	assert(fileHandle:close())
+	return strString
+end -- function StrLoadFromFile
+
+-- Return the Path, Filename, and extension as 3 values
+function SplitFilename(strFilename)
+	return strFilename:match("(.-)([^\\]-([^\\%.]+))$")
+end -- function SplitFilename
+
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+	if strDir:sub(-1) == "/" then
+		strDir = strDir:sub(1,-2)								-- Remove trailing "/"
+	end
+    
+	local function doYieldTree(strDir)
+--!		for strEntry in pl.path.dir(strDir) do
+		for strEntry in lfs.dir(strDir) do
+			if strEntry ~= "." and strEntry ~= ".." then
+				strEntry = strDir.."\\"..strEntry
+				local tblAttr, strError = lfs.attributes(strEntry)
+				if not tblAttr then tblAttr = { mode="attrfail", error=strError } end 
+				coroutine.yield(strEntry,tblAttr)
+				if tblAttr.mode == "directory" then
+					doYieldTree(strEntry)
+				end
+			end
+		end
+	end -- local function doYieldTree
+
+	return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+
+local function strErrorText(strError,strFileName,intRepeat)
+	return strError:gsub(strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")
+end -- local function strErrorText
+
+-- Delete file if it exists --
+function DeleteFile(strFileName,errFunction)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				if intRepeat > 1 and type(errFunction) == "function" then
+					errFunction(strErrorText(strError,strFileName,intRepeat))
+				end
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(strErrorText(strError,strFileName,intRepeat)) end
+		end
+	end
+end -- function DeleteFile
+
+-- Invoke FH Shell Execute API --
+function DoExecute(strExecutable,...)
+	local errFunction = fhMessageBox
+	if type(arg[#arg]) == 'function' then
+		errFunction = arg[#arg]
+		table.remove(arg)
+	end
+	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable,unpack(arg))
+	if not isOK then
+		errFunction(tostring(strErrorText).." ("..tostring(intErrorCode)..")")
+	end
+	return isOK
+end -- function DoExecute
+
+--[[
+@function:		BuildDataRef
+@description:	Get Full Data Reference for Pointer
+@parameters:		Item Pointer
+@returns:			Data Reference String, Record Id Integer, Record Type Tag String
+@requires:		None
+]]
+function BuildDataRef(ptrRef)
+
+	local strDataRef = ""										-- Data Reference with instance indices e.g. INDI.RESI[2].ADDR
+	local intRecId   = 0										-- Record Id for associated Record
+	local strRecTag  = ""										-- Record Tag of associated Record type i.e. INDI, FAM, NOTE, SOUR, etc
+
+	-- getDataRef() is called recursively per level of the Data Ref
+	-- ptrRef points to the upper Data Ref levels yet to be analysed
+	-- strRef compiles the lower Data Ref levels including instances
+
+	local function getDataRef(ptrRef,strRef)
+		local ptrTag = ptrRef:Clone()
+		local strTag = fhGetTag(ptrTag)						-- Current level Tag
+		ptrTag:MoveToParentItem(ptrTag)
+		if ptrTag:IsNotNull() then							-- Parent level exists
+			local intSib = 1
+			local ptrSib = ptrRef:Clone()					-- Pointer to siblings with same Tag
+			ptrSib:MovePrev("SAME_TAG")
+			while ptrSib:IsNotNull() do						-- Count previous siblings with same Tag
+				intSib = intSib + 1
+				ptrSib:MovePrev("SAME_TAG")
+			end
+			if intSib > 1 then 	strTag = strTag.."["..intSib.."]" end
+			getDataRef(ptrTag,"."..strTag..strRef)			-- Now analyse the parent level
+		else
+			strDataRef = strTag..strRef						-- Record level reached, so set return values
+			intRecId   = fhGetRecordId(ptrRef)
+			strRecTag  = strTag
+			if not fhIsValidDataRef(strDataRef) then print("BuildDataRef: "..strDataRef.." is Invalid") end
+		end
+	end -- local function getDataRef
+
+	if type(ptrRef) == "userdata" then getDataRef(ptrRef,"") end
+
+	return strDataRef, intRecId, strRecTag
+
+end -- function BuildDataRef
+
+--[[
+@function:		GetDataRefPtr
+@description:	Get Pointer for Full Data Reference
+@parameters:		Data Reference String, Record Id Integer, Record Type Tag String (optional)
+@returns:			Item Pointer which IsNull() if any parameters are invalid
+@requires:		None
+]]
+function GetDataRefPtr(strDataRef,intRecId,strRecTag)
+	strDataRef = strDataRef or ""
+	if not strRecTag then
+		strRecTag = strDataRef:gsub("^(%u+).*$","%1")	-- Extract Record Tag from Data Ref
+	end
+	local ptrRef = fhNewItemPtr()
+	ptrRef:MoveToRecordById(strRecTag,intRecId or 0)	-- Lookup the Record by Id
+	ptrRef:MoveTo(ptrRef,strDataRef)						-- Move to the Data Ref
+	return ptrRef
+end -- function GetDataRefPtr
+
+function TblDataRef(ptrRef)
+	local tblRef = {}
+	tblRef.DataRef, tblRef.RecId, tblRef.RecTag = BuildDataRef(ptrRef)
+	return tblRef
+end -- function TblDataRef
+
+function PtrDataRef(tblRef)
+	local tblRef = tblRef or {}								-- Ensure table and its fields exist
+	return GetDataRefPtr(tblRef.DataRef or "",tblRef.RecId or 0,tblRef.RecTag or "")
+end -- function PtrDataRef
+
+return fh
+
+end -- local function general_v1
+
+--[[
+@Module:			fh.iterate_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	An iterater functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function iterate_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+-- Iterator for all records of one chosen type --
+function Records(strType)
+	local ptrAll = fhNewItemPtr()							-- Pointer to all records in turn
+	local ptrRec = fhNewItemPtr()							-- Pointer to record returned to user
+	ptrAll:MoveToFirstRecord(strType)
+	return function ()
+		ptrRec:MoveTo(ptrAll)
+		ptrAll:MoveNext()
+		if ptrRec:IsNotNull() then return ptrRec end
+	end
+end -- function Records
+
+-- Iterator for all the record types --
+function RecordTypes()
+	local intNext = 0											-- Next record type number
+	local intLast = fhGetRecordTypeCount()					-- Last record type number
+	return function()
+		intNext = intNext + 1
+		if intNext <= intLast then
+			return fhGetRecordTypeTag(intNext)				-- Return record type tag
+		end
+	end
+end -- function RecordTypes
+
+-- Iterator for all items in all records of chosen types --
+function Items(...)
+	local intType = 1											-- Integer record type number
+	local tblType = {}											-- Table of record type tags
+	local ptrNext = fhNewItemPtr()							-- Pointer to next item in turn
+	local ptrItem = fhNewItemPtr()							-- Pointer to item returned to user
+
+	if #arg == 0 then
+		for intType = 1, fhGetRecordTypeCount() do		-- No parameters so use all record types
+			tblType[intType] = fhGetRecordTypeTag(intType)
+		end
+	else
+		tblType = arg											-- Got parameters so use them instead
+	end
+--	print(tblType[intType],intType)
+	ptrNext:MoveToFirstRecord(tblType[intType])			-- Get first record of first type
+
+	return function()
+		repeat
+			while ptrNext:IsNotNull() do						-- Loop through all items
+				ptrItem:MoveTo(ptrNext)
+				ptrNext:MoveNextSpecial()
+				if ptrItem:IsNotNull() then return ptrItem end
+			end
+			intType = intType + 1								-- Loop through each record type
+			if intType <= #tblType then
+				ptrNext:MoveToFirstRecord(tblType[intType])
+			end
+		until intType > #tblType
+	end
+end -- function Items
+
+-- Iterator for all facts of an individual --
+function Facts(ptrIndi)
+	local ptrItem = fhNewItemPtr()							-- Pointer to each item at level 1
+	local ptrFact = fhNewItemPtr()							-- Pointer to each fact returned to user
+	ptrItem:MoveToFirstChildItem(ptrIndi)
+	return function ()
+		while ptrItem:IsNotNull() do
+			ptrFact:MoveTo(ptrItem)
+			ptrItem:MoveNext()
+			if fhIsFact(ptrFact) then return ptrFact end
+		end
+	end
+end -- function Facts
+
+return fh
+
+end -- local function iterate_v1
+
+--[[
+@Module:			fh.progbar_v1
+@Author:			Mike Tate
+@LastUpdated:	26 Feb 2014
+@Version:			1.2
+@Description:	Progress Bar library module.
+@V1.0:				Initial version.
+]]
+
+local function progbar_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "iuplua"												-- To access GUI window builder
+
+local tblBars = {}												-- Table for optional external attributes
+local strBack = "255 255 255"								-- Background colour default is white
+local strBody = "0 0 0"										-- Body text colour default is black
+local strFont = nil												-- Font dialogue default is current font
+local strStop = "255 0 0"										-- Stop button colour default is red
+local intPosX = iup.CENTER									-- Show window default position is central
+local intPosY = iup.CENTER
+local intMax, intVal, intPercent, intStart, intDelta, intScale, strClock, isBarStop
+local lblText, barGauge, lblDelta, btnStop, dlgGauge
+
+local function doFocus()										-- Bring the Progress Bar window into Focus
+	dlgGauge.BringFront="YES"									-- If used too often, inhibits other windows scroll bars, etc
+end -- local function doFocus
+
+local function doUpdate()										-- Update the Progress Gauge and the Delta % with clock
+	barGauge.Value = intVal
+	lblDelta.Title = string.format("%4d %%      %s ",intPercent,strClock)
+end -- local function doUpdate
+
+local function doReset()										-- Reset all dialogue variables and Update display
+	intVal		= 0													-- Current value of Progress Bar
+	intPercent= 0.01											-- Percentage of progress
+	intStart	= os.time()										-- Start time of progress
+	intDelta	= 0													-- Delta time of progress
+	intScale	= math.ceil( intMax / 1000 )					-- Scale of percentage per second of progress (initial guess is corrected in Step function)
+	strClock	= "00 : 00 : 00"								-- Clock delta time display
+	isBarStop	= false											-- Stop button pressed signal
+	doUpdate()
+	doFocus()
+end -- local function doReset
+
+function Start(strTitle,intMaximum)							-- Create & start Progress Bar window
+	if not dlgGauge then
+		strTitle	= strTitle or ""							-- Dialogue and button title
+		intMax		= intMaximum or 100							-- Maximun range of Progress Bar, default is 100
+		local strSize = tostring( math.max( 100, string.len(" Stop "..strTitle) * 8 ) ).."x30"			-- Adjust Stop button size to Title
+		lblText	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Progress Message" }
+		barGauge	= iup.progressbar { RasterSize="400x30", Value=0, Max=intMax, Tip="Progress Bar" }
+		lblDelta	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Percentage and Elapsed Time" }
+		btnStop	= iup.button	{ Title=" Stop "..strTitle, RasterSize=strSize, FgColor=strStop, Tip="Stop Progress Button", action=function() isBarStop = true end }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
+		dlgGauge	= iup.dialog	{ Title=strTitle.." Progress ", Font=strFont, FgColor=strBody, Background=strBack, DialogFrame="YES",	-- Remove Windows minimize/maximize menu
+							iup.vbox{ Alignment="ACENTER", Gap="10", Margin="10x10",
+								lblText,
+								barGauge,
+								lblDelta,
+								btnStop,
+							},
+							move_cb	= function(self,x,y) tblBars.X = x tblBars.Y = y end,
+							close_cb	= btnStop.action,		-- Windows Close button = Stop button
+						}
+		if type(tblBars.GUI) == "table"
+		and type(tblBars.GUI.ShowDialogue) == "function" then
+			dlgGauge.move_cb = nil								-- Use GUI library to show & move window
+			tblBars.GUI.ShowDialogue("Bars",dlgGauge,btnStop,"showxy")
+		else
+			dlgGauge:showxy(intPosX,intPosY)				-- Show the Progress Bar window
+		end
+		doReset()													-- Reset the Progress Bar display
+	end
+end -- function Start
+
+function Message(strText)										-- Show the Progress Bar message
+	if dlgGauge then lblText.Title = strText end
+end -- function Message
+
+function Step(intStep)											-- Step the Progress Bar forward
+	if dlgGauge then
+		intVal = intVal + ( intStep or 1 )					-- Default step is 1
+		local intNew = math.ceil( intVal / intMax * 100 * intScale ) / intScale
+		if intPercent ~= intNew then							-- Update progress once per percent or per second, whichever is smaller
+			intPercent = math.max( 0.1, intNew )			-- Ensure percentage is greater than zero
+			if intVal > intMax then intVal = intMax intPercent = 100 end		-- Ensure values do not exceed maximum
+			intNew = os.difftime(os.time(),intStart)
+			if intDelta < intNew then							-- Update clock of elapsed time
+				intDelta = intNew
+				intScale = math.ceil( intDelta / intPercent )	-- Scale of seconds per percentage step
+				local intHour = math.floor( intDelta / 3600 )
+				local intMins = math.floor( intDelta / 60 - intHour * 60 )
+				local intSecs = intDelta - intMins * 60 - intHour * 3600
+				strClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+			end
+			doUpdate()											-- Update the Progress Bar display
+		end
+		iup.LoopStep()
+	end
+end -- function Step
+
+function Focus()												-- Bring the Progress Bar window to front
+	if dlgGauge then doFocus() end
+end -- function Focus
+
+function Reset()												-- Reset the Progress Bar display
+	if dlgGauge then doReset() end
+end -- function Reset
+
+function Stop()													-- Check if Stop button pressed
+	iup.LoopStep()
+	return isBarStop
+end -- function Stop
+
+function Close()												-- Close the Progress Bar window
+	isBarStop = false
+	if dlgGauge then dlgGauge:destroy() dlgGauge = nil end
+end -- function Close
+
+function Setup(tblSetup)										-- Setup optional table of external attributes
+	if tblSetup then
+		tblBars = tblSetup
+		strBack = tblBars.Back or strBack					-- Background colour
+		strBody = tblBars.Body or strBody					-- Body text colour
+		strFont = tblBars.Font or strFont					-- Font dialogue
+		strStop = tblBars.Stop or strStop					-- Stop button colour
+		intPosX = tblBars.X or intPosX						-- Window position
+		intPosY = tblBars.Y or intPosY
+	end
+end -- function Setup
+
+return fh
+
+end -- local function progbar_v1
+
+--[[
+@Title:			+fh+iup_gui_v2
+@Author:			Mike Tate
+@Version:			2.9
+@LastUpdated:	23 Mar 2014
+@Description:	Graphical User Interface Library Module
+@V2.0:				Second version with Plugin Data scope, new FontDialogue, RefreshDialogue, AssignAttributes, httpRequest handler, keep "dialog" mode.
+@V1.0:				Initial version.
+]]
+
+local function iup_gui_v2(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}																		-- Local environment table
+package.seeall(fh)																	-- Enable all globals
+module(...,package.seeall)														-- Create matching module name
+setfenv(1,fh)																		-- All public names are added to local fh table
+
+require "iuplua"																	-- To access GUI window builder
+require "iupluacontrols"															-- To access GUI window controls
+require "lfs"																		-- To access LUA filing system
+require "iupluaole"																	-- To access OLE subsystem
+require "luacom"																	-- To access COM subsystem
+
+local general = general_v1														-- To access FH general module
+local stringx = stringx_v2														-- To access FH stringx module but cannot import
+
+function ReportVersion()
+	local strMessage = "This is +fh+iup_gui_v2"
+	print(strMessage)
+	return strMessage
+end
+
+-- Shared Interface Attributes & Functions --
+
+Plugin		= fhGetContextInfo("CI_PLUGIN_NAME")								-- Plugin Name
+Version	= " "																		-- Plugin Version
+History	= Version																	-- Version History
+
+Red			= "255 0 0"																-- Color attributes (must exclude leading zeros & spaces to allow value comparisons)
+Maroon		= "128 0 0"
+Amber		= "250 160 0"
+Orange		= "255 165 0"
+Yellow		= "255 255 0"
+Olive		= "128 128 0"
+Lime		= "0 255 0"
+Green		= "0 128 0"
+Cyan		= "0 255 255"
+Teal		= "0 128 128"
+Blue		= "0 0 255"
+Navy		= "0 0 128"
+Magenta	= "255 0 255"
+Purple		= "128 0 128"
+Black		= "0 0 0"
+Gray		= "128 128 128"
+Silver		= "192 192 192"
+Smoke		= "240 240 240"
+White		= "255 255 255"
+Risk		= Red																		-- Risk colour for hazardous controls such as Close/Delete buttons
+Warn		= Magenta																	-- Warn colour for caution controls and warnings
+Safe		= Green																	-- Safe colour for active controls such as most buttons
+Info		= Black																	-- Info colour for text controls such as labels/tabs
+Head		= Black																	-- Head colour for headings
+Body		= Black																	-- Body colour for body text
+Back		= White																	-- Background colour for all windows
+
+Gap			= "8"																		-- Layout attributes Gap was "10"
+Border		= "8x8"																	-- 	was BigMargin="10x10"
+Margin		= "1x1"																	--	was MinMargin
+Balloon	= "NO"																		-- Tooltip balloon mode
+
+FontSet	=	0																		-- Legacy GUI font set assigned by FontAssignment but used globally
+FontHead	= ""
+FontBody	= ""
+
+local GUI = { }																		-- Sub-table for GUI Dialogue attributes to allow any "Name"
+
+--[[
+GUI.Name					table of dialogue attributes, where Name is Font, Help, Main, Memo, Bars, etc
+GUI.Name.CoordX			x co-ordinate	( Loaded & Saved by default )
+GUI.Name.CoordY			y co-ordinate	( Loaded & Saved by default )
+GUI.Name.Dialog			dialogue handle
+GUI.Name.Focus			focus button handle
+GUI.Name.Frame			dialogframe mode, "normal" = dialogframe="NO" else "YES", "showxy" = showxy(), "popup" or "keep" = popup(), default is "normal & showxy"
+GUI.Name.Height			height
+GUI.Name.Raster			rastersize		( Loaded & Saved by default )
+GUI.Name.Width			width
+GUI.Name.Back			ProgressBar background colour
+GUI.Name.Body			ProgressBar body text colour
+GUI.Name.Font			ProgressBar font style
+GUI.Name.Stop			ProgressBar Stop button colour
+GUI.Name.GUI				Module table usable by other modules e.g. progbar.Setup
+							Help dialogue Window attributes :-
+GUI.Help.GetHelp 		Parent dialogue GetHelp button
+GUI.Help.RootURL 		Wiki Help & Advice root URL
+GUI.Help.TblAttr		Table of button attributes
+GUI.Help[n]				Help dialogue nth button :-
+GUI.Help[n].Name		Name for title attribute
+GUI.Help[n].Tip 		Tooltip for tip attribute
+GUI.Help[n].URL 		Page URL to append to root URL 
+GUI.Help[n].Page		Page order for intTabPosn
+--]]
+
+-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+local tblScrn = stringx.splitnumbers(iup.GetGlobal("VIRTUALSCREEN"))	-- Used by CustomDialogue() and CheckWindowPosition() and ShowDialogue() below
+local intMaxW = tblScrn[3]
+local intMaxH = tblScrn[4]
+
+local function tblOfNames(...)													-- Get table of dialogue Names including "Font","Help","Main" by default
+	local tblNames = {"Font","Help","Main"}
+	for intName, strName in ipairs(arg) do
+		if type(strName) == "string"
+		and strName ~= "Font"
+		and strName ~= "Help"
+		and strName ~= "Main" then
+			table.insert(tblNames,strName)
+		end
+	end
+	return tblNames
+end -- local function tblOfNames
+
+local function tblNameFor(strName)												-- Get table of parameters for chosen dialogue Name
+	strName = tostring(strName)
+	if not GUI[strName] then														-- Need new table with default minimum & raster size, and X & Y co-ordinates
+		GUI[strName] = { }
+		local tblName = GUI[strName]
+		tblName.Raster = "x"
+		tblName.CoordX = iup.CENTER
+		tblName.CoordY = iup.CENTER
+	end
+	return GUI[strName]
+end -- local function tblNameFor
+
+local function intDimension(intMin,intVal,intMax)							-- Return a number bounded by intMin and intMax
+	if not intVal then return 0 end												-- Except if no value then return 0
+	intVal = tonumber(intVal) or (intMin+intMax)/2
+	return math.max(intMin,math.min(intVal,intMax))
+end -- local function intDimension
+
+function CustomDialogue(strName,strRas,intX,intY)							-- GUI custom window raster size, and X & Y co-ordinates
+	-- strRas  nil = old size, "x" or "0x0" = min size, "999x999" = new size
+	-- intX/Y  nil = central, "99" = co-ordinate position
+	local tblName = tblNameFor(strName)
+	local tblSize = {}
+	local intWide = 0
+	local intHigh = 0
+	strRas = strRas or tblName.Raster
+	if strRas then																	-- Ensure raster size is between minimum and screen size
+		tblSize = stringx.splitnumbers(strRas)
+		intWide = intDimension(intWide,tblSize[1],intMaxW)
+		intHigh = intDimension(intHigh,tblSize[2],intMaxH)
+		strRas = tostring(intWide.."x"..intHigh)
+	end
+	if intX then intX = intDimension(0,intX,intMaxW-intWide) end			-- Ensure X & Y co-ordinates position window on screen
+	if intY then intY = intDimension(0,intY,intMaxH-intHigh) end
+	tblName.Raster  = strRas	or "x"
+	tblName.CoordX  = tonumber(intX) or iup.CENTER
+	tblName.CoordY  = tonumber(intY) or iup.CENTER
+end -- function CustomDialogue
+
+function DefaultDialogue(...)													-- GUI default window minimum & raster size, and X & Y co-ordinates
+	for intName, strName in ipairs(tblOfNames(...)) do
+		CustomDialogue(strName)
+	end
+end -- function DefaultDialogue
+
+function DialogueAttributes(strName)											-- Provide named Dialogue Attributes
+	local tblName = tblNameFor(strName)											-- tblName.Dialog = dialog handle, so any other attributes could be retrieved
+	local tblSize = stringx.splitnumbers(tblName.Raster or "x")			-- Split Raster Size into width=tblSize[1] and height=tblSize[2]
+	tblName.Width  = tblSize[1]
+	tblName.Height = tblSize[2]
+	tblName.Back = Back																-- Following only needed for NewProgressBar
+	tblName.Body = Body
+	tblName.Font = FontBody
+	tblName.Stop = Risk
+	tblName.GUI  = fh																-- Module table
+	return tblName
+end -- function DialogueAttributes
+
+local strDefaultScope = "Project"												-- Default scope for Load/Save data is per Project/User/Machine as set by PluginDataScope()
+
+local tblLoadProj = {}
+local tblLoadUser = {}
+local tblLoadMach = {}
+
+local function doLoadData(strParam,strDefault,strScope)					-- Load sticky data for Plugin Data scope
+	strScope = tostring(strScope or strDefaultScope):lower()
+	local tblLoadData = tblLoadProj
+	if     strScope:match("user") then tblLoadData = tblLoadUser
+	elseif strScope:match("mach") then tblLoadData = tblLoadMach
+	end
+	return tblLoadData[strParam] or strDefault
+end -- local function doLoadData
+
+function LoadLocal(strParam,strDefault,strScope)							-- Load Local Parameter for this PC
+	return doLoadData(ComputerName.."-"..strParam,strDefault,strScope)
+end -- function LoadLocal
+
+function LoadGlobal(strParam,strDefault,strScope)							-- Load Global Parameter for all PC
+	return doLoadData(strParam,strDefault,strScope)
+end -- function LoadGlobal
+
+function LoadDialogue(...)														-- Load Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		tblName.Raster = tostring(LoadLocal(strName.."S",tblName.Raster))  -- Legacy of "S" becomes "R"
+		tblName.Raster = tostring(LoadLocal(strName.."R",tblName.Raster))
+		tblName.CoordX = tonumber(LoadLocal(strName.."X",tblName.CoordX))
+		tblName.CoordY = tonumber(LoadLocal(strName.."Y",tblName.CoordY))
+		CheckWindowPosition(tblName)
+	end
+end -- function LoadDialogue
+
+function LoadSettings(...)														-- Load Sticky Settings from File
+	for strFileName, tblLoadData in pairs ({ ProjectFile=tblLoadProj, PerUserFile=tblLoadUser, MachineFile=tblLoadMach }) do
+		strFileName = fh[strFileName]
+		if general.FlgFileExists(strFileName) then							-- Load Settings File in table lines with key & val fields
+			local tblField = {}
+			for strLine in io.lines(strFileName) do
+				if strLine == "return {"											-- Unless entire Sticky Data table was saved
+				and type(table.load) == "function" then
+					local tblLoad, strErr = table.load(strFileName)			-- Load Settings File table
+					for i,j in pairs (tblLoad) do
+						tblLoadData[i] = tblLoad[i]
+					end
+					break
+				end
+				tblField = stringx.split(strLine,"=")
+				tblLoadData[tblField[1]] = tblField[2]
+			end
+		end
+	end
+	Safe    = tostring(LoadGlobal("SafeColor",Safe))
+	Warn    = tostring(LoadGlobal("WarnColor",Warn))
+	Risk    = tostring(LoadGlobal("RiskColor",Risk))
+	Head    = tostring(LoadGlobal("HeadColor",Head))
+	Body    = tostring(LoadGlobal("BodyColor",Body))
+	FontHead= tostring(LoadGlobal("FontHead",FontHead))
+	FontBody= tostring(LoadGlobal("FontBody",FontBody))
+	FontSet = tonumber(LoadGlobal("Fonts",FontSet))							-- Legacy only
+	FontSet = tonumber(LoadGlobal("FontSet",FontSet))						-- Legacy only
+	History = tostring(LoadGlobal("History",History))
+	LoadDialogue(...)
+	if FontSet > 0 then FontAssignment(FontSet) end							-- Legacy only
+end -- function LoadSettings
+
+local tblSaveProj = {}
+local tblSaveUser = {}
+local tblSaveMach = {}
+
+local function doSaveData(strParam,anyValue,strScope)						-- Save sticky data for Plugin Data scope
+	strScope = tostring(strScope or strDefaultScope):lower()
+	local tblSaveData = tblSaveProj
+	if     strScope:match("user") then tblSaveData = tblSaveUser
+	elseif strScope:match("mach") then tblSaveData = tblSaveMach
+	end
+	tblSaveData[strParam] = anyValue
+end -- local function doSaveData
+
+function SaveLocal(strParam,anyValue,strScope)								-- Save Local Parameter for this PC
+	doSaveData(ComputerName.."-"..strParam,anyValue,strScope)
+end -- function SaveLocal
+
+function SaveGlobal(strParam,anyValue,strScope)								-- Save Global Parameter for all PC
+	doSaveData(strParam,anyValue,strScope)
+end -- function SaveGlobal
+
+function SaveDialogue(...)														-- Save Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		SaveLocal(strName.."R",tblName.Raster)
+		SaveLocal(strName.."X",tblName.CoordX)
+		SaveLocal(strName.."Y",tblName.CoordY)
+	end
+end -- function SaveDialogue
+
+function SaveSettings(...)														-- Save Sticky Settings to File
+	SaveDialogue(...)
+	SaveGlobal("SafeColor",Safe)
+	SaveGlobal("WarnColor",Warn)
+	SaveGlobal("RiskColor",Risk)
+	SaveGlobal("HeadColor",Head)
+	SaveGlobal("BodyColor",Body)
+	SaveGlobal("FontHead",FontHead)
+	SaveGlobal("FontBody",FontBody)
+	SaveGlobal("History",History)
+	for strFileName, tblSaveData in pairs ({ ProjectFile=tblSaveProj, PerUserFile=tblSaveUser, MachineFile=tblSaveMach }) do
+		for i,j in pairs (tblSaveData) do										-- Check if table has any entries
+			strFileName = fh[strFileName]
+			if type(table.save) == "function" then								-- Save entire Settings File table per Project/User/Machine
+				table.save(tblSaveData,strFileName)
+			else
+				local fileHandle = general.OpenFile(strFileName,"w")		-- Else save Settings File lines with key & val fields
+				for strKey,strVal in pairs(tblSaveData) do
+					fileHandle:write(strKey.."="..strVal.."\n")
+				end
+				fileHandle:close()
+			end
+			break
+		end
+	end
+end -- function SaveSettings
+
+function CheckWindowPosition(tblName)											-- Ensure dialogue window coordinates are on Screen
+	if tonumber(tblName.CoordX) == nil
+	or tonumber(tblName.CoordX) > intMaxW then
+		tblName.CoordX = iup.CENTER
+	end
+	if tonumber(tblName.CoordY) == nil
+	or tonumber(tblName.CoordY) > intMaxH then
+		tblName.CoordY = iup.CENTER
+	end
+end -- function CheckWindowPosition
+
+function IsNormalWindow(iupDialog)												-- Check dialogue window is not Maximised or Minimised
+	-- tblPosn[1] = origin x, tblPosn[2] = origin y, tblPosn[3] = width, tblPosn[4] = height
+	local tblPosn = stringx.splitnumbers(iupDialog.screenposition)
+	local intPosX = tblPosn[1]
+	local intPosY = tblPosn[2]
+	if intPosX < 0 and intPosY < 0 then											-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
+		return false																	-- then is Maximised or Minimised
+	end
+	return true
+end -- function IsNormalWindow
+
+function ShowDialogue(strName,iupDialog,btnFocus,strFrame)				-- Set standard frame attributes and display dialogue window
+	local tblName = tblNameFor(strName)
+	iupDialog = iupDialog or tblName.Dialog									-- Retrieve previous parameters if needed
+	btnFocus  = btnFocus  or tblName.Focus
+	strFrame  = strFrame  or tblName.Frame
+	strFrame  = strFrame  or "show norm"										-- Default frame mode is dialog:showxy(X,Y) with DialogFrame="NO" ("normal" to vary size, otherwise fixed size)
+	strFrame  = strFrame:lower()													-- Other modes are "show", "popup" & "keep" with DialogFrame="YES", or with "normal" for DialogFrame="NO" ("show" for active windows, "popup"/"keep" for modal windows)
+	if strFrame:gsub("%s-%a-map%a*[%s%p]*","") == "" then					-- May be prefixed with "map" mode to just map dialogue initially, also may be suffixed with "dialog" to inhibit iup.MainLoop() to allow progress messages
+		strFrame = "map show norm"												-- If only "map" mode then default to "map show norm"
+	end
+	if type(iupDialog) == "userdata" then
+		tblName.Dialog = iupDialog
+		tblName.Focus  = btnFocus													-- Preserve parameters
+		tblName.Frame  = strFrame
+		iupDialog.Background = Back												-- Background colour
+		iupDialog.Shrink = "YES"													-- Sometimes needed to shrink controls to raster size
+		if type(btnFocus) == "userdata" then									-- Set button as focus for Esc and Enter keys
+			iupDialog.StartFocus   = iupDialog.StartFocus   or btnFocus
+			iupDialog.DefaultEsc   = iupDialog.DefaultEsc   or btnFocus
+			iupDialog.DefaultEnter = iupDialog.DefaultEnter or btnFocus
+		end
+		iupDialog.MaxSize = intMaxW.."x"..intMaxH								-- Maximum size is screen size
+		iupDialog.MinSize = "x"													-- Minimum size (default "x" becomes nil)
+		iupDialog.RasterSize = tblName.Raster or "x"							-- Raster size  (default "x" becomes nil)
+		if strFrame:match("norm") then											-- DialogFrame mode is "NO" by default for variable size window
+			if strFrame:match("pop") or strFrame:match("keep") then
+				iupDialog.MinBox = "NO"											-- For "popup" and "keep" hide Minimize and Maximize icons
+				iupDialog.MaxBox = "NO"
+			else 
+				strFrame = strFrame.." show"										-- If not "popup" nor "keep" then use "showxy" mode
+			end
+		else
+			iupDialog.DialogFrame = "YES"										-- Define DialogFrame mode for fixed size window
+		end
+		iupDialog.close_cb  = iupDialog.close_cb  or function() return iup.CLOSE end	-- Define default window X close, move, and resize actions
+		iupDialog.move_cb   = iupDialog.move_cb   or function(self,x,y) if IsNormalWindow(self) then tblName.CoordX=x tblName.CoordY=y end end
+		iupDialog.resize_cb = iupDialog.resize_cb or function(self)     if IsNormalWindow(self) then tblName.Raster=self.RasterSize end end
+		if strFrame:match("map") then											-- Only dialogue mapping is required
+			iupDialog:map()
+--!			tblName.Frame = strFrame:gsub("map","")							-- Remove "map" from frame mode ready for subsequent call
+			tblName.Frame = strFrame:gsub("%s-%a-map%a*[%s%p]*","")		-- Remove "map" from frame mode ready for subsequent call
+			return
+		end
+		RefreshDialogue(strName)													-- Refresh to set Natural Size as Minimum Size
+		if iup.MainLoopLevel() == 0												-- Called from outside Main GUI, so must use showxy() and not popup()
+		or strFrame:match("dialog")
+		or strFrame:match("sho") then											-- Use showxy() to dispay dialogue window for "showxy" or "dialog" mode
+			iupDialog:showxy(tblName.CoordX,tblName.CoordY)
+			if History ~= Version then											-- Initially show new Version History Help
+				if type(HelpDialogue) == "function" then
+					History = Version
+					HelpDialogue(Version)											-- But only after Help dialogue exists
+					iupDialog.BringFront = "YES"
+				end
+			end
+			if not ( strName == "Help" or strFrame:match("dialog") )		-- Inhibit MainLoop if Help dialogue or "dialog" mode
+			and iup.MainLoopLevel() == 0 then iup.MainLoop() end
+		else
+			iupDialog:popup(tblName.CoordX,tblName.CoordY)					-- Use popup() to display dialogue window for "popup" or "keep" modes
+		end
+		if not strFrame:match("dialog") and strFrame:match("pop") then
+			tblName.Dialog = nil													-- When popup closed, clear key parameters, but not for "keep" mode
+			tblName.Raster = nil
+			tblName.CoordX = nil -- iup.CENTER
+			tblName.CoordY = nil -- iup.CENTER
+		end
+	end
+end -- function ShowDialogue
+
+function DestroyDialogue(strName)												-- Destroy existing dialogue
+	local tblName = tblNameFor(strName)
+	if tblName then
+		local iupDialog = tblName.Dialog
+		if type(iupDialog) == "userdata" then
+			iupDialog:destroy()
+		end
+	end
+end -- function DestroyDialogue
+
+local function strDialogueArgs(strArgA,strArgB,comp)						-- Compare two argument pairs and return matching pair
+	local tblArgA = stringx.splitnumbers(strArgA)
+	local tblArgB = stringx.splitnumbers(strArgB)
+	local strArgX = tostring(comp(tblArgA[1] or 100,tblArgB[1] or 100))
+	local strArgY = tostring(comp(tblArgA[2] or 100,tblArgB[2] or 100))
+	return strArgX.."x"..strArgY
+end -- local function strDialogueArgs
+
+function RefreshDialogue(strName)												-- Refresh dialogue window size after Font change, etc
+	local tblName = tblNameFor(strName)
+	local iupDialog = tblName.Dialog											-- Retrieve the dialogue handle
+	if type(iupDialog) == "userdata" then
+		iupDialog.Size = iup.NULL
+		iup.Refresh(iupDialog)														-- Refresh window to Natural Size and set as Minimum Size
+		if not iupDialog.RasterSize then
+			iupDialog:map()
+			iup.Refresh(iupDialog)
+		end
+		iupDialog.MinSize = strDialogueArgs(iupDialog.MaxSize,iupDialog.RasterSize,math.min)	-- Set Minimum Size to smaller of Maximm Size or Natural Size
+		iupDialog.RasterSize = strDialogueArgs(tblName.Raster,iupDialog.RasterSize,math.max)	-- Set Current Size to larger of Current Size or Natural Size
+		iup.Refresh(iupDialog)
+		tblName.Raster = iupDialog.RasterSize
+		if iupDialog.Visible == "YES" then										-- Ensure visible dialogue origin is on screen
+			tblName.CoordX = math.max(tblName.CoordX,10)
+			tblName.CoordY = math.max(tblName.CoordY,10)						-- Set both coordinates to larger of current value or 10 pixels
+			if iupDialog.Modal == "NO" then
+				iupDialog.ZOrder = "BOTTOM"										-- Ensure dialogue is subservient to any popup
+				iupDialog:showxy(tblName.CoordX,tblName.CoordY)				-- Use showxy() to reposition main window
+			else
+				iupDialog:popup(tblName.CoordX,tblName.CoordY)				-- Use popup() to reposition modal window
+			end
+		else
+			iupDialog.BringFront="YES"
+		end
+	end
+end -- function RefreshDialogue
+
+function AssignAttributes(tblControls)											-- Assign the attributes of all controls supplied
+	local anyFunction = nil
+	for iupName, tblAttr in pairs ( tblControls or {} ) do
+		if type(iupName) == "userdata" and type(tblAttr) == "table" then-- Loop through each iup control
+			for intAttr, anyName in ipairs ( tblControls[1] or {} ) do	-- Loop through each iup attribute
+				local strName = nil
+				local strAttr = nil
+				local strType = type(anyName)
+				if strType == "string" then										-- Attribute is different for each control in tblControls
+					strName = anyName
+					strAttr = tblAttr[intAttr]
+				elseif strType == "table" then									-- Attribute is same for all controls as per tblControls[1] 
+					strName = anyName[1]
+					strAttr = anyName[2]
+				elseif strType == "function" then
+					anyFunction = anyName
+					break
+				end
+				if type(strName) == "string" and ( type(strAttr) == "string" or type(strAttr) == "function" ) then
+					local anyRawGet = rawget(fh,strAttr)						-- Use rawget() to stop require("pl.strict") complaining
+					if type(anyRawGet) == "string" then
+						strAttr = anyRawGet											-- Use internal module attribute such as Head or FontBody
+					end
+					iupName[strName] = strAttr									-- Assign attribute to control
+				end
+			end
+		end
+	end
+	if anyFunction then anyFunction() end										-- Perform any control assignment function
+end -- function AssignAttributes
+
+-- Font Dialogue Attributes and Functions --
+
+FontBody = iup.GetGlobal("DEFAULTFONT")										-- Set default font for Body and Head text
+FontHead = FontBody:gsub(", B?o?l?d?",", Bold ")
+
+---[=[
+local intFontPlain  = 1															-- Font Face & Style values for legacy FontSet setting
+local intFontBold   = 2
+local intArialPlain = 3
+local intArialBold  = 4
+local intTahomaPlain= 5
+local intTahomaBold = 6
+local strFontFace = FontBody:gsub(",.*","")
+local tblFontSet = {}																-- Lookup table for FontHead and FontBody
+tblFontSet[intFontPlain]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..",      -16", }
+tblFontSet[intFontBold]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..", Bold -15", }
+tblFontSet[intArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
+tblFontSet[intArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
+tblFontSet[intTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
+tblFontSet[intTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
+
+function FontAssignment(intFontSet)												-- Assign Font Face & Style GUI values for legacy FontSet setting
+	if 	intFontSet then
+		intFontSet = math.max(intFontSet,1)
+		intFontSet = math.min(intFontSet,#tblFontSet)
+		FontHead = tblFontSet[intFontSet]["Head"]								-- Legacy Font for all GUI dialog header text
+		FontBody = tblFontSet[intFontSet]["Body"]								-- Legacy Font for all GUI dialog body text
+	end
+end -- function FontAssignment
+--]=]
+
+function FontDialogue(tblAttr,strName)											-- GUI Font Face & Style Dialogue
+	tblAttr = tblAttr or {}
+	strName = strName or "Main"
+	local isFontChosen = false
+	local btnFontHead = iup.button { Title="Choose Headings Font and default Colour" }
+	local btnFontBody = iup.button { Title="Choose Body text Font and default Colour" }
+	local btnCol_Safe = iup.button { Title=" Safe Colour " }
+	local btnCol_Warn = iup.button { Title=" Warning Colour " }
+	local btnCol_Risk = iup.button { Title=" Risky Colour " }
+	local btnDefault  = iup.button { Title=" Default Fonts " }
+	local btnMinimum  = iup.button { Title=" Minimum Size " }
+	local btnDestroy  = iup.button { Title=" Close Dialogue " }
+	local frmSetFonts = iup.frame  { Title=" Set Window Fonts & Colours ",
+								iup.vbox { Alignment="ACENTER", Margin=Margin, Homogeneous="YES",
+									btnFontHead,
+									btnFontBody,
+									iup.hbox { btnCol_Safe, btnCol_Warn, btnCol_Risk, Homogeneous="YES" },
+									iup.hbox { btnDefault , btnMinimum , btnDestroy , Homogeneous="YES" },
+								} -- iup.vbox end
+							} -- iup.frame end
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local dialogFont  = iup.dialog { Title=" Set Window Fonts & Colours ", Gap=Gap, Margin=Border, frmSetFonts }
+
+	local tblButtons = { }
+
+	local function setDialogues()												-- Refresh the Main and Help dialogues
+		local tblHelp = tblNameFor("Help")
+		if type(tblHelp.Dialog) == "userdata" then							-- Help dialogue exists
+			AssignAttributes(tblHelp.TblAttr)									-- Assign the Help dialogue attributes
+			RefreshDialogue("Help")												-- Refresh the Help window size & position
+		end
+		AssignAttributes(tblAttr)													-- Assign parent dialogue attributes
+		RefreshDialogue(strName)													-- Refresh parent window size & position and bring infront of Help window
+		RefreshDialogue("Font")													-- Refresh Font window size & position and bring infront of parent window
+	end -- local function setDialogues
+
+	local function getFont(strColor)											-- Set font button function
+		local strTitle = " Choose font style & default colour for "..strColor:gsub("Head","Heading").." text "
+		local strValue = "Font"..strColor										-- The font codes below are not recognised by iupFontDlg and result in empty font face!
+		local strFont  = rawget(fh,strValue):gsub(" Black,",","):gsub(" Light, Bold",","):gsub(" Extra Bold,",","):gsub(" Semibold,",",")
+		local iupFontDlg = iup.fontdlg { Title=strTitle, Color=rawget(fh,strColor), Value=strFont }
+		iupFontDlg:popup()															-- Popup predefined font dialogue
+		if iupFontDlg.Status == "1" then
+			if iupFontDlg.Value:match("^,") then								-- Font face missing so revert to original font
+				iupFontDlg.Value = rawget(fh,strValue)
+			end
+			fh[strColor] = iupFontDlg.Color										-- Set Head or Body color attribute
+			fh[strValue] = iupFontDlg.Value										-- Set FontHead or FontBody font style
+			AssignAttributes(tblButtons)											-- Assign the button & frame attributes
+			setDialogues()
+			isFontChosen = true
+		end
+	end -- local function getFont
+
+	local function getColor(strColor)											-- Set colour button function
+		local strTitle = " Choose colour for "..strColor:gsub("Warn","Warning"):gsub("Risk","Risky").." button & message text "
+		local iupColorDlg = iup.colordlg { Title=strTitle, Value=rawget(fh,strColor), ShowColorTable="YES" }
+		iupColorDlg.DialogFrame="YES"
+		iupColorDlg:popup()															-- Popup predefined color dialogue fixed size window
+		if iupColorDlg.Status == "1" then
+			fh[strColor] = iupColorDlg.Value									-- Set Safe or Warn or Risk color attribute
+			AssignAttributes(tblButtons)											-- Assign the button & frame attributes
+			setDialogues()
+			isFontChosen = true
+		end
+	end -- local function getColor
+
+	local function setDefault()													-- Action for Default Fonts button
+		Safe = Green
+		Warn = Magenta
+		Risk = Red																	-- Set default colours
+		Body = Black
+		Head = Black
+		FontBody = iup.GetGlobal("DEFAULTFONT")								-- Set default fonts for Body and Head text
+		FontHead = FontBody:gsub(", B?o?l?d?",", Bold")
+		AssignAttributes(tblButtons)												-- Assign the button & frame attributes
+		setDialogues()
+		isFontChosen = true
+	end -- local function setDefault
+
+	local function setMinimum()													-- Action for Minimum Size button
+		local tblName = tblNameFor(strName)
+		local iupDialog = tblName.Dialog										-- Retrieve the parent dialogue handle
+		if type(iupDialog) == "userdata" then
+			tblName.Raster = "10x10"												-- Refresh parent window to Minimum Size & adjust position
+			RefreshDialogue(strName)
+		end
+		local tblFont = tblNameFor("Font")
+		tblFont.Raster = "10x10"													-- Refresh Font window to Minimum Size & adjust position
+		RefreshDialogue("Font")
+	end -- local function setMinimum
+
+	tblButtons  =  {  {  "Font" , "FgColor" , "Tip" , "action" , {"TipBalloon";"Balloon"} , {"Expand";"YES"} },
+		[btnFontHead] = { "FontHead", "Head", "Choose the Heading text Font Face, Style, Size, Effects, and default Colour", function() getFont("Head") end },
+		[btnFontBody] = { "FontBody", "Body", "Choose the Body text Font Face, Style, Size, Effects, and default Colour"   , function() getFont("Body") end },
+		[btnCol_Safe] = { "FontBody", "Safe", "Choose the colour for Safe operations"   , function() getColor("Safe") end },
+		[btnCol_Warn] = { "FontBody", "Warn", "Choose the colour for Warning operations", function() getColor("Warn") end },
+		[btnCol_Risk] = { "FontBody", "Risk", "Choose the colour for Risky operations"  , function() getColor("Risk") end },
+		[btnDefault ] = { "FontBody", "Safe", "Restore default Fonts and Colours", function() setDefault() end },
+		[btnMinimum ] = { "FontBody", "Safe", "Reduce window to its minimum size", function() setMinimum() end },
+		[btnDestroy ] = { "FontBody", "Risk", "Close this dialogue ", function() return iup.CLOSE end },
+		[frmSetFonts] = { "FontHead", "Head" },
+		} 
+
+	AssignAttributes(tblButtons)													-- Assign the button & frame attributes
+	ShowDialogue("Font",dialogFont,btnDestroy,"keep normal")				-- Popup the Set Window Fonts dialogue: "keep normal"  : vary size & posn, and remember size & posn
+--	ShowDialogue("Font",dialogFont,btnDestroy,"popup normal")				-- Popup the Set Window Fonts dialogue: "popup normal" : vary size & posn, but redisplayed centred
+--	ShowDialogue("Font",dialogFont,btnDestroy,"keep")						-- Popup the Set Window Fonts dialogue: "keep" : fixed size, vary posn, and only remember posn
+--	ShowDialogue("Font",dialogFont,btnDestroy,"popup")						-- Popup the Set Window Fonts dialogue: "popup": fixed size, vary posn, but redisplayed centred
+	dialogFont:destroy()
+	return isFontChosen
+
+end -- function FontDialogue
+
+-- Help Dialogue Attributes and Functions
+
+HelpDialogue = ""																	-- HelpDialogue must be declared for ShowDialogue
+
+local strHelpButtonActive = nil  -- defaults to "YES"						-- Help button active attribute mode used only in NewHelpDialogue
+
+function NewHelpDialogue(btnGetHelp,strRootURL)								-- Prototype for GUI Help Dialogue, with parent Help button, and web page root/namespace URL
+	local tblHelp = tblNameFor("Help")
+	local oleControl, btnDestroy, hboxHelp, dialogHelp						-- Dialogue component upvalues
+	if type(btnGetHelp) == "userdata" then
+		btnGetHelp.Active = strHelpButtonActive
+		if btnGetHelp.Active == "NO" then										-- Help button inactive, so Help dialogue exists, so just update parent button
+			tblHelp.GetHelp = btnGetHelp											-- Allows successive parent GUI to share one Help dialogue
+			return
+		end
+	end
+	tblHelp.GetHelp = btnGetHelp
+	strRootURL = strRootURL or Plugin:gsub(" ","_"):lower()				-- Default to Plugin name as Wiki namespace
+	if strRootURL:match("^[%w_]+$") then										-- Append Wiki namespace to Wiki root URL
+		strRootURL = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:"..strRootURL..":"
+	end
+	tblHelp.RootURL = strRootURL
+	local intURL = 1																-- Index to Version History help page URL
+	local tblURL = { }																-- List of help page URL
+	local tblAttr = { { "Font", "FgColor" } }									-- Attribute table primarily for FontDialogue()
+	tblHelp.TblAttr = tblAttr
+
+	local function doCommonAction()												-- Common action when creating/destroying Help dialogue
+		local strMode = "NO"
+		if tblHelp.Dialog then
+			tblHelp.Dialog = nil													-- Clear dialog handle
+			strMode = nil															-- Defaults to "YES" but more efficient to test
+		end 
+		if type(tblHelp.GetHelp) == "userdata" then							-- Set parent dialogue Help button active mode
+			tblHelp.GetHelp.Active = strMode
+		end
+		strHelpButtonActive = strMode
+	end -- local function doCommonAction										-- Save global Help button active mode
+
+	function HelpDialogue(anyPage)												-- GUI Help Dialogue for chosen web page
+		--[=[
+			Parameter anyPage can be one of several values:
+			1. Page number from 0 to index tblURL, often equal to intTabPosn.
+			2. Version to display Version History page for version chosen.
+			3. String with " "="_" and lowercase substring of a page name in tblURL.
+		--]=]
+
+		if not tblHelp.Dialog then
+			doCommonAction()
+			-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
+			oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+			oleControl:CreateLuaCOM()
+			btnDestroy = iup.button { Title="Close Window", Tip="Close this Help and Advice window", TipBalloon=Balloon, Expand="HORIZONTAL", Size="x10", FgColor=Risk, action=function() dialogHelp:destroy() doCommonAction() end }
+			hboxHelp = iup.hbox { margin=Margin, homogeneous="NO" }
+			-- Create each GUI button with title, tooltip, color, action, etc, and table of web page URL
+			for intButton, tblButton in ipairs(tblHelp) do
+				local intPage = tblButton.Page or intButton
+				local strURL  = tblButton.URL
+				if strURL:match("ver.-hist") then intURL = intPage end
+				tblURL[intPage] = strURL
+				local btnName = iup.button { Title=tblButton.Name, Tip=tblButton.Tip, TipBalloon=Balloon, Expand=btnDestroy.Expand, Size=btnDestroy.Size, FgColor=Safe, action=function() oleControl.com:Navigate(tblHelp.RootURL..strURL) end }
+				iup.Append(hboxHelp,btnName)
+				tblAttr[btnName] = { "FontBody", "Safe" }
+			end
+			iup.Append(hboxHelp,btnDestroy)
+			tblAttr[btnDestroy] = { "FontBody", "Risk" }
+			dialogHelp = iup.dialog { Title=Plugin.." Help & Advice", Font=FontBody,
+								iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Border, ExpandChildren="YES",
+									oleControl,
+									hboxHelp,
+								},
+								close_cb = function() doCommonAction() end,
+							}
+			ShowDialogue("Help",dialogHelp,btnDestroy)						-- Show Help dialogue window and set tblHelp.Dialog = dialogHelp
+		end
+		anyPage = anyPage or 0
+		if type(anyPage) == "number" then										-- Select page by Tab = Button = Help page index
+			anyPage = math.max(1,math.min(#tblURL,anyPage+1))
+			anyPage = tblURL[anyPage] or ""
+		elseif anyPage == Version then											-- Select the Version History features section
+			anyPage = anyPage:gsub("[%s%p]","")
+			anyPage = anyPage:gsub("^(%d)","V%1")
+			anyPage = tblURL[intURL].."#features_of_"..anyPage
+		elseif type(anyPage) == "string" then									-- Select page by matching name text
+			local strPage = anyPage:gsub(" ","_"):lower()
+			anyPage = tblURL[1] or ""												-- Default to first web page
+			for intURL = 1, #tblURL do
+				local strURL = tblURL[intURL]
+				if strURL:match(strPage) then
+					anyPage = strURL
+					break
+				end
+			end
+		else
+			anyPage = tblURL[1] or ""												-- Default to first web page
+		end
+		oleControl.com:Navigate(tblHelp.RootURL..anyPage)					-- Navigate to chosen web page
+	end -- function HelpDialogue
+
+end -- function NewHelpDialogue
+
+function AddHelpButton(strName,strTip,strURL,intPage)						-- Add button to GUI Help Dialogue
+	local tblHelp = tblNameFor("Help")
+	if tblHelp and not strHelpButtonActive then
+		for intHelp, tblHelp in ipairs(tblHelp) do							-- Check button does not already exist
+			if tblHelp.Name == strName then return end
+		end
+		if tonumber(intPage) then intPage = intPage + 1 end					-- Optional external intPage number matches intTabPosn
+		table.insert( tblHelp, { Name=strName or "?", Tip=strTip or "?", URL=strURL or "", Page=intPage } )
+	end
+end -- function AddHelpButton
+
+local function anyMemoControl(anyName,fgColor)								-- Compose any control Title and FgColor
+	local strName = tostring(anyName)											-- anyName may be a string, and fgColor is default FgColor
+	local tipText = nil
+	if type(anyName) == "table" then											-- anyName may be a table = { Title string , FgColor string , ToolTip string (optional) }
+		strName = anyName[1]
+		fgColor = anyName[2]:match("%d* %d* %d*") or fgColor
+		tipText = anyName[3]
+	end
+	return strName, fgColor, tipText
+end -- local function anyMemoControl
+
+local function anyMemoDialogue(strHead,anyHead,strMemo,anyMemo,...)		-- Display framed memo dialogue with buttons
+	local intButt = 0																-- Returned value if "X Close" button is used
+	local tblButt = { [0]="X Close" }											-- Button names lookup table
+	local strHead, fgcHead, tipHead = anyMemoControl(anyHead or "",strHead)
+	local strMemo, fgcMemo, tipMemo = anyMemoControl(anyMemo or "",strMemo)
+	-- Create the GUI labels and buttons
+	local lblMemo = iup.label { Title=strMemo, FgColor=fgcMemo, Tip=tipMemo, TipBalloon=Balloon, Alignment="ACENTER", Padding=Margin, Expand="YES", WordWrap="YES" }
+	local lblLine = iup.label { Separator="HORIZONTAL" }
+	local iupHbox = iup.hbox  { Homogeneous="YES" }
+	local btnButt = iup.button { }
+	local strMode = "popup"
+	if arg[1] == "Keep Dialogue" then											-- Keep dialogue open for a progress message
+		strMode = "keep dialogue"
+		lblLine = iup.label { }
+	else
+		if #arg == 0 then arg[1] = "OK" end 									-- If no buttons listed then default to an "OK" button
+		for intArg, anyButt in ipairs(arg) do
+			local strButt, fgcButt, tipButt = anyMemoControl(anyButt,Safe)
+			tblButt[intArg] = strButt
+			btnButt = iup.button { Title=strButt, FgColor=fgcButt, Tip=tipButt, TipBalloon=Balloon, Expand="NO", MinSize="80", Padding=Margin, action=function() intButt=intArg return iup.CLOSE end }
+			iup.Append( iupHbox, btnButt )
+		end
+	end
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local iupMemo = iup.dialog { Title=Plugin..Version..strHead,
+							iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Margin,
+								iup.frame { Title=strHead, FgColor=fgcHead, Font=FontHead,
+									iup.vbox { Alignment="ACENTER", Font=FontBody, lblMemo, lblLine, iupHbox },
+								},
+							},
+						}
+	ShowDialogue("Memo",iupMemo,btnButt,strMode)								-- Show popup Memo dialogue window with righthand button in focus (if any)
+	if strMode == "keep dialogue" then 	return lblMemo end					-- Return label control so message can be changed
+	iupMemo:destroy()
+	return intButt, tblButt[intButt]											-- Return button number & title that was pressed
+end -- local function anyMemoDialogue
+
+function MemoDialogue(anyMemo,...)												-- Multi-Button GUI like iup.Alarm and fhMessageBox, with "Memo" in frame
+	return anyMemoDialogue(Head,"Memo",Body,anyMemo,...)
+end -- function MemoDialogue
+
+function WarnDialogue(anyHead,anyMemo,...)									-- Multi-Button GUI like iup.Alarm and fhMessageBox, with heading in frame
+	return anyMemoDialogue(Warn,anyHead,Warn,anyMemo,...)
+end -- function WarnDialogue
+
+local function httpRequest(strRequest)											-- Luacom http request protected by pcall() below
+	local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+	http:Open("GET",strRequest,false)
+	http:Send()
+	return http.Responsebody
+end -- local function httpRequest
+
+function VersionInStore(anyPlugin)												-- Obtain the Version in Plugin Store by Name or Id
+	local strType = "name="
+	if type(anyPlugin) == "number"
+	or tonumber(anyPlugin) then strType = "id=" end
+	if anyPlugin then
+		local strFile = MachinePath.."\\VersionInStoreInternetError.dat"
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..anyPlugin
+		local isOK, strReturn = pcall(httpRequest,strRequest)
+		if not isOK then															-- Problem with Internet access
+			local intTime = os.time() - 36000									-- Time in seconds 10 hours ago
+			local tblAttr, strError = lfs.attributes(strFile)				-- Obtain file attributes
+			if not tblAttr or tblAttr.modification < intTime then			-- File does not exist or was modified long ago 
+				fhMessageBox(strReturn.."\n The Internet appears to be inaccessible. ")
+			end
+			general.SaveStringToFile(strFile,strFile)							-- Update file modified time
+			return "0"
+		end
+		general.DeleteFile(strFile)												-- Delete file if Internet is OK
+		local strVersion = "0"
+		if strReturn ~= nil then
+			strVersion = strReturn:match("([%d%.]*),%d*")					-- Version digits & dots then comma and Id digits 
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function VersionInStore
+
+local function intVersion(strVersion)											-- Convert version string to comparable integer
+	local intVersion = 0
+	local tblVersion = stringx.split(strVersion,".")
+	for i=1,5 do
+		intVersion = intVersion * 1000 + tonumber(tblVersion[i] or 0)
+	end
+	return intVersion
+end -- local function intVersion
+
+function CheckVersionInStore()													-- Check if later Version available in Plugin Store
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = VersionInStore(strPlugin:gsub(" %- .*",""))
+	local strOldVer = Version
+	if intVersion(strNewVer) > intVersion(strOldVer:match("%D*([%d%.]*)")) then
+		MemoDialogue("Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.")
+	end
+end -- function CheckVersionInStore
+
+function PluginDataScope(strScope)												-- Set default Plugin Data scope to per-Project, or per-User, or per-Machine
+	strScope = tostring(strScope):lower()
+	if strScope:match("mach") then												-- Per-Machine
+		strDefaultScope = "Machine"
+	elseif strScope:match("user") then											-- Per-User
+		strDefaultScope = "User"
+	end																					-- Per-Project is default
+end -- function PluginDataScope
+
+local function getPluginDataFileName(strScope)								-- Get plugin data filename for chosen scope
+	local isOK, strDataFile = pcall(fhGetPluginDataFileName,strScope)
+	if not isOK then strDataFile = fhGetPluginDataFileName() end			-- Before V5.0.8 parameter is disallowed and default = CURRENT_PROJECT
+	return strDataFile
+end -- local function getPluginDataFileName
+
+local function getDataFiles(strScope)											-- Compose the Plugin Data file & path & root names
+	local strDataFile = getPluginDataFileName(strScope)						-- Allow plugins with variant filenames to use same plugin data files
+	strDataFile = strDataFile:gsub("\\"..Plugin:gsub(" ","_"):lower(),"\\"..Plugin)
+	strDataFile = strDataFile:gsub("\\"..Plugin..".+%.[D,d][A,a][T,t]$","\\"..Plugin..".dat")
+	if strDataFile == "" and strScope == "CURRENT_PROJECT" then			-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
+		strDataFile = fhGetContextInfo("CI_GEDCOM_FILE")
+		strDataFile = strDataFile:gsub("%.[G,g][E,e][D,d]",".fh_data")
+		lfs.mkdir(strDataFile)
+		strDataFile = strDataFile.."\\Plugin Data"
+		lfs.mkdir(strDataFile)
+		strDataFile = strDataFile.."\\"..Plugin..".dat"
+	end
+	local strDataPath = strDataFile:gsub("\\"..Plugin.."%.[D,d][A,a][T,t]$","")	-- Plugin data folder path name
+	local strDataRoot = strDataPath.."\\"..Plugin										-- Plugin data file root name
+	return strDataFile, strDataPath, strDataRoot
+end -- local function getDataFiles
+
+function Initialise(strVersion,strPlugin)											-- Initialise the GUI module with optional Version & Plugin name
+
+	local strAppData = fhGetContextInfo("CI_APP_DATA_FOLDER")
+
+	Plugin = fhGetContextInfo("CI_PLUGIN_NAME")									-- Plugin Name from file
+	Version = strVersion or " "														-- Plugin Version
+	if Version == " " then
+		local strTitle = "\n@Title is missing"
+		local strAuthor = "\n@Author is missing"
+		local strVersion = "\n@Version is missing"
+		local strPlugin = strAppData.."\\Plugins\\"..Plugin..".fh_lua"
+		for strLine in io.lines(strPlugin) do										-- Read each line from the Plugin file
+			strPlugin = strLine:match("^@Title:%s*(.*)")
+			if strPlugin then
+				strPlugin = strPlugin:gsub("&&","&")
+				if Plugin:match("^"..strPlugin:gsub("(%W)","%%%1")) then
+					Plugin = strPlugin													-- Prefer Title to Filename if it matches
+					strTitle = nil
+				else
+					strTitle = "\n@Title differs from Filename"					-- Report abnormality
+				end
+			end
+			if strLine:match("^@Author:%s*(.*)") then								-- Check @Author exists
+				strAuthor = nil
+			end 
+			Version = strLine:gsub("^@Version:%D*([%d%.]*)%D*"," %1 ")
+			if Version ~= strLine then												-- Obtain the @Version from Plugin file
+				strVersion = nil
+				break
+			end
+		end
+		if strTitle or strAuthor or strVersion then								-- Report any header abnormalities
+			fhMessageBox("\nScript Header: "..Plugin..(strTitle or "")..(strAuthor or "")..(strVersion or ""))
+		end
+	end
+	History = Version																	-- Version History
+	Plugin  = strPlugin or Plugin													-- Plugin Name from argument or default from file
+
+	CustomDialogue("Help","1020x730")												-- Custom "Help" dialogue sizes
+
+	DefaultDialogue()																	-- Default "Font","Help","Main" dialogues
+
+	MachineFile,MachinePath,MachineRoot = getDataFiles("LOCAL_MACHINE")		-- Plugin data names per machine
+	PerUserFile,PerUserPath,PerUserRoot = getDataFiles("CURRENT_USER")		-- Plugin data names per user
+	ProjectFile,ProjectPath,ProjectRoot = getDataFiles("CURRENT_PROJECT")	-- Plugin data names per project
+
+	PublicPath = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")					-- Public data folder path name
+	if PublicPath == "" then PublicPath = ProjectPath end
+
+	CalicoPie = strAppData:gsub("\\Calico Pie\\.*","\\Calico Pie")			-- Program Data Calico Pie path name
+
+	ComputerName = os.getenv("COMPUTERNAME")										-- Local PC Computer Name
+
+end -- function Initialise
+
+local iupVersion = iup.GetGlobal("VERSION")
+
+Initialise()																				-- Initialise module with default values
+
+return fh
+
+end -- local function iup_gui_v2
+
+stringx_v2 = stringx_v2("stringx")
+tablex_v1  = tablex_v1 ("tablex")
+encoder_v2 = encoder_v2("encoder")
+general_v1 = general_v1("general")
+iterate_v1 = iterate_v1("iterate")
+progbar_v1 = progbar_v1("progbar")
+iup_gui_v2 = iup_gui_v2("iup_gui")
+
+-- All above should eventually become library modules as loaded below --
+
+--]==]
+
+--[==[
+local fhLoadRequire = require("fhLoadRequire").fhLoadRequire				-- Interim fhLoadRequire() API
+
+if not fhLoadRequire("pl","pl.init") then return end						-- Load required Penlight modules
+require("pl.import_into")()
+require("pl.strict")																-- Strict check for undeclared globals
+
+if not fhLoadRequire("fh.library_v2") then return end 						-- Load required FH v2 modules
+require("fh.modules_v2")()
+--]==]
+stringx_v2.import()																	-- To access FH string extension v2 module
+tablex_v1.import()																	-- To access FH table extension v1 module
+local encoder = encoder_v2														-- To access FH encoder of text v2 module
+local general = general_v1														-- To access FH general useful v1 module
+local iterate = iterate_v1														-- To access FH iterate items v1 module
+local progbar = progbar_v1														-- To access FH progress bar v1 module including "iuplua"
+local iup_gui = iup_gui_v2														-- To access FH GUI builder v2 module including "iuplua", "lfs", "fh.general_v1" & "fh.loadreq_v1", "fh.stringx_v2", etc
+
+-- Global Functions --
+
+-- Global Data Constants Definition --
+function PresetGlobalConstants()
+	iup_gui.Gap = "2"
+	iup_gui.Balloon = "YES"
+end -- function PresetGlobalConstants
+
+-- Reset Sticky Settings to Default Values --
+function ResetDefaultSettings()
+	iup_gui.DefaultDialogue("Bars")												-- GUI window rastersize and X & Y co-ordinates for "Main","Font","Help","Bars" dialogues
+	iup_gui.CustomDialogue("Main","x")											-- Main dialogue smallest size and centralised
+	iup_gui.History = " "															-- Version History reset for initial Help
+	IntCensusList = 1																-- U.K. Census Records
+	IntAncestryCo = 1																-- Use search.ancestry.co.uk
+	IntFindMyPast = 1																-- Use new.findmypast.co.uk
+	IntRecordList = 1																-- Ancestors of an Individual
+	StrInCountry = "OFF"															-- Ignore Facts for at home or abroad toggle -- 24 Nov 2013 V3.0
+end -- function ResetDefaultSettings
+
+-- Load Sticky Settings from File --
+function LoadSettings()
+	iup_gui.LoadSettings("Bars")													-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+	IntCensusList = tonumber(iup_gui.LoadGlobal("CensusList",IntCensusList))
+	IntAncestryCo = tonumber(iup_gui.LoadGlobal("AncestryCo",IntAncestryCo))
+	IntFindMyPast = tonumber(iup_gui.LoadGlobal("FindMyPast",IntFindMyPast))
+	IntRecordList = tonumber(iup_gui.LoadGlobal("RecordList",IntRecordList))
+	StrInCountry  = tostring(iup_gui.LoadGlobal("InCountry" ,StrInCountry )) -- 24 Nov 2013 V3.0
+	SaveSettings()																	-- Save sticky data settings
+end -- function LoadSettings
+
+-- Save Sticky Settings to File --
+function SaveSettings()
+	iup_gui.SaveGlobal("CensusList",IntCensusList)
+	iup_gui.SaveGlobal("AncestryCo",IntAncestryCo)
+	iup_gui.SaveGlobal("FindMyPast",IntFindMyPast)
+	iup_gui.SaveGlobal("RecordList",IntRecordList)
+	iup_gui.SaveGlobal("InCountry" ,StrInCountry )							-- 24 Nov 2013 V3.0
+	iup_gui.SaveSettings("Bars")													-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+end -- function SaveSettings
+
+-- Make New Help Dialogue from Prototype --
+function MakeHelpDialogue(btnGetHelp)
+	iup_gui.NewHelpDialogue(btnGetHelp,"lookup_missing_census")			-- Supply control Help button and Wiki namespace
+	iup_gui.AddHelpButton("User Options"	,"Option settings Help and Advice"	, "user_options"	)
+	iup_gui.AddHelpButton("Lookup Page"		,"Lookup web page Help and Advice"	, "lookup_page"		)
+	iup_gui.AddHelpButton("Result Set"		,"Result Set list Help and Advice"	, "result_set"		)
+	iup_gui.AddHelpButton("F.  A.  Q."		,"Frequently Asked Questions"		, "frequently_asked_questions")
+	iup_gui.AddHelpButton("Version History","Version History of Features"		, "version_history"	)
+end -- function MakeHelpDialogue
+
+-- Graphical User Interface --
+function GUI_MainDialogue()
+
+	local strGratitude = [=[
+		This Plugin is derived from earlier Plugin versions: 
+		'Ancestors UK Census Checker' by Jane Taubman, 
+		'Ancestors Canada Census Checker' by Keir Strugnell,
+		and work on the USA Census Checkers by Bill Henshaw.	]=]
+
+	-- Create GUI controls
+	local lblGratitude	= iup.label	{ Alignment="ACENTER", Title=strGratitude:gsub("\t","") }		-- gsub needed for XP
+	local lblCensusList	= iup.label	{ Alignment="ARIGHT", Title=" Choose the Census Records to check  :" }
+	local lstCensusList	= iup.list	{ DropDown="YES", Visible_Items="19", " U. K. Census Records 1841 - 1911", " U. S. A. Census Records 1790 - 1940", " Canada Census Records 1851 - 1921", " Australia Census Records 1828 - 1901" }
+	local hbxCensusList	= iup.hbox	{ Homogeneous="YES", lblCensusList, lstCensusList }
+	local lblAncestryCo	= iup.label	{ Alignment="ARIGHT", Title=" Choose any Ancestry web site to use  :" }	-- 13 June 2013 "search." removed from URL
+	local lstAncestryCo	= iup.list	{ DropDown="YES", Visible_Items="19", " Ancestry U. K.   :   ancestry.co.uk", " Ancestry U. S. A.  :  ancestry.com", " Ancestry Canada  :  ancestry.ca", " Ancestry Australia  :  ancestry.com.au", " Ancestry Germany  :  ancestry.de", " Ancestry Sweden  :  ancestry.se", " Ancestry France  :  ancestry.fr", " Ancestry Italy   :   ancestry.it", " Ancestry search is disabled" }
+	local hbxAncestryCo	= iup.hbox	{ Homogeneous="YES", lblAncestryCo, lstAncestryCo }
+	local lblFindMyPast	= iup.label	{ Alignment="ARIGHT", Title=" Choose FindMyPast web site to use  :" }		-- 13 June 2013 "www." removed from URL -- 2 April 2014 "new." added to findmypast.co.uk
+	local lstFindMyPast	= iup.list	{ DropDown="YES", Visible_Items="19", " FindMyPast U. K.  :  new.findmypast.co.uk", " FindMyPast U. S. A. :  findmypast.com", " FindMyPast Ireland   :  findmypast.ie", " FindMyPast Australia  :  findmypast.com.au", " FindMyPast search is disabled" }
+	local hbxFindMyPast	= iup.hbox	{ Homogeneous="YES", lblFindMyPast, lstFindMyPast }
+	local lblRecordList	= iup.label	{ Alignment="ARIGHT", Title=" Choose the Individuals to search  :" }
+	local lstRecordList	= iup.list	{ DropDown="YES", Visible_Items="19", " All the Ancestors of a chosen person", " All the Descendants of a chosen person", " All Ancestors & Descendants of a person", " All the Relations of a chosen person", " Anyone via the Select Records dialogue" }	-- 20 July 2013
+	local hbxRecordList	= iup.hbox	{ Homogeneous="YES", lblRecordList, lstRecordList }
+	local tglInCountry	= iup.toggle	{ Title=" Use their Facts to decide if each person was \n at home or abroad on missing Census dates " } -- 24 Nov 2013 V3.0
+	local btnRunLookup	= iup.button	{ Title="Lookup  Missing  Census  Facts" }
+	local hbxRunLookup	= iup.hbox	{ Homogeneous="YES", tglInCountry, btnRunLookup, Gap="9" }
+	local btnDefault	= iup.button	{ Title="Restore Defaults" }
+	local btnSetFont	= iup.button	{ Title="Set Window Fonts" }
+	local btnGetHelp	= iup.button	{ Title="  Help && Advice" }
+	local btnDestroy	= iup.button	{ Title="Close Plugin" }
+	local hbxButtons	= iup.hbox	{ Homogeneous="YES", btnDefault, btnSetFont, btnGetHelp, btnDestroy }
+
+	-- Combine all the above controls
+	local	allCont	= iup.vbox { Gap="4", Margin="8x8", lblGratitude, hbxCensusList, hbxAncestryCo, hbxFindMyPast, hbxRecordList, hbxRunLookup, hbxButtons }
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local dialogMain = iup.dialog{ Title=iup_gui.Plugin..iup_gui.Version, allCont }
+
+	local function setControls()											-- Reset GUI control values
+		lstCensusList.Value = IntCensusList
+		lstAncestryCo.Value = IntAncestryCo
+		lstFindMyPast.Value = IntFindMyPast
+		lstRecordList.Value = IntRecordList
+		tglInCountry.Value  = StrInCountry								-- 24 Nov 2013 V3.0
+	end -- local function setControls
+
+	-- Set other GUI control attributes									-- 28 Dec 2013 V3.1
+	tblControls  =  {  {  "Font", "FgColor", "Padding", "Tip", {"TipBalloon";"Balloon"}, {"Expand";"YES"}, setControls },
+		[lblGratitude]  = { "FontBody", "Body",  "1x4", "Acknowledgement to previous Plugin authors" },
+		[lblCensusList] = { "FontBody", "Body", "20x4", "Choose country for census record to be checked" },
+		[lstCensusList] = { "FontBody", "Safe",  "4x4", "Choose country for census record to be checked" },
+		[lblAncestryCo] = { "FontBody", "Body", "20x4", "Choose the Ancestry lookup web site to use" },
+		[lstAncestryCo] = { "FontBody", "Safe",  "4x4", "Choose the Ancestry lookup web site to use" },
+		[lblFindMyPast] = { "FontBody", "Body", "20x1", "Choose the FindMyPast lookup web site to use" },
+		[lstFindMyPast] = { "FontBody", "Safe",  "4x4", "Choose the FindMyPast lookup web site to use" },
+		[lblRecordList] = { "FontBody", "Body", "20x1", "Choose the Individuals to include in search" },
+		[lstRecordList] = { "FontBody", "Safe",  "4x4", "Choose the Individuals to include in search" },
+		[tglInCountry]  = { "FontBody", "Safe",  "0x0", "Use all Facts of each Individual to decide if they were\n at home or abroad on missing Census Fact dates ?" }, -- 24 Nov 2013 V3.0
+		[btnRunLookup]  = { "FontHead", "Safe",  "1x6", "Start the Census lookup search" },
+		[btnDefault ]   = { "FontBody", "Safe",  "1x1", "Restore all option settings, and window positions and sizes" },
+		[btnSetFont ]   = { "FontBody", "Safe",  "1x1", "Alter the window interface font styles" },
+		[btnGetHelp ]   = { "FontBody", "Safe",  "1x1", "Access the online Help and Advice pages" },
+		[btnDestroy ]   = { "FontBody", "Risk",  "1x1", "Close this Plugin" },
+		}
+
+	iup_gui.AssignAttributes(tblControls)								-- Assign GUI control attributes	-- 28 Dec 2013 V3.1
+
+	MakeHelpDialogue(btnGetHelp)
+
+	local intFindMyPastCount = lstFindMyPast.Count
+
+	IntFindMyPast = math.min(IntFindMyPast,intFindMyPastCount)	-- V2.6 allowed one extra droplist option i.e. 6 max
+	lstFindMyPast.Value = IntFindMyPast
+
+	local function setAttributes()										-- Set the GUI attributes
+		local strAncestryCo = lstAncestryCo[IntAncestryCo]
+		local strFindMyPast = lstFindMyPast[IntFindMyPast]
+		local strCensusList = lstCensusList[IntCensusList]
+		lstFindMyPast.RemoveItem = intFindMyPastCount + 1
+		if strCensusList:matches("Canada") then						-- 1 Apr 2014
+			lstFindMyPast.AppendItem = " FindMyPast is disabled for chosen Census"
+			lstFindMyPast.Value = lstFindMyPast.Count					-- Disable FindMyPast for Canada Census Records
+			strFindMyPast = "disable"
+		else
+			lstFindMyPast.Value = IntFindMyPast							-- Restore FindMyPast for other Census Records
+		end
+		if strAncestryCo:match("disable") and strFindMyPast:match("disable") then
+			btnRunLookup.Active = "NO"									-- Disable Run Lookup button if both websites disabled
+		else
+			btnRunLookup.Active = "YES"
+		end
+	end -- local function setAttributes
+
+	function lstCensusList:action(strText,intItem,intState)		-- Action for CensusList dropdown
+		if intState == 1 then
+			IntCensusList = intItem
+			SaveSettings()
+			setAttributes()
+		end
+	end -- function lstCensusList:action
+
+	function lstAncestryCo:action(strText,intItem,intState)		-- Action for AncestryCo dropdown
+		if intState == 1 then
+			IntAncestryCo = intItem
+			SaveSettings()
+			setAttributes()
+		end
+	end -- function lstAncestryCo:action
+
+	function lstFindMyPast:action(strText,intItem,intState)		-- Action for FindMyPast dropdown
+		if intState == 1 then
+			IntFindMyPast = intItem
+			SaveSettings()
+			setAttributes()
+		end
+	end -- function lstFindMyPast:action
+
+	function lstRecordList:action(strText,intItem,intState)		-- Action for RecordList dropdown
+		if intState == 1 then
+			IntRecordList = intItem
+			SaveSettings()
+			setAttributes()
+		end
+	end -- function lstRecordList:action
+
+	function tglInCountry:action(intState)								-- Action for In Country toggle -- 24 Nov 2013 V3.0
+		StrInCountry = tglInCountry.Value
+		SaveSettings()
+	end -- function tglInCountry:action
+
+	function btnRunLookup:action()										-- Action for Run Lookup button
+		local strCensusList = lstCensusList[lstCensusList.Value]
+		local strAncestryCo = lstAncestryCo[lstAncestryCo.Value]:match(" : -([^ ]-ancestry.-)$")	-- Extract both web site URL from GUI options
+		local strFindMyPast = lstFindMyPast[lstFindMyPast.Value]:match(" : -([^ ]-findmypast.-)$")
+		local strRecordList = lstRecordList[lstRecordList.Value]:match(" (Ancestors.- of )")
+								or lstRecordList[lstRecordList.Value]:match(" (Descendant.- of )")
+								or lstRecordList[lstRecordList.Value]:match(" (Relations.- of )")		-- Extract Individuals to check from GUI option
+--		RunLookup(strCensusList,strAncestryCo,strFindMyPast,strRecordList,StrInCountry=="OFF")		-- 24 Nov 2013 V3.0
+		RunLookup(strCensusList,strAncestryCo,strFindMyPast,strRecordList,StrInCountry=="ON")		-- 25 Nov 2013 V3.0
+		return iup.CLOSE
+	end -- function btnRunLookup:action
+
+	function btnDefault:action()											-- Action for Restore Defaults button
+		ResetDefaultSettings()
+		iup_gui.ShowDialogue("Help")
+		setControls()														-- Reset controls & redisplay Main dialogue
+		iup_gui.ShowDialogue("Main")
+		SaveSettings()														-- Save sticky data settings
+		setAttributes()
+	end -- function btnDefault:action
+
+	function btnSetFont:action()											-- Action for Set Window Font button
+		btnSetFont.Active = "NO"
+		iup_gui.FontDialogue(tblControls)								-- 28 Dec 2013 V3.1
+		SaveSettings()														-- Save sticky data settings
+		btnSetFont.Active = "YES"
+	end -- function btnSetFont:action
+
+	function btnGetHelp:action()											-- Action for Help & Advice button
+		iup_gui.HelpDialogue(0)
+	end -- function btnGetHelp:action
+
+	function btnDestroy:action()											-- Action for Close button
+		return iup.CLOSE
+	end -- function btnDestroy:action
+
+	setAttributes()
+
+	iup_gui.ShowDialogue("Main",dialogMain,btnDestroy)				-- Display Main GUI Dialogue and optionally Version History Help
+
+end -- function GUI_MainDialogue
+
+-- Java Script --
+
+StrWebPageJS =
+[[
+/*
+Table sorting script by Joost de Valk, check it out at http://www.joostdevalk.nl/code/sortable-table/.
+Based on a script from http://www.kryogenix.org/code/browser/sorttable/.
+Distributed under the MIT license: http://www.kryogenix.org/code/browser/licence.html .
+
+Copyright (c) 1997-2007 Stuart Langridge, Joost de Valk.
+
+Version 1.5.7
+*/
+
+/* You can change these values */
+var image_path = "http://www.fhug.org.uk/programs/js/sortable/";
+var image_up = "arrow-up.gif";
+var image_down = "arrow-down.gif";
+var image_none = "arrow-none.gif";
+var europeandate = true;
+var alternate_row_colors = false;
+
+/* Don't change anything below this unless you know what you're doing */
+addEvent(window, "load", sortables_init);
+
+var SORT_COLUMN_INDEX;
+var thead = false;
+
+function sortables_init() {
+	// Find all tables with class sortable and make them sortable
+	if (!document.getElementsByTagName) return;
+	tbls = document.getElementsByTagName("table");
+	for (ti=0;ti<tbls.length;ti++) {
+		thisTbl = tbls[ti];
+		if (((' '+thisTbl.className+' ').indexOf("sortable") != -1) && (thisTbl.id)) {
+			ts_makeSortable(thisTbl);
+		}
+	}
+}
+
+function ts_makeSortable(t) {
+	if (t.rows && t.rows.length > 0) {
+		if (t.tHead && t.tHead.rows.length > 0) {
+			var firstRow = t.tHead.rows[t.tHead.rows.length-1];
+			thead = true;
+		} else {
+			var firstRow = t.rows[0];
+		}
+	}
+	if (!firstRow) return;
+	
+	// We have a first row: assume it's the header, and make its contents clickable links
+	for (var i=0;i<firstRow.cells.length;i++) {
+		var cell = firstRow.cells[i];
+		var txt = ts_getInnerText(cell);
+		if (cell.className != "unsortable" && cell.className.indexOf("unsortable") == -1) {
+			cell.innerHTML = '<a href="#" class="sortheader" onclick="ts_resortTable(this, '+i+');return false;">'+txt+'<span class="sortarrow">&nbsp;&nbsp;<img src="'+ image_path + image_none + '" alt="&darr;"/></span></a>';
+		}
+	}
+	if (alternate_row_colors) {
+		alternate(t);
+	}
+}
+
+function ts_getInnerText(el) {
+	if (typeof el == "string") return el;
+	if (typeof el == "undefined") { return el };
+	if (el.innerText) return el.innerText;	//Not needed but it is faster
+	var str = "";
+	
+	var cs = el.childNodes;
+	var l = cs.length;
+	for (var i = 0; i < l; i++) {
+		switch (cs[i].nodeType) {
+			case 1: //ELEMENT_NODE
+				str += ts_getInnerText(cs[i]);
+				break;
+			case 3:	//TEXT_NODE
+				str += cs[i].nodeValue;
+				break;
+		}
+	}
+	return str;
+}
+
+function ts_resortTable(lnk, clid) {
+	var span;
+	for (var ci=0;ci<lnk.childNodes.length;ci++) {
+		if (lnk.childNodes[ci].tagName && lnk.childNodes[ci].tagName.toLowerCase() == 'span') span = lnk.childNodes[ci];
+	}
+	var spantext = ts_getInnerText(span);
+	var td = lnk.parentNode;
+	var column = clid || td.cellIndex;
+	var t = getParent(td,'TABLE');
+	// Work out a type for the column
+	if (t.rows.length <= 1) return;
+	var itm = "";
+	var i = 0;
+	while (itm == "" && i < t.tBodies[0].rows.length) {
+		var itm = ts_getInnerText(t.tBodies[0].rows[i].cells[column]);
+		itm = trim(itm);
+		if (itm.substr(0,4) == "<!--" || itm.length == 0) {
+			itm = "";
+		}
+		i++;
+	}
+	if (itm == "") return; 
+	sortfn = ts_sort_caseinsensitive;
+	if (itm.match(/^\d\d[\/\.-][a-zA-z][a-zA-Z][a-zA-Z][\/\.-]\d\d\d\d$/)) sortfn = ts_sort_date;
+	if (itm.match(/^\d\d[\/\.-]\d\d[\/\.-]\d\d\d{2}?$/)) sortfn = ts_sort_date;
+	if (itm.match(/^-?[£$Ä€¢¥]\d/)) sortfn = ts_sort_numeric;
+	if (itm.match(/^-?(\d+[,\.]?)+(E[-+][\d]+)?%?$/)) sortfn = ts_sort_numeric;
+	SORT_COLUMN_INDEX = column;
+	var firstRow = new Array();
+	var newRows = new Array();
+	for (k=0;k<t.tBodies.length;k++) {
+		for (i=0;i<t.tBodies[k].rows[0].length;i++) { 
+			firstRow[i] = t.tBodies[k].rows[0][i]; 
+		}
+	}
+	for (k=0;k<t.tBodies.length;k++) {
+		if (!thead) {
+			// Skip the first row
+			for (j=1;j<t.tBodies[k].rows.length;j++) { 
+				newRows[j-1] = t.tBodies[k].rows[j];
+			}
+		} else {
+			// Do NOT skip the first row
+			for (j=0;j<t.tBodies[k].rows.length;j++) { 
+				newRows[j] = t.tBodies[k].rows[j];
+			}
+		}
+	}
+	newRows.sort(sortfn);
+	if (span.getAttribute("sortdir") == 'down') {
+			ARROW = '&nbsp;&nbsp;<img src="'+ image_path + image_down + '" alt="&darr;"/>';
+			newRows.reverse();
+			span.setAttribute('sortdir','up');
+	} else {
+			ARROW = '&nbsp;&nbsp;<img src="'+ image_path + image_up + '" alt="&uarr;"/>';
+			span.setAttribute('sortdir','down');
+	} 
+    // We appendChild rows that already exist to the tbody, so it moves them rather than creating new ones
+    // don't do sortbottom rows
+    for (i=0; i<newRows.length; i++) { 
+		if (!newRows[i].className || (newRows[i].className && (newRows[i].className.indexOf('sortbottom') == -1))) {
+			t.tBodies[0].appendChild(newRows[i]);
+		}
+	}
+    // do sortbottom rows only
+    for (i=0; i<newRows.length; i++) {
+		if (newRows[i].className && (newRows[i].className.indexOf('sortbottom') != -1)) 
+			t.tBodies[0].appendChild(newRows[i]);
+	}
+	// Delete any other arrows there may be showing
+	var allspans = document.getElementsByTagName("span");
+	for (var ci=0;ci<allspans.length;ci++) {
+		if (allspans[ci].className == 'sortarrow') {
+			if (getParent(allspans[ci],"table") == getParent(lnk,"table")) { // in the same table as us?
+				allspans[ci].innerHTML = '&nbsp;&nbsp;<img src="'+ image_path + image_none + '" alt="&darr;"/>';
+			}
+		}
+	}		
+	span.innerHTML = ARROW;
+	alternate(t);
+}
+
+function getParent(el, pTagName) {
+	if (el == null) {
+		return null;
+	} else if (el.nodeType == 1 && el.tagName.toLowerCase() == pTagName.toLowerCase()) {
+		return el;
+	} else {
+		return getParent(el.parentNode, pTagName);
+	}
+}
+
+function sort_date(date) {	
+	// y2k notes: two digit years less than 50 are treated as 20XX, greater than 50 are treated as 19XX
+	dt = "00000000";
+	if (date.length == 11) {
+		mtstr = date.substr(3,3);
+		mtstr = mtstr.toLowerCase();
+		switch(mtstr) {
+			case "jan": var mt = "01"; break;
+			case "feb": var mt = "02"; break;
+			case "mar": var mt = "03"; break;
+			case "apr": var mt = "04"; break;
+			case "may": var mt = "05"; break;
+			case "jun": var mt = "06"; break;
+			case "jul": var mt = "07"; break;
+			case "aug": var mt = "08"; break;
+			case "sep": var mt = "09"; break;
+			case "oct": var mt = "10"; break;
+			case "nov": var mt = "11"; break;
+			case "dec": var mt = "12"; break;
+			// default: var mt = "00";
+		}
+		dt = date.substr(7,4)+mt+date.substr(0,2);
+		return dt;
+	} else if (date.length == 10) {
+		if (europeandate == false) {
+			dt = date.substr(6,4)+date.substr(0,2)+date.substr(3,2);
+			return dt;
+		} else {
+			dt = date.substr(6,4)+date.substr(3,2)+date.substr(0,2);
+			return dt;
+		}
+	} else if (date.length == 8) {
+		yr = date.substr(6,2);
+		if (parseInt(yr) < 50) { 
+			yr = '20'+yr; 
+		} else { 
+			yr = '19'+yr; 
+		}
+		if (europeandate == true) {
+			dt = yr+date.substr(3,2)+date.substr(0,2);
+			return dt;
+		} else {
+			dt = yr+date.substr(0,2)+date.substr(3,2);
+			return dt;
+		}
+	}
+	return dt;
+}
+
+function ts_sort_date(a,b) {
+	dt1 = sort_date(ts_getInnerText(a.cells[SORT_COLUMN_INDEX]));
+	dt2 = sort_date(ts_getInnerText(b.cells[SORT_COLUMN_INDEX]));
+	
+	if (dt1==dt2) {
+		return 0;
+	}
+	if (dt1<dt2) { 
+		return -1;
+	}
+	return 1;
+}
+function ts_sort_numeric(a,b) {
+	var aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]);
+	aa = clean_num(aa);
+	var bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]);
+	bb = clean_num(bb);
+	return compare_numeric(aa,bb);
+}
+function compare_numeric(a,b) {
+	var a = parseFloat(a);
+	a = (isNaN(a) ? 0 : a);
+	var b = parseFloat(b);
+	b = (isNaN(b) ? 0 : b);
+	return a - b;
+}
+function ts_sort_caseinsensitive(a,b) {
+	aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]).toLowerCase();
+	bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]).toLowerCase();
+	if (aa==bb) {
+		return 0;
+	}
+	if (aa<bb) {
+		return -1;
+	}
+	return 1;
+}
+function ts_sort_default(a,b) {
+	aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]);
+	bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]);
+	if (aa==bb) {
+		return 0;
+	}
+	if (aa<bb) {
+		return -1;
+	}
+	return 1;
+}
+function addEvent(elm, evType, fn, useCapture)
+// addEvent and removeEvent
+// cross-browser event handling for IE5+,	NS6 and Mozilla
+// By Scott Andrew
+{
+	if (elm.addEventListener){
+		elm.addEventListener(evType, fn, useCapture);
+		return true;
+	} else if (elm.attachEvent){
+		var r = elm.attachEvent("on"+evType, fn);
+		return r;
+	} else {
+		alert("Handler could not be removed");
+	}
+}
+function clean_num(str) {
+	str = str.replace(new RegExp(/[^-?0-9.]/g),"");
+	return str;
+}
+function trim(s) {
+	return s.replace(/^\s+|\s+$/g, "");
+}
+function alternate(table) {
+	// Take object table and get all it's tbodies.
+	var tableBodies = table.getElementsByTagName("tbody");
+	// Loop through these tbodies
+	for (var i = 0; i < tableBodies.length; i++) {
+		// Take the tbody, and get all it's rows
+		var tableRows = tableBodies[i].getElementsByTagName("tr");
+		// Loop through these rows
+		// Start at 1 because we want to leave the heading row untouched
+		for (var j = 0; j < tableRows.length; j++) {
+			// Check if j is even, and apply classes for both possible results
+			if ( (j % 2) == 0  ) {
+				if ( !(tableRows[j].className.indexOf('odd') == -1) ) {
+					tableRows[j].className = tableRows[j].className.replace('odd', 'even');
+				} else {
+					if ( tableRows[j].className.indexOf('even') == -1 ) {
+						tableRows[j].className += " even";
+					}
+				}
+			} else {
+				if ( !(tableRows[j].className.indexOf('even') == -1) ) {
+					tableRows[j].className = tableRows[j].className.replace('even', 'odd');
+				} else {
+					if ( tableRows[j].className.indexOf('odd') == -1 ) {
+						tableRows[j].className += " odd";
+					}
+				}
+			} 
+		}
+	}
+}
+]]
+
+-- Cascading Style Sheet --
+
+StrWebPageCSS =
+[[
+/* CSS Document */
+body {
+	font-family: Arial, Helvetica, sans-serif;
+	font-size: 0.8em;
+}
+h1 {
+	font: normal 1.5em Arial, Helvetica, sans-serif;
+}
+.datagrid table {
+	border-collapse: collapse;
+	text-align: left;
+	width: 100%;
+}
+.datagrid {
+	font: normal 12px/150% Arial, Helvetica, sans-serif;
+	background: #fff;
+	overflow: hidden;
+	border: 1px solid #006699;
+	-webkit-border-radius: 3px;
+	-moz-border-radius: 3px;
+	border-radius: 3px;
+}
+.datagrid table td, .datagrid table th {
+	padding: 3px 10px;
+}
+.datagrid table thead th {
+	background: -webkit-gradient( linear, left top, left bottom, color-stop(0.05, #006699), color-stop(1, #00557F) );
+	background: -moz-linear-gradient( center top, #006699 5%, #00557F 100% );
+	filter: progid: DXImageTransform.Microsoft.gradient(startColorstr='#006699', endColorstr='#00557F');
+	background-color: #006699;
+	color: #ffffff;
+	font-size: 12px;
+	font-weight: bold;
+	border-left: 1px solid #0070A8;
+	text-align: left;
+	padding: 2px 4px 2px 4px;
+}
+.datagrid table thead th:first-child {
+	border: none;
+}
+.datagrid table tbody td {
+	color: #00496B;
+	border-left: 1px solid #E1EEF4;
+	font-size: 12px;
+	font-weight: normal;
+	height: 42px
+}
+.datagrid table tbody .alt td, .datagrid table tbody .even td{
+	background: #E1EEF4;
+	color: #00496B;
+}
+.datagrid table tbody td:first-child {
+	border: none;
+}
+.datagrid table th a {
+	color: #ffffff;
+	font-size: 12px;
+	font-weight: bold;
+}
+]]
+
+-- Web Page Templates --
+
+StrWebPageTemplate =
+[[
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+	<head>
+		<title>{TitleName}</title>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<script type="text/javascript" src="{JS_File}"></script>
+		<link type="text/css" rel="stylesheet" href="{CSS_File}">
+	</head>
+	<body>
+		<h1>{TitleName}</h1>
+		<p>
+			The following people appear to have no Census information when they could be alive.<br />
+			People with no life dates recorded are assessed on their estimated life dates.<br />
+			Women who are married at the time of a Census are shown with their married name if available.<br />
+			Where there is no marriage date the Family Date is taken from the 1<sup>st</sup> child&#39;s birth date if any.
+		</p>
+		<div class="datagrid">
+			<table class="sortable" id="anyid" summary="census search">
+				<thead>
+					<tr>
+						<th>No.</th>{AncestryCo}{FindMyPast}
+						<th>Individual's Name</th>
+						<th>Birth Year</th>
+						<th>Life Dates</th>
+						<th class="unsortable">Spouse Family at Census</th>
+						<th class="unsortable">Family Date</th>
+						<th class="unsortable">Father's Name</th>
+						<th class="unsortable">Mother's Name</th>
+					</tr>
+				</thead>
+{WebGrid}
+			</table>
+		</div>
+	</body>
+</html>
+]]
+
+StrWebLineTemplate =
+[[
+				<tr class="{LineColour}">
+					<td>{ItemNumber}</td>
+{AncestryCo}
+{FindMyPast}
+					<td>{Individual}</td>
+					<td>{Birth_Year}</td>
+					<td>{Life_Dates}</td>
+					<td>{FamilyName}</td>
+					<td>{FamilyDate}</td>
+					<td>{FatherName}</td>
+					<td>{MotherName}</td>
+				</tr>
+]]
+
+StrAncestryCoTemplate =
+[[					<td>
+						<a href="http://search.{WebAddress}/cgi-bin/sse.dll?{CensusCode}&amp;rank=1&amp;new=1&amp;so=3&amp;MSAV=0&amp;msT=1&amp;gsfn={GivenNames}&amp;gsln={TheSurname}&amp;msbdy={Birth_Year}&amp;msbpn__ftp={BirthPlace}&amp;msbdp={BirthRange}&amp;_83004003-n_xcl={ExcludeSex}{Relatives}" target="_blank">
+							{CensusYear}
+						</a>
+					</td>]]
+
+StrAncestryFatherTemplate = "&amp;msfng0={GivenNames}&amp;msfns0={TheSurname}"
+
+StrAncestryMotherTemplate = "&amp;msmng0={GivenNames}&amp;msmns0={TheSurname}"
+
+StrAncestrySpouseTemplate = "&amp;mssng0={GivenNames}&amp;mssns0={TheSurname}"
+
+-- Could add &amp;memberfirstname={FirstName}&amp;memberfirstname_variants=true&amp;memberlastname={LastName}&amp;memberlastname_variants=true
+
+-- Major revision to template -- 2 April 2014 V3.1 -- Now applies to ALL the FindMyPast web sites -- Uses &eventyear={CensusYear}&eventyear_offset=0 instead of /census?datasetname={RecordCode}
+StrFindMyPastTemplate =
+[[					<td>
+						<a href="http://search.{WebAddress}/results/{RegionCode}-records-in-census-land-and-{Category}?firstname={GivenNames}&amp;firstname_variants=true&amp;lastname={TheSurname}&amp;lastname_variants=true&amp;eventyear={CensusYear}&amp;eventyear_offset=0&amp;yearofbirth={Birth_Year}&amp;yearofbirth_offset={BirthRange}" target="_blank">
+							{CensusYear}
+						</a>
+					</td>]]
+
+--[==[
+2 April 2014 V3.1 examples:
+http://search.new.findmypast.co.uk/results/united-kingdom-records-in-census-land-and-surveys?firstname=mike&firstname_variants=true&lastname=munro&eventyear=1901&eventyear_offset=0&yearofbirth=1891&yearofbirth_offset=2
+http://search.findmypast.ie/results/united-states-records-in-census-land-and-substitutes?firstname=mike&firstname_variants=true&lastname=munro&eventyear=1900&eventyear_offset=0&yearofbirth=1891&yearofbirth_offset=2
+
+-- Major revision to template -- 13 June 2013 
+StrFindMyPastTemplate =
+[[					<td>
+						<a href="http://search.{WebAddress}/search/{RegionCode}-records/census-land-and-{Category}/census?datasetname={RecordCode}&amp;firstname={GivenNames}&amp;firstname_variants=true&amp;lastname={TheSurname}&amp;lastname_variants=true&amp;birthyear={Birth_Year}&amp;birthyear_offset={BirthRange}" target="_blank">
+							{CensusYear}
+						</a>
+					</td>]]
+--]==]
+-- End Web Page Templates --
+
+-- Build Census Data Table --
+function TblCensusData(strCensusList)
+	--[[
+	 Year    Replaces {CensusYear} in various Templates, and used to check if Census Event exists
+	 Date    Converts to FH Simple Date Object and determines if Individual was alive and in Country at Census
+	 Census  Replaces {CensusCode} in Ancestry Template to choose Census Year records
+	 Region  Replaces {RegionCode} in FindMyPast World Template to choose Where in world records				-- 13 June 2013
+	 Record  Replaces {RecordCode} in FindMyPast World Template to choose Census Year Records data set		-- 13 June 2013 -- 2 April 2014 V3.1 discontinued
+	 Country Contains names of countries to determine if Individual was in Country at Census					-- 24 Nov 2013 V3.0
+	--]]
+	local tblCensusData = {}
+	if strCensusList:match("U. K.") then
+		table.insert(tblCensusData,{ Year=1841, Date= "6 Jun 1841", Census="gl=1841uki", Region="united-kingdom", Record="1841+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1851, Date="30 Mar 1851", Census="gl=1851uki", Region="united-kingdom", Record="1851+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1861, Date= "7 Apr 1861", Census="gl=1861uki", Region="united-kingdom", Record="1861+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1871, Date= "2 Apr 1871", Census="gl=1871uki", Region="united-kingdom", Record="1871+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1881, Date= "3 Apr 1881", Census="gl=1881uki", Region="united-kingdom", Record="1881+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1891, Date= "5 Apr 1891", Census="gl=1891uki", Region="united-kingdom", Record="1891+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1901, Date="31 Mar 1901", Census="gl=1901uki", Region="united-kingdom", Record="1901+englandutf002c+wales+utf0026+scotland+census",	Country="England,Wales,Scotland,UK,U.K." })
+		table.insert(tblCensusData,{ Year=1911, Date= "2 Apr 1911", Census="gl=1911uki", Region="united-kingdom", Record="1911+census+for+england+utf0026+wales",					Country="England,Wales,UK,U.K." }) -- Before 10 June 2013 was "1911+englandutf002c+wales+utf0026+scotland+census"
+	end
+	if strCensusList:match("U. S. A.") then
+		table.insert(tblCensusData,{ Year=1790, Date= "2 Aug 1790", Census="db=1790usfedcen", Region="united-states", Record="us+census+1790", Country="USA,U.S.A." }) -- Before 13 June 2013 were mostly "yyyy+us+census"
+		table.insert(tblCensusData,{ Year=1800, Date= "4 Aug 1800", Census="db=1800usfedcen", Region="united-states", Record="us+census+1800", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1810, Date= "6 Aug 1810", Census="db=1810usfedcen", Region="united-states", Record="us+census+1810", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1820, Date= "7 Aug 1820", Census="db=1820usfedcen", Region="united-states", Record="us+census+1820", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1830, Date= "1 Jun 1830", Census="db=1830usfedcen", Region="united-states", Record="us+census+1830", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1840, Date= "1 Jun 1840", Census="db=1840usfedcen", Region="united-states", Record="us+census+1840", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1850, Date= "1 Jun 1850", Census="db=1850usfedcen", Region="united-states", Record="us+census+1850", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1860, Date= "1 Jun 1860", Census="db=1860usfedcen", Region="united-states", Record="us+census+1860", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1870, Date= "1 Jun 1870", Census="db=1870usfedcen", Region="united-states", Record="us+census+1870", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1880, Date= "1 Jun 1880", Census="db=1880usfedcen", Region="united-states", Record="us+census+1880", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1900, Date= "1 Jun 1900", Census="db=1900usfedcen", Region="united-states", Record="us+census+1900", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1910, Date="15 Apr 1910", Census="db=1910uscenindex",Region="united-states",Record="us+census+1910", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1920, Date= "1 Jan 1920", Census="db=1920usfedcen", Region="united-states", Record="us+census+1920", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1930, Date= "1 Apr 1930", Census="db=1930usfedcen", Region="united-states", Record="us+census+1930", Country="USA,U.S.A." })
+		table.insert(tblCensusData,{ Year=1940, Date= "1 Apr 1940", Census="db=1940usfedcen", Region="united-states", Record="us+census+1940", Country="USA,U.S.A." })
+	end
+	if strCensusList:match("Canada") then
+	 	-- FindMyPast has no Canadian Census records
+		table.insert(tblCensusData,{ Year=1851, Date="12 Jan 1852", Census="db=1851canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1861, Date="14 Jan 1861", Census="db=1861canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1871, Date= "2 Apr 1871", Census="db=1871canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1881, Date= "4 Apr 1881", Census="db=1881canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1891, Date= "6 Apr 1891", Census="db=1891canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1901, Date="31 Mar 1901", Census="db=1901canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1906, Date="24 Jun 1906", Census="db=1906canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1911, Date= "1 Jun 1911", Census="db=1911canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1916, Date= "1 Jun 1916", Census="db=1916canada", Region="", Record="", Country="Canada" })
+		table.insert(tblCensusData,{ Year=1921, Date= "1 Jun 1921", Census="db=CanCen1921", Region="", Record="", Country="Canada" })		-- 30 Oct 2013
+	end
+	if strCensusList:match("Australia") then
+	 	-- FindMyPast Australian Census Data Sets appear in 'Full list of Australasian records' but do not return any Search records -- 2 April 2014 V3.1 now some do return records
+		table.insert(tblCensusData,{ Year=1828, Date= "1 Nov 1828", Census="db=1828nswcensus", Region="australia-and-new-zealand", Record="",										Country="Australia,New Zealand" })
+		table.insert(tblCensusData,{ Year=1841, Date= "2 Mar 1841", Census="db=1841nsw"      , Region="australia-and-new-zealand", Record="1841-south-australia-census",	Country="Australia,New Zealand" })
+--	?	table.insert(tblCensusData,{ Year=1881, Date= "? Mar 1881", Census=""                , Region="australia-and-new-zealand", Record="1841-south-australia-census",	Country="Australia,New Zealand" })
+		table.insert(tblCensusData,{ Year=1891, Date= "5 Apr 1891", Census="db=1891nswcen"   , Region="australia-and-new-zealand", Record="1891-northern-territory-census",	Country="Australia,New Zealand" })
+		table.insert(tblCensusData,{ Year=1901, Date="31 Mar 1901", Census="db=1901nswcen"   , Region="australia-and-new-zealand", Record="1901-northern-territory-census",	Country="Australia,New Zealand" })
+--	?	table.insert(tblCensusData,{ Year=1911, Date= "? Mar 1911", Census=""                , Region="australia-and-new-zealand", Record="1911-northern-territory-census",	Country="Australia,New Zealand" })
+--	?	table.insert(tblCensusData,{ Year=1921, Date= "? Mar 1921", Census=""                , Region="australia-and-new-zealand", Record="1921-northern-territory-census",	Country="Australia,New Zealand" })
+	end
+	local datCensus = fhNewDate()
+	for intCensus, tblCensus in ipairs(tblCensusData) do				-- Convert each Date string to an FH Simple Date Object
+		datCensus:SetValueAsText(tblCensus.Date)
+		tblCensus.Date = datCensus:Clone()									-- Save cloned FH Simple Date Object
+	end
+	return tblCensusData
+end -- function TblCensusData
+
+-- Get Individual Name & Birth Details --
+TblDetails = {}																	-- Save details in table cache for quick subsequent lookup
+function TblIndividualDetails(ptrIndi,intRecId)
+	if not TblDetails[intRecId] then
+		TblDetails[intRecId] = {}
+		local tblDetails = TblDetails[intRecId]
+		tblDetails.First = fhGetItemText(ptrIndi,"~.NAME:FIRST")										-- 07 June 2013
+		tblDetails.Given = encoder.StrCP1252_URI(fhGetItemText(ptrIndi,"~.NAME:GIVEN_ALL"))		-- 07 June 2013
+		tblDetails.Sname = encoder.StrCP1252_URI(fhGetItemText(ptrIndi,"~.NAME:SURNAME"))		-- 07 June 2013
+		tblDetails.Place = encoder.StrCP1252_URI(fhGetItemText(ptrIndi,"~.BIRT.PLAC"))			-- 07 June 2013
+		tblDetails.Birth = fhCallBuiltInFunction("EstimatedBirthDate",ptrIndi,"MID",9):GetYear()
+		if tblDetails.Birth == 0 then
+			tblDetails.Birth = ""												-- No estimated Birth year available
+			tblDetails.Range = ""
+		else																		-- Tolerance range = latest Birth year - earliest Birth year
+			tblDetails.Range = fhCallBuiltInFunction("EstimatedBirthDate",ptrIndi,"LATEST",9):GetYear() - fhCallBuiltInFunction("EstimatedBirthDate",ptrIndi,"EARLIEST",9):GetYear()
+			tblDetails.Range = math.ceil( tblDetails.Range / 2 ) + 5	-- 10 June 2013 extend range by ±5 years to allow for approx/calc/est, 1841 Census rounding, etc -- previously math.max( 5, math.ceil( tblDetails.Range / 2 ) )
+		end
+	end
+	return TblDetails[intRecId]
+end -- function TblIndividualDetails
+
+-- Build Ancestry Co Search --
+function StrAncestryCo(strWebAddress,tblCensusData,ptrIndi,tblDetails,strSurname,ptrFamily)			-- 25 Nov 2013 V3.0
+	local strAncestryCo = ""
+	if strWebAddress then
+		if not ptrIndi then 													-- Build table heading
+			strAncestryCo = "\n						<th>"..strWebAddress.."</th>"
+		else																		-- Build table data search anchor tag
+			strAncestryCo = StrAncestryCoTemplate
+			strAncestryCo = strAncestryCo:replace("{WebAddress}",strWebAddress)
+			strAncestryCo = strAncestryCo:replace("{CensusCode}",tblCensusData.Census)					-- 25 Nov 2013 V3.0
+			strAncestryCo = strAncestryCo:replace("{GivenNames}",tblDetails.Given)
+			strAncestryCo = strAncestryCo:replace("{TheSurname}",encoder.StrCP1252_URI(strSurname))	-- 07 June 2013
+			strAncestryCo = strAncestryCo:replace("{Birth_Year}",tblDetails.Birth)
+			strAncestryCo = strAncestryCo:replace("{BirthRange}",tblDetails.Range)
+			strAncestryCo = strAncestryCo:replace("{BirthPlace}",tblDetails.Place)
+			strAncestryCo = strAncestryCo:replace("{CensusYear}",tblCensusData.Year)						-- 25 Nov 2013 V3.0
+			local tblExcludeSex = { Male="f", Female="m", [""]="" }
+			strAncestryCo = strAncestryCo:replace("{ExcludeSex}",tblExcludeSex[fhGetItemText(ptrIndi,"~.SEX")])
+			local strRelatives = ""
+			local strRelation = ""
+			local tblRelation = {}
+			local ptrRelation = fhNewItemPtr()
+			ptrRelation:MoveTo(ptrIndi,"~.~FATH>")							-- Get Father
+			if ptrRelation:IsNotNull() then
+				tblRelation = TblIndividualDetails(ptrRelation,fhGetRecordId(ptrRelation))
+				strRelation = StrAncestryFatherTemplate
+				strRelation = strRelation:replace("{GivenNames}",tblRelation.Given)
+				strRelation = strRelation:replace("{TheSurname}",tblRelation.Sname)
+				strRelatives = strRelatives..strRelation
+			end
+			ptrRelation:MoveTo(ptrIndi,"~.~MOTH>")							-- Get Mother
+			if ptrRelation:IsNotNull() then
+				tblRelation = TblIndividualDetails(ptrRelation,fhGetRecordId(ptrRelation))
+				strRelation = StrAncestryMotherTemplate
+				strRelation = strRelation:replace("{GivenNames}",tblRelation.Given)
+				strRelation = strRelation:replace("{TheSurname}",tblRelation.Sname)
+				strRelatives = strRelatives..strRelation
+			end
+			if ptrFamily:IsNotNull() then									-- Get Spouse at time of Census
+				if fhGetItemText(ptrIndi,"~.SEX") == "Female" then
+					ptrRelation:MoveTo(ptrFamily,"~.HUSB>")
+				else
+					ptrRelation:MoveTo(ptrFamily,"~.WIFE>")
+				end
+				if ptrRelation:IsNotNull() then
+					tblRelation = TblIndividualDetails(ptrRelation,fhGetRecordId(ptrRelation))
+					strRelation = StrAncestrySpouseTemplate
+					strRelation = strRelation:replace("{GivenNames}",tblRelation.Given)
+					strRelation = strRelation:replace("{TheSurname}",tblRelation.Sname)
+					strRelatives = strRelatives..strRelation
+				end
+			end
+			strAncestryCo = strAncestryCo:replace("{Relatives}",strRelatives)
+		end
+	end
+	return strAncestryCo
+end -- function StrAncestryCo
+
+-- Build Find My Past Search --
+function StrFindMyPast(strWebAddress,tblCensusData,ptrIndi,tblDetails,strSurname)						-- 25 Nov 2013 V3.0
+	local strFindMyPast = ""
+	if strWebAddress then
+		local intCensusYear = tblCensusData.Year																	-- 25 Nov 2013 V3.0
+		-- 2 April 2014 V3.1 -- ALL FindMyPast web sites now all use same World Search format
+		if not ptrIndi then 													-- Build table heading
+			strFindMyPast = "\n						<th>"..strWebAddress.."</th>"
+		else																		-- Build table data search anchor tag
+			local intBirth_Year = tblDetails.Birth
+			local intBirthRange = tblDetails.Range
+			if intBirthRange > 5 and intBirthRange < 40 then
+				intBirthRange = math.ceil(intBirthRange/10) * 10		-- Round up range offset to ±10, ±20, or ±40								-- 13 June 2013
+				if intBirthRange == 30 then intBirthRange = 40 end
+			end
+			local strCategory = "substitutes"								-- For "findmypast.com" U.S.A. and "findmypast.ie" Ireland			-- 13 June 2013
+			if strWebAddress == "new.findmypast.co.uk"
+			or strWebAddress == "findmypast.com.au" then
+				strCategory = "surveys"										-- For "new.findmypast.co.uk" U.K. and "findmypast.com.au" Australia	-- 13 June 2013
+			end
+			strFindMyPast = StrFindMyPastTemplate
+			strFindMyPast = strFindMyPast:replace("{WebAddress}",strWebAddress)
+			strFindMyPast = strFindMyPast:replace("{RegionCode}",tblCensusData.Region)							-- 13 June 2013 & 25 Nov 2013 V3.0
+			strFindMyPast = strFindMyPast:replace("{Category}"  ,strCategory)										-- 13 June 2013
+--!			strFindMyPast = strFindMyPast:replace("{RecordCode}",tblCensusData.Record)							-- 13 June 2013 & 25 Nov 2013 V3.0 -- 2 April 2014 V3.1 discontinued
+			strFindMyPast = strFindMyPast:replace("{CensusYear}",intCensusYear)
+			strFindMyPast = strFindMyPast:replace("{GivenNames}",encoder.StrCP1252_URI(tblDetails.First))	-- 07 June 2013
+			strFindMyPast = strFindMyPast:replace("{TheSurname}",encoder.StrCP1252_URI(strSurname))			-- 07 June 2013
+--	?		strFindMyPast = strFindMyPast:replace("{FirstName}" ,"")	-- Another household member name could be added
+--	?		strFindMyPast = strFindMyPast:replace("{LastName}"  ,"")	-- See StrFindMyPastTemplate "member..." filters
+			strFindMyPast = strFindMyPast:replace("{Birth_Year}",intBirth_Year)
+			strFindMyPast = strFindMyPast:replace("{BirthRange}",intBirthRange)
+		end
+	end
+	return strFindMyPast
+end -- function StrFindMyPast
+
+-- Current Family At Census --
+function CurrentFamily(ptrIndi,datCensusDate)
+	local ptrFamily  = fhNewItemPtr()
+	local ptrMarried = fhNewItemPtr()										-- 14 July 2013
+	local ptrFamsTag = fhNewItemPtr()										-- Find Marriage before Census Date
+	local ptrFamLink = fhNewItemPtr()
+	local ptrFamDate = fhNewItemPtr()
+	local datFamDate = fhNewDate()
+	local strSurname = fhGetItemText(ptrIndi,"~.NAME:SURNAME")		-- 07 June 2013
+	ptrFamsTag:MoveTo(ptrIndi,"~.FAMS")										-- First Family As Spouse
+	while ptrFamsTag:IsNotNull() do
+		ptrFamLink = fhGetValueAsLink(ptrFamsTag)
+		ptrFamDate:MoveTo(ptrFamLink,"~.MARR.DATE")
+		if ptrFamDate:IsNull() then											-- If no Marriage Date use Birth of First Child
+			ptrFamDate:MoveTo(ptrFamLink,"~.CHIL>BIRT.DATE")
+		end
+		datFamDate = fhGetValueAsDate(ptrFamDate)
+		if not(datFamDate:IsNull()) and datFamDate:Compare(datCensusDate) <= 0 then
+			strStatus = fhGetItemText(ptrFamLink,"~._STAT")
+			if strStatus ~= "Never Married" and strStatus ~= "Unmarried Couple" then
+				ptrFamily  = ptrFamLink:Clone()								-- Family couple married or with child before Census Date
+				ptrMarried = ptrFamDate:Clone()								-- 14 July 2013
+			end
+		end
+		if fhGetItemText(ptrIndi,"~.SEX") == "Female" and ptrFamily:IsNotNull() then -- 19 July 2013 moved from after 'end'
+			local strHusband = fhGetItemText(ptrFamily,"~.HUSB>NAME:SURNAME") -- 07 June 2013
+			if strHusband ~= "" then strSurname = strHusband end		-- Married women use husband's surname, if any -- 14 July 2013
+		end
+		ptrFamsTag:MoveNext("SAME_TAG")
+	end
+	return ptrFamily,strSurname,ptrMarried -- ptrFamDate				-- 14 July 2013
+end -- function CurrentFamily
+
+-- Get List of Records to Search --
+function TblRecordList(tblRecordList,strRecordList)
+	if strRecordList then														-- Ancestors or Descendants or Relations needed
+		local ptrRoot = tblRecordList[1]
+		local isAncestor   = strRecordList:match("Ancestor")			-- Ancestors    or  Ancestors & Descendants ?
+		local isDescendant = strRecordList:match("Descendant")			-- Descendants  or  Ancestors & Descendants ?
+		local isRelation   = strRecordList:match("Relation")			-- Relations ?
+		local intRelation  = fhCallBuiltInFunction("RelationPool",ptrRoot) or 0
+		local intIndi = 0
+		for ptrIndi in iterate.Records("INDI") do							-- Count number of Individuals
+			intIndi = intIndi + 1
+		end
+		if intIndi >= 1000 then
+			progbar.Start('Finding Relations',intIndi)					-- Optionally start the Progress Bar
+		end
+		intIndi = 0
+		for ptrIndi in iterate.Records("INDI") do							-- Loop through all Individuals to find relatives
+			intIndi = intIndi + 1
+			if isAncestor   and fhCallBuiltInFunction("IsAncestorOf"  ,ptrIndi,ptrRoot)
+			or isDescendant and fhCallBuiltInFunction("IsDescendantOf",ptrIndi,ptrRoot)
+			or isRelation   and fhCallBuiltInFunction("IsRelativeOf"  ,ptrIndi,ptrRoot)	-- 20 July 2013 alternative to RelationPool but only blood relations & spouses
+			or isRelation   and fhCallBuiltInFunction("RelationPool"  ,ptrIndi) == intRelation then
+				table.insert(tblRecordList,ptrIndi:Clone())				-- Ancestor or Descendant or Relation found
+				progbar.Message("Record Id "..fhGetRecordId(ptrIndi))
+				progbar.Step(intIndi)
+				intIndi = 0
+			end
+			if progbar.Stop() then return end
+		end
+		progbar.Close()
+	end
+	return tblRecordList
+end -- function TblRecordList
+
+-- Check if Census is missing and Individual was in Census Country on Census Date -- 25 Nov 2103 V3.0
+-- Many U.K. & Australia/Canada Census Dates were in same Year, some identical Dates and some different Dates, so must cater for all cases
+TblFacts = {}																	-- Save subset of Facts in table cache for quick subsequent lookup
+function IsCensusMissing(ptrIndi,intRecId,tblCensusData,isInCountry)
+	if TblFacts.RecId ~= intRecId then										-- Start empty table when Record Id changes
+		TblFacts = {}
+		TblFacts.RecId = intRecId
+		for ptrFact in iterate.Facts(ptrIndi) do							-- Save CENSus Events &/or all Facts with both full Simple Date and Place fields
+			local strTag = fhGetTag(ptrFact)
+			local datDate = fhGetValueAsDate(fhGetItemPtr(ptrFact,"~.DATE"))
+			local strDate = datDate:GetDisplayText("COMPACT")			-- Compact Simple Date Format is "dd mmm yyyy" and all parts needed, so length is > 9
+			local strPlace = fhGetItemText(ptrFact,"~.PLAC")
+			if strTag == "CENS"
+			or isInCountry and datDate:GetType() == "Simple" and datDate:GetSubtype() == "" and #strDate > 9 and #strPlace > 1 then
+				table.insert(TblFacts,{ Tag=strTag, Date=datDate:Clone(), Place=", "..strPlace..", " })
+			end
+		end
+	end
+	isInCountry = true															-- Assume person is in Census Country on Census Date and missing Census Event
+	for intFact, tblFact in ipairs(TblFacts) do							-- Check each Fact in lookup table
+		local intCompare = tblFact.Date:Compare(tblCensusData.Date)	-- Comparison = 0 even if only partial match for CENSus Event Year or Month & Year
+		if intCompare == 0 then												-- Fact Date matches Census Date
+			local strTag = tblFact.Tag
+			local strPlace = tblFact.Place
+			if strTag == "CENS" and strPlace == ", , " then				-- CENSus Event for Date but no Place field
+				return false														-- Assume it is for Census Country, so Census is NOT missing
+			end
+			for _, strCountry in ipairs ( tblCensusData.Country:split() ) do
+				if strPlace:matches(", "..strCountry..", ") then
+					if strTag == "CENS" then return false end				-- CENSus Event for Date & Country, so Census is NOT missing
+				else
+					isInCountry = false											-- Fact for Census Date but not Country, so Census is NOT missing as person was abroad
+				end
+			end
+		end
+		if intCompare > 0 then break end									-- Curtail loop when Fact Date is after Census Date
+	end
+	return isInCountry															-- If in Country on Date then Census is missing, otherwise Census is NOT missing
+end -- function IsCensusMissing
+
+-- Delete files accessed more than 1 hour ago --
+function DeleteOldFiles(strFolder,strFile)
+	local intTime = os.time() - 3600										-- Time in seconds one hour ago
+	for strEntry in lfs.dir(strFolder) do									-- Search for files in the folder
+		if strEntry ~= "." and strEntry ~= ".." then
+			local strPath = strFolder.."\\"..strEntry
+			local tblAttr, strError = lfs.attributes(strPath)			-- Obtain file attributes
+			if not tblAttr then tblAttr = { mode="attrfail", error=strError } end 
+			if tblAttr.mode == "file"
+			and strEntry:matches(strFile) then								-- Simple file with matching name?
+				if tblAttr.access < intTime then
+					general.DeleteFile(strPath)								-- Delete if access time is an hour ago
+				end
+			end
+		end
+	end
+end -- function DeleteOldFiles
+
+-- Run Census Lookup --
+function RunLookup(strCensusList,strAncestryCo,strFindMyPast,strRecordList,isInCountry)
+	-- strCensusList	Chosen set of Census entries
+	local strFolder = os.getenv("TEMP").."\\"								-- Define temporary folder for browser files
+	local strPlugin = iup_gui.Plugin:lower():gsub(" ","")				-- Define lowercase and despaced Plugin name
+	local strFile_js = strPlugin..".js" 									-- Define temporary filenames for .css, .js & .html files
+	local strFile_css = strPlugin..".css"
+	local strFile_html = os.tmpname():gsub("^\\","")..strPlugin..".html"
+	DeleteOldFiles(strFolder,strPlugin)										-- Delete any old copies of the temporary files
+	local strFileName = ""
+	local strWebPage = StrWebPageTemplate									-- Web page of headings and placeholders for following components
+	local tblWebGrid = {}														-- Web grid of Census web lines
+	local strWebLine = ""														-- Web line in grid above
+	local strLineColour = ""													-- Web line colour switch
+	local tblCensusData = TblCensusData(strCensusList)					-- Table of Census data per year for chosen country
+	local strTitleName = "selected Individuals"							-- Title name for Individuals via Select Records
+	local tblRecordList = {}													-- List of Individual Records to search
+	local intRecordList = 9000												-- Allow large numer of Individuals via Select Records
+	if strRecordList then intRecordList = 1 end							-- But only one for Ancestors/Descendants/Relations option
+	tblRecordList = fhPromptUserForRecordSel("INDI",intRecordList)	-- Select Records dialogue
+	if #tblRecordList == 0 then return end
+	if strRecordList then														-- Title details of chosen root person for Ancestors/Descendants/Relations option
+		strTitleName = strRecordList..fhGetItemText(tblRecordList[1],"~.NAME").." "..fhCallBuiltInFunction("LifeDates",tblRecordList[1])
+	end
+	strTitleName = strCensusList.." are missing for "..strTitleName	-- Prefix Census List to title
+	strWebPage = strWebPage:replace("{JS_File}",strFile_js)			-- Insert web page components into placeholders
+	strWebPage = strWebPage:replace("{CSS_File}",strFile_css)
+	strWebPage = strWebPage:replace("{TitleName}",encoder.StrCP1252_XML(strTitleName)) -- 07 June 2013
+	strWebPage = strWebPage:replace("{AncestryCo}",StrAncestryCo(strAncestryCo))
+	strWebPage = strWebPage:replace("{FindMyPast}",StrFindMyPast(strFindMyPast,tblCensusData[1])) -- 25 Nov 2103 V3.0
+	local datBirthDate = fhNewDate()
+	local datDeathDate = fhNewDate()
+	local datCensusDate = fhNewDate()
+	local intCensusYear = 0
+	local tblIndiItem = {}														-- Result Set tables
+	local tblRecordId = {}
+	progbar.Setup(iup_gui.DialogueAttributes("Bars"))
+	tblRecordList = TblRecordList(tblRecordList,strRecordList)		-- Obtain list of Individual Records to search
+	if #tblRecordList >= 200 then
+		progbar.Start('Searching Individuals',#tblRecordList)			-- Optionally start the Progress Bar
+	end
+	for intIndi, ptrIndi in ipairs(tblRecordList) do					-- Check each Individual against each Census
+		local isCensusMissing = false
+		local intRecordId = fhGetRecordId(ptrIndi)
+		local tblDetails = {}
+		local strBirthYear = ""
+		datBirthDate:SetSimpleDate(fhCallBuiltInFunction("EstimatedBirthDate",ptrIndi,"EARLIEST",9))
+		datDeathDate:SetSimpleDate(fhCallBuiltInFunction("EstimatedDeathDate",ptrIndi,"LATEST",9))
+		for intEntry, tblCensusData in ipairs(tblCensusData) do		-- Check each Census against life dates of Individual
+			datCensusDate = tblCensusData.Date
+			if  datBirthDate:Compare(datCensusDate) <= 0
+			and datDeathDate:Compare(datCensusDate) >= 0 then			-- Individual is alive at selected Census Date
+				-- Check if Census Event is missing and Individual is in Census Country on Census Date
+				if IsCensusMissing(ptrIndi,intRecordId,tblCensusData,isInCountry) then -- 25 Nov 2103 V3.0
+					isCensusMissing = true										-- Census is Missing and Individual alive in Census Country
+					tblDetails = TblIndividualDetails(ptrIndi,intRecordId)
+					strBirthYear = tostring(tblDetails.Birth)
+					if strBirthYear > "0" then
+						strBirthYear = encoder.StrCP1252_XML(strBirthYear.." ± "..tblDetails.Range)	-- 07 June 2013
+					end
+					ptrFamily, strSurname, ptrFamDate = CurrentFamily(ptrIndi,datCensusDate)
+					if strLineColour == "odd" then strLineColour = "even" else strLineColour = "odd" end 
+					strWebLine = StrWebLineTemplate							-- Replace web line placeholders with actual components below
+					strWebLine = strWebLine:replace("{LineColour}",strLineColour)
+					strWebLine = strWebLine:replace("{ItemNumber}",#tblWebGrid + 1)
+					strWebLine = strWebLine:replace("{AncestryCo}",StrAncestryCo(strAncestryCo,tblCensusData,ptrIndi,tblDetails,strSurname,ptrFamily))			-- 25 Nov 2013 V3.0
+					strWebLine = strWebLine:replace("{FindMyPast}",StrFindMyPast(strFindMyPast,tblCensusData,ptrIndi,tblDetails,strSurname))	 -- 13 June 2013 & 25 Nov 2013 V3.0
+					strWebLine = strWebLine:replace("{Individual}",encoder.StrCP1252_XML(strSurname)..", "..encoder.StrGetItem_XML(ptrIndi,"~.NAME:GIVEN_ALL").." ["..intRecordId.."]") -- 07 June 2013
+					strWebLine = strWebLine:replace("{Birth_Year}",strBirthYear)
+					strWebLine = strWebLine:replace("{Life_Dates}",fhCallBuiltInFunction("LifeDates",ptrIndi))
+					strWebLine = strWebLine:replace("{FamilyName}",encoder.StrGetItem_XML(ptrFamily,"~"))				-- 07 June 2013
+					strWebLine = strWebLine:replace("{FamilyDate}",encoder.StrGetItem_XML(ptrFamDate,"~:ABBREV2"))	-- 07 June 2013
+					strWebLine = strWebLine:replace("{FatherName}",encoder.StrGetItem_XML(ptrIndi,"~.~FATH>"))		-- 07 June 2013
+					strWebLine = strWebLine:replace("{MotherName}",encoder.StrGetItem_XML(ptrIndi,"~.~MOTH>"))		-- 07 June 2013
+					table.insert(tblWebGrid,strWebLine)
+				end
+			end
+		end
+		if isCensusMissing then												-- Census Missing so add Individual to Result Set
+			table.insert(tblIndiItem,ptrIndi:Clone())
+			table.insert(tblRecordId,intRecordId)
+		end
+		progbar.Message("Record Id "..intRecordId)
+		progbar.Step(1)
+		if progbar.Stop() then return end
+	end
+	if #tblIndiItem > 0 then													-- Invoke browser web page and show Result Set
+		strFileName = strFolder..strFile_js
+		if not general.FlgFileExists(strFileName) then
+			general.SaveStringToFile(StrWebPageJS,strFileName)			-- Output temporary .js Java Script file
+		end
+		strFileName = strFolder..strFile_css
+		if not general.FlgFileExists(strFileName) then
+			general.SaveStringToFile(StrWebPageCSS,strFileName)			-- Output temporary .css Style Sheet file
+		end
+		strWebPage = strWebPage:replace("{WebGrid}",table.concat(tblWebGrid))
+		strFileName = strFolder..strFile_html
+		general.SaveStringToFile(strWebPage,strFileName)				-- Output & execute temporary .html web page file
+		local isOK, intErrorCode, strErrorText = fhShellExecute(strFileName)
+		progbar.Step(1)
+		fhOutputResultSetTitles(strTitleName, strTitleName, "Printed Date: %#x")
+		fhOutputResultSetColumn("Individual" , "item", tblIndiItem, #tblIndiItem, 180, "align_left")
+		fhOutputResultSetColumn("Record Id","integer", tblRecordId, #tblIndiItem, 40, "align_right")
+		progbar.Close()
+	else
+		progbar.Close()
+		iup_gui.MemoDialogue("\n No "..strTitleName..". \n")			-- No Census Missing informative message
+	end
+end -- function RunLookup
+
+-- Main code starts here --
+
+	fhInitialise(5,0,0,"save_recommended")									-- Recommend current GEDCOM is saved if outstanding changes
+
+	PresetGlobalConstants()													-- Preset global data constants
+
+	ResetDefaultSettings()														-- Preset default sticky settings
+
+	LoadSettings()																-- Load sticky data settings
+
+	iup_gui.CheckVersionInStore()											-- Notify if later Version
+
+	GUI_MainDialogue()															-- Invoke User Dialogue
+
+	SaveSettings()																-- Save sticky data settings
+
+--[[
+@V3.1:				iup_gui module Help window X Close crash fix, extra fonts, new CheckVersionInStore, inhibit Minimize & Maximize in popups, new.findmypast.co.uk web search URL, etc, etc.
+@V3.0:				Optionally do not list as missing from Census if a Fact is found on the Census Date but not in the Census Country, and cope with different country Census dates in same year.
+@V2.9:				Uses IsRelativeOf() as workaround for RelationPool() not working, plus related minor change to GUI, Version History help, Canadian 1921 Census, and new Library Modules.
+@V2.8:				Mother with a child, but father with no surname, retains original surname, and Family Date bug corrected.
+@V2.7:				EstimatedBirthDate() sets Birth Year & Range in search templates, Individual Name & Birth lookup more efficient, new FindMyPast Template codes,
+					new XML/HTML/URI/UTF encoding, DeleteOldFiles() modified, gsub() problems fixed with plain text versions, and revised web page layout.
+@V2.6:				Create js & css files from scripts in Plugin and delete 1-hour old temp js & css & html files, add FindMyPast USA, Ireland & Australia World Search for UK & USA Census.
+@V2.5:				Add 'Restore Defaults' and 'Set Window Font' and 'Help & Advice' and 'Relationship Pool' option, plus Australian Census, and all Ancestry web sites.
+@ FHUG Work in Progress Versions:
+@V2.4:				Set GUI attributes according to options, remove gss= Mask for USA Ancestry, add option for Ancestors/Descendants/both/anyone. 
+@V2.3:				Changed Canada Mask settings and many other minor updates to improve HTML and LUA style.
+@V2.2:				Plugin exits after Run Census Lookup, and HTML symbols are escaped.
+@V2.1:				Added Canada 1851, and incorporated Bill Henshaw's USA Census settings
+@V2.0:				Merge various similar Plugins into one with user options
+@ Ancestor's UK Census Checker Versions:
+@V1.3:				Add Output to Result Set as well, to make it easier to find the Ancestors in the Local Database and support custom Census events in the xxxx Census naming format, additionally add sorting to the web output.
+@V1.2:				Change Find My Past Search to the new format
+@V1.1:				Added Find My Past Search  
+--]]

@@ -1,0 +1,138 @@
+--[[
+@Title: Quick Descendant Breakdown
+@Author: Jane Taubman
+@Version: March 2013
+@LastUpdated: 
+@Description: Quick list of generation counts for direct descendants.
+]]
+
+function main()
+    local plist = fhPromptUserForRecordSel('INDI',1)
+    if plist[1] == nil then
+        return
+    end
+    local list = GetDecendantList(plist[1])
+    local tblOutput,iC = createResultTable()
+    local rel = {}
+    -- Define Columns
+    tblOutput.gen = {title='Generation',type='integer',width=10,align='align_left',content={}, sort=1,ascending=true}
+    tblOutput.desc = {title='Relationship',type='text',width=100,align='align_left',content={}, sort=1,ascending=false}
+    tblOutput.count = {title='count',type='integer',width=30,align='align_left',content={}}
+    tblOutput.male = {title='Male',type='integer',width=30,align='align_left',content={}}
+    tblOutput.female = {title='Female',type='integer',width=30,align='align_left',content={}}
+    for _,ptr in pairs(list) do
+        -- =RelationCode(["Individual"],%INDI%,GENERATION,1)
+        local gen = fhCallBuiltInFunction('RelationCode',plist[1],ptr,'GENS_DOWN',1)
+        local reldesc = fhCallBuiltInFunction('Relationship',plist[1],ptr)
+        local sex = fhGetItemText(ptr,'~.SEX')
+        rel[gen] = rel[gen] or {rel=reldesc, count = 0,male = 0,female = 0, other = 0}
+        rel[gen].count = rel[gen].count + 1
+        if sex == 'Male' then rel[gen].male = rel[gen].male + 1
+        elseif sex == 'Female' then rel[gen].female = rel[gen].female + 1
+        else rel[gen].other = rel[gen].other + 1
+        end
+    end
+    -- output table
+    for key,line in pairs(rel) do
+        if key > 0 then
+            iC = iC + 1
+            tblOutput.gen.content[iC] = key
+            local label = line.rel:gsub('[Dd]aughter','child')
+            local label = label:gsub('[Ss]on','child')
+            tblOutput.desc.content[iC] = label
+            tblOutput.count.content[iC] = line.count
+            tblOutput.male.content[iC] = line.male
+            tblOutput.female.content[iC] = line.female
+        end
+    end
+    local title = 'Quick Descendant Breakdown '..fhGetDisplayText(plist[1])
+    fhOutputResultSetTitles(title, title, "Print Date: %#x")
+    for t in tblOutput() do
+        fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align,(t.sort or 0),t.ascending)
+    end
+end
+
+function createResultTable()
+    -- create metatable
+    local tblOutput_mt = {}
+    tblOutput_mt.col = 0
+    tblOutput_mt.seq = {}
+    tblOutput_mt.__newindex = function (t,k,v)
+        rawset(t,k,v) -- update original table
+        local m = getmetatable(t)
+        m.col = m.col + 1
+        table.insert(m.seq,k)
+    end
+    tblOutput_mt.__call = function (t)
+        local i = 0
+        local m = getmetatable(t)
+        local n = table.getn(m.seq)
+        return function ()
+            i = i + 1
+            if i <= n then return t[m.seq[i]] end
+        end
+    end
+    local tblOutput = {} -- Define Columns Table
+    setmetatable(tblOutput, tblOutput_mt)
+    local iC = 0 -- Define count of lines
+    return tblOutput,iC
+end
+--[[
+@function: CheckDuplicate
+@description: Adds Record Id as value and index, to table if it does not already exist
+@parameters: Item Pointer - Must be at Record Level
+@returns: true if pointer is a duplicate
+@requires: none
+]]
+
+function CheckDuplicate(table, ptr)
+    local id = fhGetRecordId(ptr)
+    if table[id] == nil then
+        table[id] = id
+        return false
+    else
+        return true
+    end
+end
+-- End Function
+--[[
+@function: GetDecendantList
+@description: Returns a list of decendants
+@parameters: Item Pointer - Must be at Record Level
+@returns: table of record Item Pointers
+@requires: CheckDuplicate
+]]
+
+function GetDecendantList(ptr)
+    local decendantlist = {}
+    local dupcheck = {}
+    local ptrChild = fhNewItemPtr()
+    local ptrFamily = fhNewItemPtr()
+    local ptrFamilyRec = fhNewItemPtr()
+    local ptrBase = fhNewItemPtr
+    table.insert(decendantlist,ptr:Clone())
+    CheckDuplicate(dupcheck,ptr)
+    iLoop = 1
+    while iLoop <= #decendantlist do
+        ptrBase = decendantlist[iLoop]
+        -- Loop Family as Spouse
+        ptrFamily:MoveTo(ptrBase,'~.FAMS')
+        while ptrFamily:IsNotNull() do
+            ptrFamilyRecord = fhGetValueAsLink(ptrFamily)
+            -- Loop Children
+            ptrChild:MoveTo(ptrFamilyRecord,'~.CHIL')
+            while ptrChild:IsNotNull() do
+                ptrChildRecord = fhGetValueAsLink(ptrChild)
+                if ptrChildRecord:IsNotNull() and not CheckDuplicate(dupcheck,ptrChildRecord) then
+                    table.insert(decendantlist,fhGetValueAsLink(ptrChild))
+                end
+                ptrChild:MoveNext('SAME_TAG')
+            end
+            ptrFamily:MoveNext('SAME_TAG')
+        end
+        iLoop = iLoop + 1
+    end
+    return decendantlist
+end
+-- End Function
+main()

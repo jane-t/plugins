@@ -1,0 +1,91 @@
+--[[
+@Title: Clipboard Cleanup
+@Author: Jane Taubman
+@Version: 1.0
+@LastUpdated: March 2013 
+@Description: Takes the current text contents of the clipboard and provides options for cleaning it for use in Family Historian (or elsewhere)
+]]
+
+function main()
+    local clipboard = iup:clipboard()
+    if clipboard.textavailable then
+        strText= clipboard.text
+        mainScreen(strText)
+    else
+        fhMessageBox('Text not found in Clipboard')
+        return
+    end
+end
+--------------------------------- Functions
+
+function mainScreen(clip)
+    local text = iup.text{value=clip, MULTILINE='YES', EXPAND='YES' }
+    local lstSingle = iup.list{" space",", comma",": colon", value='1', dropdown = "YES", visible_items = 5}
+    local btnSingle = iup.button{title='Single Line',expand="HORIZONTAL",padding="4"}
+    btnSingle.action = function()
+        text.value = doSingle(text.value,lstSingle.value)
+        return
+    end
+    local btnRemoveBlanks = iup.button{title='Remove Blank Lines',expand="HORIZONTAL"}
+    btnRemoveBlanks.action=function()
+        text.value = doBlanks(text.value)
+        return 
+    end
+    local btnTitleCase = iup.button{title='Convert To Titlecase',expand="HORIZONTAL"}
+    btnTitleCase.action=function()
+        text.value = titlecase(text.value)
+        return 
+    end
+    local btnUndo = iup.button{title='Undo',expand="HORIZONTAL"}
+    btnUndo.action = function()
+        text.value = clip
+        return
+    end
+    local btnCopyToClipboard = iup.button{title='Copy to Clipboard and Close',expand="HORIZONTAL",padding="4"}
+    btnCopyToClipboard.action = function()
+        doCopyToClipboard(text.value)
+        return iup.CLOSE
+    end
+    local dialogue = iup.dialog{iup.vbox{
+        iup.hbox{iup.label{title='Separator:'},lstSingle,btnSingle,btnRemoveBlanks,btnTitleCase,btnUndo,btnCopyToClipboard},text};
+    title="Clipboard Cleanup",dialogframe="YES",background="250 250 250",gap="8",margin="8x8",size="HALFxHALF",RESIZE="YES"}
+    dialogue:show()
+    if (iup.MainLoopLevel()==0) then iup.MainLoop() end
+    dialogue:destroy()
+end
+
+function doSingle(str,int)
+    str = doBlanks(str)
+    local lstValues = {" ", ", "," : "}
+    local pos = tonumber(int)
+    if pos == 0 then pos = 1 end
+    local separator = lstValues[pos]
+    str = str:gsub('%s+$','') -- Remove end of line blanks
+    str = str:gsub('\n',separator)
+    str = str:gsub('%s+',' ') -- Convert Multiple spaces or tabs to a single space
+    return str
+end
+
+function doBlanks(str)
+    str = str:gsub('%s+$','')
+    str = str:gsub('\n+','\n')
+    return str
+end
+
+function doCopyToClipboard(str)
+    local clipboard = iup:clipboard()
+    clipboard.text = str
+end
+
+function titlecase(str)
+result=''
+    for word in string.gfind(str, "[%S%.]+") do          
+        local first = string.sub(word,1,1)
+        result = (result .. string.upper(first) ..
+            string.lower(string.sub(word,2)) .. ' ')
+    end    
+    return result
+end
+--------------------------------- Start Program
+require "iup"
+main()

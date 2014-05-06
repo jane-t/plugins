@@ -1,0 +1,2525 @@
+--[[
+@Title:			Show Project Statistics
+@Author:			Mike Tate
+@Version:			1.7
+@LastUpdated:	19 Nov 2013
+@Description:	Show project statistics summary as requested by Wish List Ref 191 File Summary Display.
+@V1.7:				Improve some Item names & 'buddy' pointers, report Dates too far in past, add Exception Report Options tab, see comments marked with 'V1.7'.
+@V1.6:				Improve some "buddy" pointers to refer to data field, fix invalid date warning text, and fix ResetGridCells error, see comments marked with 'V1.6'.
+@V1.5:				Check date warnings using GetDataWarning(...) in UpdateDate(...) function, count Max.Spouses & report if any Spouse link is duplicated, and add "buddy" column to Result Set.
+@V1.4:				Preserve the Result Set with Grid, report Permanent/Automatic Record Idents and Citation Entry Dates in future, allow Flag name "All", bug fix AgeAt -ve age by -1, plus new string library.
+					Add Cremation events to Facts tab, and change 'Close & Show Report' button label to 'Close & Report' plus other adjustments to get height < 600 pixel, add Version History help, and GUI Library.
+@V1.3:				Correct "Ave.Children" count, add "Idents" count, refine several other counts, add Result Set Exceptions Report, show highest & lowest 2 Pools & 5 Flags with rest in middle.
+@V1.2:				Correct "Both Sex", "Same Sex", "One Parent", "No Parents" Couples counts, and sort Flags by popularity.
+@V1.1:				Correct the Age statistics, add Age At and Pool and Flag plus a few other statistics.
+@V1.0:				Initial version with Tabs, Export CSV files, etc.
+]]
+
+--[[
+@Title:			aa Library Functions Preamble
+@Author:			Mike Tate
+@Version:			1.0
+@LastUpdated:	14 Nov 2013
+@Description:	All the library module functions as preamble for Plugins.
+]]
+
+---[==[
+
+-- Initial +fh+ functions below should eventually become library modules --
+
+--[[
+@Title:			+fh+stringx_v1
+@Author:			Mike Tate
+@LastUpdated:	22 Oct 2013
+@Version:			1.2
+@Description:	Extended string functions to supplement LUA string library.
+@V1.0:				Initial version.
+]]
+
+local function stringx_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}									-- Local environment table
+package.seeall(fh)								-- Enable all globals
+module(...,package.seeall)					-- Create matching module name
+setfenv(1,fh)									-- All public names are added to local fh table
+
+function ReportVersion()
+	local strMessage = "This is +fh+stringx_v1"
+	print(strMessage)
+	return strMessage
+end
+
+-- Split a string using "," or chosen separator --
+function split(strTxt,strSep)
+	local strSep = strSep or ","
+	local tblFields = {}
+	local strPattern = string.format("([^%s]+)", strSep)
+	strTxt = strTxt or ""
+	strTxt:gsub(strPattern, function(strField) tblFields[#tblFields+1] = strField end)
+	return tblFields
+end -- function split
+
+-- Split a string into numbers using " " or "," or "x" separators	-- Any non-number remains as a string
+function splitnumbers(strTxt)
+	local tblNum = {}
+	strTxt = strTxt or ""
+	strTxt:gsub("([^ ,x]+)", function(strNum) tblNum[#tblNum+1] = tonumber(strNum) or strNum end)
+	return tblNum
+end -- function splitnumbers
+
+-- Hide magic pattern symbols	^ $ ( ) % . [ ] * + - ?
+function plain(strTxt)
+	-- Prefix every non-alphanumeric character (%W) with a % escape character,
+	-- where %% is the % escape, and %1 is the original character capture.
+	strTxt = (strTxt or ""):gsub("(%W)","%%%1")
+	return strTxt
+end -- function plain
+
+-- matches is plain text version of string.match()
+function matches(strTxt,strFind,intInit)
+	strFind = (strFind or ""):gsub("(%W)","%%%1")						-- Hide magic pattern symbols
+	return strTxt:match(strFind,intInit)
+end -- function matches
+
+-- replace is plain text version of string.gsub()
+function replace(strTxt,strOld,strNew,intNum)
+	strOld = (strOld or ""):gsub("(%W)","%%%1")							-- Hide magic pattern symbols
+	return strTxt:gsub(strOld,function() return strNew end,intNum)	-- Hide % capture symbols
+end -- function replace
+
+-- convert is pattern without captures version of string.gsub()
+function convert(strTxt,strOld,strNew,intNum)
+	return strTxt:gsub(strOld,function() return strNew end,intNum)	-- Hide % capture symbols
+end -- function convert
+
+-- import overloads fh functions into string table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			string[strIndex] = anyValue
+		end
+	end
+end -- function import
+
+return fh
+
+end -- local function stringx_v1
+
+--[[
+@Module:			fh.tablex_v1
+@Author:			Mike Tate
+@Version:			1.1
+@LastUpdated:	19 Oct 2013
+@Description:	A Table Load Save Module.
+@V1.0:				Initial version 0.94 is Lua 5.1 compatible.
+]]
+
+local function tablex_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+------------------------------------------------------ Start Table Load Save
+-- require "_tableloadsave"
+--[[
+   Save Table to File/Stringtable
+   Load Table from File/Stringtable
+   v 0.94
+   
+   Lua 5.1 compatible
+   
+   Userdata and indices of these are not saved
+   Functions are saved via string.dump, so make sure it has no upvalues
+   References are saved
+   ----------------------------------------------------
+   table.save( table [, filename] )
+   
+   Saves a table so it can be called via the table.load function again
+   table must a object of type 'table'
+   filename is optional, and may be a string representing a filename or true/1
+   
+   table.save( table )
+      on success: returns a string representing the table (stringtable)
+      (uses a string as buffer, ideal for smaller tables)
+   table.save( table, true or 1 )
+      on success: returns a string representing the table (stringtable)
+      (uses io.tmpfile() as buffer, ideal for bigger tables)
+   table.save( table, "filename" )
+      on success: returns 1
+      (saves the table to file "filename")
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   table.load( filename or stringtable )
+   
+   Loads a table that has been saved via the table.save function
+   
+   on success: returns a previously saved table
+   on failure: returns as second argument an error msg
+   ----------------------------------------------------
+   
+   chillcode, http://lua-users.org/wiki/SaveTableToFile
+   Licensed under the same terms as Lua itself.
+]]--
+
+   -- declare local variables
+   --// exportstring( string )
+   --// returns a "Lua" portable version of the string
+   local function exportstring( s )
+      s = string.format( "%q",s )
+      -- to replace
+      s = string.gsub( s,"\\\n","\\n" )
+      s = string.gsub( s,"\r","\\r" )
+      s = string.gsub( s,string.char(26),"\"..string.char(26)..\"" )
+      return s
+   end
+--// The Save Function
+function save(  tbl,filename )
+   local charS,charE = "   ","\n"
+   local file,err
+   -- create a pseudo file that writes to a string and return the string
+   if not filename then
+      file =  { write = function( self,newstr ) self.str = self.str..newstr end, str = "" }
+      charS,charE = "",""
+   -- write table to tmpfile
+   elseif filename == true or filename == 1 then
+      charS,charE,file = "","",io.tmpfile()
+   -- write table to file
+   -- use io.open here rather than io.output, since in windows when clicking on a file opened with io.output will create an error
+   else
+      file,err = io.open( filename, "w" )
+      if err then return _,err end
+   end
+   -- initiate variables for save procedure
+   local tables,lookup = { tbl },{ [tbl] = 1 }
+   file:write( "return {"..charE )
+   for idx,t in ipairs( tables ) do
+      if filename and filename ~= true and filename ~= 1 then
+         file:write( "-- Table: {"..idx.."}"..charE )
+      end
+      file:write( "{"..charE )
+      local thandled = {}
+      for i,v in ipairs( t ) do
+         thandled[i] = true
+         -- escape functions and userdata
+         if type( v ) ~= "userdata" then
+            -- only handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables, v )
+                  lookup[v] = #tables
+               end
+               file:write( charS.."{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( charS.."loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write(  charS..value..","..charE )
+            end
+         end
+      end
+      for i,v in pairs( t ) do
+         -- escape functions and userdata
+         if (not thandled[i]) and type( v ) ~= "userdata" then
+            -- handle index
+            if type( i ) == "table" then
+               if not lookup[i] then
+                  table.insert( tables,i )
+                  lookup[i] = #tables
+               end
+               file:write( charS.."[{"..lookup[i].."}]=" )
+            else
+               local index = ( type( i ) == "string" and "["..exportstring( i ).."]" ) or string.format( "[%d]",i )
+               file:write( charS..index.."=" )
+            end
+            -- handle value
+            if type( v ) == "table" then
+               if not lookup[v] then
+                  table.insert( tables,v )
+                  lookup[v] = #tables
+               end
+               file:write( "{"..lookup[v].."},"..charE )
+            elseif type( v ) == "function" then
+               file:write( "loadstring("..exportstring(string.dump( v )).."),"..charE )
+            else
+               local value =  ( type( v ) == "string" and exportstring( v ) ) or tostring( v )
+               file:write( value..","..charE )
+            end
+         end
+      end
+      file:write( "},"..charE )
+   end
+   file:write( "}" )
+   -- Return Values
+   -- return stringtable from string
+   if not filename then
+      -- set marker for stringtable
+      return file.str.."--|"
+   -- return stringttable from file
+   elseif filename == true or filename == 1 then
+      file:seek ( "set" )
+      -- no need to close file, it gets closed and removed automatically
+      -- set marker for stringtable
+      return file:read( "*a" ).."--|"
+   -- close file and return 1
+   else
+      file:close()
+      return 1
+   end
+end
+
+--// The Load Function
+function load( sfile )
+   local tables,err
+   -- catch marker for stringtable
+   if string.sub( sfile,-3,-1 ) == "--|" then
+      tables,err = loadstring( sfile )
+   else
+      tables,err = loadfile( sfile )
+   end
+   if err then return _,err
+   end
+   tables = tables()
+   for idx = 1,#tables do
+      local tolinkv,tolinki = {},{}
+      for i,v in pairs( tables[idx] ) do
+         if type( v ) == "table" and tables[v[1]] then
+            table.insert( tolinkv,{ i,tables[v[1]] } )
+         end
+         if type( i ) == "table" and tables[i[1]] then
+            table.insert( tolinki,{ i,tables[i[1]] } )
+         end
+      end
+      -- link values, first due to possible changes of indices
+      for _,v in ipairs( tolinkv ) do
+         tables[idx][v[1]] = v[2]
+      end
+      -- link indices
+      for _,v in ipairs( tolinki ) do
+         tables[idx][v[2]],tables[idx][v[1]] =  tables[idx][v[1]],nil
+      end
+   end
+   return tables[1]
+end
+
+------------------------------------------------------ End Table Load Save
+
+-- import overloads fh functions into table
+function import()
+	for strIndex, anyValue in pairs(fh) do
+		if type(anyValue) == 'function' and strIndex ~= "import" then
+			table[strIndex] = anyValue
+		end
+	end
+end -- function import
+
+return fh
+
+end -- local function tablex_v1
+
+--[[
+@Title:			+fh+general_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	A general functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function general_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "lfs"													-- To access LUA filing system
+
+-- Check if file exists --
+function FlgFileExists(strFileName)
+--	return pl.path.isfile(strFileName)
+---[=[
+	if lfs.attributes(strFileName,"mode") == "file" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFileExists
+
+-- Check if folder exists --
+function FlgFolderExists(strFolderName)
+--	return pl.path.isdir(strFolderName)
+---[=[
+	if lfs.attributes(strFolderName:gsub("\\$",""),"mode") == "directory" then
+		return true
+	else
+		return false
+	end
+--]=]
+end -- function FlgFolderExists
+
+-- Check if folder writable --
+function FlgFolderWrite(strFolderName)
+	if FlgFolderExists(strFolderName) then
+		local fileHandle, strError = io.open(strFolderName.."\\xyz.xyz","w")
+		if fileHandle ~= nil then
+			fileHandle:close()
+			os.remove(strFolderName.."\\xyz.xyz")
+			return true
+		end
+	end
+	return false
+end -- function FlgFolderWrite
+
+-- Open File and return Handle --
+function OpenFile(strFileName,strMode)
+	local fileHandle, strError = io.open(strFileName,strMode)
+	if fileHandle == nil then
+		error("\n Unable to open file in \""..strMode.."\" mode. \n "..strFileName.." \n "..strError.." \n")
+	end
+	return fileHandle
+end -- function OpenFile
+
+-- Save string to file --
+function SaveStringToFile(strString,strFileName)
+	local fileHandle = OpenFile(strFileName,"w")
+	fileHandle:write(strString)
+	assert(fileHandle:close())
+end -- function SaveStringToFile
+
+-- Load string from file --
+function StrLoadFromFile(strFileName)
+	local fileHandle = OpenFile(strFileName,"r")
+	local strString = fileHandle:read("*all")
+	assert(fileHandle:close())
+	return strString
+end -- function StrLoadFromFile
+
+-- Return the Path, Filename, and extension as 3 values
+function SplitFilename(strFilename)
+	return strFilename:match("(.-)([^\\]-([^\\%.]+))$")
+end -- function SplitFilename
+
+-- Return a Directory Tree entry & attributes on each iteration --
+function DirTree(strDir)
+	assert(strDir and strDir ~= "", "directory parameter is missing or empty")
+	if strDir:sub(-1) == "/" then
+		strDir = strDir:sub(1,-2)								-- Remove trailing "/"
+	end
+    
+	local function doYieldTree(strDir)
+--!		for strEntry in pl.path.dir(strDir) do
+		for strEntry in lfs.dir(strDir) do
+			if strEntry ~= "." and strEntry ~= ".." then
+				strEntry = strDir.."\\"..strEntry
+				local tblAttr, strError = lfs.attributes(strEntry)
+				if not tblAttr then tblAttr = { mode="attrfail", error=strError } end 
+				coroutine.yield(strEntry,tblAttr)
+				if tblAttr.mode == "directory" then
+					doYieldTree(strEntry)
+				end
+			end
+		end
+	end -- local function doYieldTree
+
+	return coroutine.wrap(function() doYieldTree(strDir) end)
+end -- function DirTree
+
+local function strErrorText(strError,strFileName,intRepeat)
+	return strError:gsub(strFileName:match("(.+\\).+"),"Del#"..tostring(intRepeat)..":")
+end -- local function strErrorText
+
+-- Delete file if it exists --
+function DeleteFile(strFileName,errFunction)
+	if FlgFileExists(strFileName) then
+		local fileHandle, strError = os.remove(strFileName)
+		if fileHandle == nil then
+			local intRepeat = 1
+			repeat
+				if intRepeat > 1 and type(errFunction) == "function" then
+					errFunction(strErrorText(strError,strFileName,intRepeat))
+				end
+				fhSleep(300,100)
+				if FlgFileExists(strFileName) then
+					fileHandle, strError = os.remove(strFileName)
+				end
+				intRepeat = intRepeat + 1
+			until fileHandle ~= nil or intRepeat > 10
+			if intRepeat > 10 then error(strErrorText(strError,strFileName,intRepeat)) end
+		end
+	end
+end -- function DeleteFile
+
+-- Invoke FH Shell Execute API --
+function DoExecute(strExecutable,...)
+	local errFunction = fhMessageBox
+	if type(arg[#arg]) == 'function' then
+		errFunction = arg[#arg]
+		table.remove(arg)
+	end
+	local isOK, intErrorCode, strErrorText = fhShellExecute(strExecutable,unpack(arg))
+	if not isOK then
+		errFunction(tostring(strErrorText).." ("..tostring(intErrorCode)..")")
+	end
+	return isOK
+end -- function DoExecute
+
+--[[
+@function:		BuildDataRef
+@description:	Get Full Data Reference for Pointer
+@parameters:		Item Pointer
+@returns:			Data Reference String, Record Id Integer, Record Type Tag String
+@requires:		None
+]]
+function BuildDataRef(ptrRef)
+
+	local strDataRef = ""										-- Data Reference with instance indices e.g. INDI.RESI[2].ADDR
+	local intRecId   = 0										-- Record Id for associated Record
+	local strRecTag  = ""										-- Record Tag of associated Record type i.e. INDI, FAM, NOTE, SOUR, etc
+
+	-- getDataRef() is called recursively per level of the Data Ref
+	-- ptrRef points to the upper Data Ref levels yet to be analysed
+	-- strRef compiles the lower Data Ref levels including instances
+
+	local function getDataRef(ptrRef,strRef)
+		local ptrTag = ptrRef:Clone()
+		local strTag = fhGetTag(ptrTag)						-- Current level Tag
+		ptrTag:MoveToParentItem(ptrTag)
+		if ptrTag:IsNotNull() then							-- Parent level exists
+			local intSib = 1
+			local ptrSib = ptrRef:Clone()					-- Pointer to siblings with same Tag
+			ptrSib:MovePrev("SAME_TAG")
+			while ptrSib:IsNotNull() do						-- Count previous siblings with same Tag
+				intSib = intSib + 1
+				ptrSib:MovePrev("SAME_TAG")
+			end
+			if intSib > 1 then 	strTag = strTag.."["..intSib.."]" end
+			getDataRef(ptrTag,"."..strTag..strRef)			-- Now analyse the parent level
+		else
+			strDataRef = strTag..strRef						-- Record level reached, so set return values
+			intRecId   = fhGetRecordId(ptrRef)
+			strRecTag  = strTag
+			if not fhIsValidDataRef(strDataRef) then print("BuildDataRef: "..strDataRef.." is Invalid") end
+		end
+	end -- local function getDataRef
+
+	if type(ptrRef) == "userdata" then getDataRef(ptrRef,"") end
+
+	return strDataRef, intRecId, strRecTag
+
+end -- function BuildDataRef
+
+--[[
+@function:		GetDataRefPtr
+@description:	Get Pointer for Full Data Reference
+@parameters:		Data Reference String, Record Id Integer, Record Type Tag String (optional)
+@returns:			Item Pointer which IsNull() if any parameters are invalid
+@requires:		None
+]]
+function GetDataRefPtr(strDataRef,intRecId,strRecTag)
+	strDataRef = strDataRef or ""
+	if not strRecTag then
+		strRecTag = strDataRef:gsub("^(%u+).*$","%1")	-- Extract Record Tag from Data Ref
+	end
+	local ptrRef = fhNewItemPtr()
+	ptrRef:MoveToRecordById(strRecTag,intRecId or 0)	-- Lookup the Record by Id
+	ptrRef:MoveTo(ptrRef,strDataRef)						-- Move to the Data Ref
+	return ptrRef
+end -- function GetDataRefPtr
+
+function TblDataRef(ptrRef)
+	local tblRef = {}
+	tblRef.DataRef, tblRef.RecId, tblRef.RecTag = BuildDataRef(ptrRef)
+	return tblRef
+end -- function TblDataRef
+
+function PtrDataRef(tblRef)
+	local tblRef = tblRef or {}								-- Ensure table and its fields exist
+	return GetDataRefPtr(tblRef.DataRef or "",tblRef.RecId or 0,tblRef.RecTag or "")
+end -- function PtrDataRef
+
+return fh
+
+end -- local function general_v1
+
+--[[
+@Module:			fh.iterate_v1
+@Author:			Mike Tate
+@LastUpdated:	19 Oct 2013
+@Version:			1.1
+@Description:	An iterater functions module to supplement LUA functions.
+@V1.0:				Initial version.
+]]
+
+local function iterate_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+-- Iterator for all records of one chosen type --
+function Records(strType)
+	local ptrAll = fhNewItemPtr()							-- Pointer to all records in turn
+	local ptrRec = fhNewItemPtr()							-- Pointer to record returned to user
+	ptrAll:MoveToFirstRecord(strType)
+	return function ()
+		ptrRec:MoveTo(ptrAll)
+		ptrAll:MoveNext()
+		if ptrRec:IsNotNull() then return ptrRec end
+	end
+end -- function Records
+
+-- Iterator for all the record types --
+function RecordTypes()
+	local intNext = 0											-- Next record type number
+	local intLast = fhGetRecordTypeCount()					-- Last record type number
+	return function()
+		intNext = intNext + 1
+		if intNext <= intLast then
+			return fhGetRecordTypeTag(intNext)				-- Return record type tag
+		end
+	end
+end -- function RecordTypes
+
+-- Iterator for all items in all records of chosen types --
+function Items(...)
+	local intType = 1											-- Integer record type number
+	local tblType = {}											-- Table of record type tags
+	local ptrNext = fhNewItemPtr()							-- Pointer to next item in turn
+	local ptrItem = fhNewItemPtr()							-- Pointer to item returned to user
+
+	if #arg == 0 then
+		for intType = 1, fhGetRecordTypeCount() do		-- No parameters so use all record types
+			tblType[intType] = fhGetRecordTypeTag(intType)
+		end
+	else
+		tblType = arg											-- Got parameters so use them instead
+	end
+--	print(tblType[intType],intType)
+	ptrNext:MoveToFirstRecord(tblType[intType])			-- Get first record of first type
+
+	return function()
+		repeat
+			while ptrNext:IsNotNull() do						-- Loop through all items
+				ptrItem:MoveTo(ptrNext)
+				ptrNext:MoveNextSpecial()
+				if ptrItem:IsNotNull() then return ptrItem end
+			end
+			intType = intType + 1								-- Loop through each record type
+			if intType <= #tblType then
+				ptrNext:MoveToFirstRecord(tblType[intType])
+			end
+		until intType > #tblType
+	end
+end -- function Items
+
+-- Iterator for all facts of an individual --
+function Facts(ptrIndi)
+	local ptrItem = fhNewItemPtr()							-- Pointer to each item at level 1
+	local ptrFact = fhNewItemPtr()							-- Pointer to each fact returned to user
+	ptrItem:MoveToFirstChildItem(ptrIndi)
+	return function ()
+		while ptrItem:IsNotNull() do
+			ptrFact:MoveTo(ptrItem)
+			ptrItem:MoveNext()
+			if fhIsFact(ptrFact) then return ptrFact end
+		end
+	end
+end -- function Facts
+
+return fh
+
+end -- local function iterate_v1
+
+--[[
+@Module:			fh.progbar_v1
+@Author:			Mike Tate
+@LastUpdated:	30 Oct 2013
+@Version:			1.1
+@Description:	Progress Bar library module.
+@V1.0:				Initial version.
+]]
+
+local function progbar_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}													-- Local environment table
+package.seeall(fh)												-- Enable all globals
+module(...,package.seeall)									-- Create matching module name
+setfenv(1,fh)													-- All public names are added to local fh table
+
+require "iuplua"												-- To access GUI window builder
+
+local tblBars = {}												-- Table for optional external attributes
+local strFont = nil												-- Font dialogue default is current font
+local strStop = "255 0 0"										-- Stop button colour default is red
+local strBack = "255 255 255"								-- Background colour default is white
+local intPosX = iup.CENTER									-- Show window default position is central
+local intPosY = iup.CENTER
+local intMax, intVal, intPercent, intStart, intDelta, intScale, strClock, isBarStop
+local lblText, barGauge, lblDelta, btnStop, dlgGauge
+
+local function doFocus()										-- Bring the Progress Bar window into Focus
+	dlgGauge.BringFront="YES"									-- If used too often, inhibits other windows scroll bars, etc
+end -- local function doFocus
+
+local function doUpdate()										-- Update the Progress Gauge and the Delta % with clock
+	barGauge.Value = intVal
+	lblDelta.Title = string.format("%4d %%      %s ",intPercent,strClock)
+end -- local function doUpdate
+
+local function doReset()										-- Reset all dialogue variables and Update display
+	intVal		= 0													-- Current value of Progress Bar
+	intPercent= 0.01											-- Percentage of progress
+	intStart	= os.time()										-- Start time of progress
+	intDelta	= 0													-- Delta time of progress
+	intScale	= math.ceil( intMax / 1000 )					-- Scale of percentage per second of progress (initial guess is corrected in Step function)
+	strClock	= "00 : 00 : 00"								-- Clock delta time display
+	isBarStop	= false											-- Stop button pressed signal
+	doUpdate()
+	doFocus()
+end -- local function doReset
+
+function Start(strTitle,intMaximum)							-- Create & start Progress Bar window
+	if not dlgGauge then
+		strTitle	= strTitle or ""							-- Dialogue and button title
+		intMax		= intMaximum or 100							-- Maximun range of Progress Bar, default is 100
+		local strSize = tostring( math.max( 100, string.len(" Stop "..strTitle) * 8 ) ).."x30"			-- Adjust Stop button size to Title
+		lblText	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Progress Message" }
+		barGauge	= iup.progressbar { RasterSize="400x30", Value=0, Max=intMax, Tip="Progress Bar" }
+		lblDelta	= iup.label	{ Title=" ", Expand="YES", Alignment="ACENTER", Tip="Percentage and Elapsed Time" }
+		btnStop	= iup.button	{ Title=" Stop "..strTitle, RasterSize=strSize, FgColor=strStop, Tip="Stop Progress Button", action=function() isBarStop = true end }	-- Signal Stop button pressed	return iup.CLOSE -- Often caused main GUI to close !!!
+		dlgGauge	= iup.dialog	{ Title=strTitle.." Progress ", Font=strFont, Background=strBack, DialogFrame="YES",	-- Remove Windows minimize/maximize menu
+							iup.vbox{ Alignment="ACENTER", Gap="10", Margin="10x10",
+								lblText,
+								barGauge,
+								lblDelta,
+								btnStop,
+							},
+							move_cb	= function(self,x,y) tblBars.X = x tblBars.Y = y end,
+							close_cb	= btnStop.action,		-- Windows Close button = Stop button
+						}
+		if type(tblBars.GUI) == "table"
+		and type(tblBars.GUI.ShowDialogue) == "function" then
+			dlgGauge.move_cb = nil								-- Use GUI library to show & move window
+			tblBars.GUI.ShowDialogue("Bars",dlgGauge,btnStop,"showxy")
+		else
+			dlgGauge:showxy(intPosX,intPosY)				-- Show the Progress Bar window
+		end
+		doReset()													-- Reset the Progress Bar display
+	end
+end -- function Start
+
+function Message(strText)										-- Show the Progress Bar message
+	if dlgGauge then lblText.Title = strText end
+end -- function Message
+
+function Step(intStep)											-- Step the Progress Bar forward
+	if dlgGauge then
+		intVal = intVal + ( intStep or 1 )					-- Default step is 1
+		local intNew = math.ceil( intVal / intMax * 100 * intScale ) / intScale
+		if intPercent ~= intNew then							-- Update progress once per percent or per second, whichever is smaller
+			intPercent = math.max( 0.1, intNew )			-- Ensure percentage is greater than zero
+			if intVal > intMax then intVal = intMax intPercent = 100 end		-- Ensure values do not exceed maximum
+			intNew = os.difftime(os.time(),intStart)
+			if intDelta < intNew then							-- Update clock of elapsed time
+				intDelta = intNew
+				intScale = math.ceil( intDelta / intPercent )	-- Scale of seconds per percentage step
+				local intHour = math.floor( intDelta / 3600 )
+				local intMins = math.floor( intDelta / 60 - intHour * 60 )
+				local intSecs = intDelta - intMins * 60 - intHour * 3600
+				strClock = string.format("%02d : %02d : %02d",intHour,intMins,intSecs)
+			end
+			doUpdate()											-- Update the Progress Bar display
+		end
+		iup.LoopStep()
+	end
+end -- function Step
+
+function Focus()												-- Bring the Progress Bar window to front
+	if dlgGauge then doFocus() end
+end -- function Focus
+
+function Reset()												-- Reset the Progress Bar display
+	if dlgGauge then doReset() end
+end -- function Reset
+
+function Stop()													-- Check if Stop button pressed
+	iup.LoopStep()
+	return isBarStop
+end -- function Stop
+
+function Close()												-- Close the Progress Bar window
+	isBarStop = false
+	if dlgGauge then dlgGauge:destroy() dlgGauge = nil end
+end -- function Close
+
+function Setup(tblSetup)										-- Setup optional table of external attributes
+	if tblSetup then
+		tblBars = tblSetup
+		strFont = tblBars.Font or strFont					-- Font dialogue
+		strStop = tblBars.Stop or strStop					-- Stop button colour
+		strBack = tblBars.Back or strBack					-- Background colour
+		intPosX = tblBars.X or intPosX						-- Window position
+		intPosY = tblBars.Y or intPosY
+	end
+end -- function Setup
+
+return fh
+
+end -- local function progbar_v1
+
+--[[
+@Title:			+fh+iup_gui_v1
+@Author:			Mike Tate
+@Version:			1.4
+@LastUpdated:	12 Nov 2013
+@Description:	Graphical User Interface Library Module
+@V1.0:				Initial version.
+]]
+
+local function iup_gui_v1(...) -- if not ... then error("\n\nThis is a Library Module, and so it can not be executed on its own.") end
+
+local fh = {}																		-- Local environment table
+package.seeall(fh)																	-- Enable all globals
+module(...,package.seeall)														-- Create matching module name
+setfenv(1,fh)																		-- All public names are added to local fh table
+
+require "iuplua"																	-- To access GUI window builder
+require "iupluacontrols"															-- To access GUI window controls
+require "lfs"																		-- To access LUA filing system
+require "iupluaole"																	-- To access OLE subsystem
+require "luacom"																	-- To access COM subsystem
+
+local general = general_v1														-- To access FH general module
+local stringx = stringx_v1														-- To access FH stringx module but cannot import
+
+function ReportVersion()
+	local strMessage = "This is +fh+iup_gui_v1"
+	print(strMessage)
+	return strMessage
+end
+
+-- Shared Interface Attributes & Functions --
+
+Plugin		= fhGetContextInfo("CI_PLUGIN_NAME")								-- Plugin Name
+Version	= " "																		-- Plugin Version
+History	= Version																	-- Version History
+
+Red			= "255 0 0"																-- Color attributes (must exclude leading zeros & spaces to allow value comparisons)
+Maroon		= "128 0 0"
+Amber		= "250 160 0"
+Orange		= "255 165 0"
+Yellow		= "255 255 0"
+Olive		= "128 128 0"
+Lime		= "0 255 0"
+Green		= "0 128 0"
+Cyan		= "0 255 255"
+Teal		= "0 128 128"
+Blue		= "0 0 255"
+Navy		= "0 0 128"
+Magenta	= "255 0 255"
+Purple		= "128 0 128"
+Black		= "0 0 0"
+Gray		= "128 128 128"
+Silver		= "192 192 192"
+Smoke		= "240 240 240"
+White		= "255 255 255"
+Risk		= Red																		-- Risk colour for hazardous controls such as Close/Delete buttons
+Warn		= Orange																	-- Warn colour for caution controls and warnings
+Safe		= Green																	-- Safe colour for active controls such as most buttons
+Info		= Black																	-- Info colour for text controls such as labels/tabs
+Back		= White																	-- Background colour for all windows
+
+Gap			= "8"																		-- Layout attributes Gap was "10"
+Border		= "8x8"																	-- 	was BigMargin="10x10"
+Margin		= "1x1"																	--	was MinMargin
+Balloon	= "NO"																		-- Tooltip balloon mode
+
+FontSet	=	1																		-- GUI font set assigned by FontAssignment but used globally
+FontHead	= ""
+FontBody	= ""
+
+GUI = { }																				-- Sub-table for GUI Dialogue attributes to allow any "Name"
+
+--[[
+GUI.Name					table of dialogue attributes, where Name is Font, Help, Main, Memo, Bars, etc
+GUI.Name.CoordX			x co-ordinate	( Loaded & Saved by default )
+GUI.Name.CoordY			y co-ordinate	( Loaded & Saved by default )
+GUI.Name.Dialog			dialogue handle
+GUI.Name.Focus			focus button handle
+GUI.Name.Frame			dialogframe mode, default "no" is dialogframe="NO" + showxy(), "showxy" is dialogframe="YES" + showxy(), "popup" or "keep" is dialogframe="NO" + popup()
+GUI.Name.Height			height
+GUI.Name.minsize 		minsize default
+GUI.Name.MinSize		minsize			( NOT NOW Loaded & Saved by default )
+GUI.Name.rastersize 	rastersize default
+GUI.Name.Raster			rastersize		( Loaded & Saved by default )
+GUI.Name.Width			width
+GUI.Name.Back			ProgressBar background colour
+GUI.Name.Font			ProgressBar font style
+GUI.Name.Stop			ProgressBar Stop button colour
+							Help dialogue Window attributes :-
+GUI.Help.GetHelp 		Parent dialogue GetHelp button
+GUI.Help.RootURL 		Wiki Help & Advice root URL
+GUI.Help[n]				Help dialogue nth button :-
+GUI.Help[n].Name		Name for title attribute
+GUI.Help[n].Tip 		Tooltip for tip attribute
+GUI.Help[n].URL 		Page URL to append to root URL 
+GUI.Help[n].Page		Page order for intTabPosn
+--]]
+
+local function tblOfNames(...)													-- Get table of dialogue Names including "Font","Help","Main" by default
+	local tblNames = {"Font","Help","Main"}
+	for intName, strName in ipairs(arg) do
+		if type(strName) == "string"
+		and strName ~= "Font"
+		and strName ~= "Help"
+		and strName ~= "Main" then
+			table.insert(tblNames,strName)
+		end
+	end
+	return tblNames
+end -- local function tblOfNames
+
+local function tblNameFor(strName)												-- Get table of parameters for chosen dialogue Name
+	strName = tostring(strName)
+	if not GUI[strName] then														-- Need new table with default minimum & raster size, and X & Y co-ordinates
+		GUI[strName] = { }
+		local tblName = GUI[strName]
+		tblName.MinSize = "x"
+		tblName.Raster  = "x"
+		tblName.CoordX  = iup.CENTER
+		tblName.CoordY  = iup.CENTER
+	end
+	return GUI[strName]
+end -- local function tblNameFor
+
+function CustomDialogue(strName,strMin,strRas,intX,intY)					-- GUI custom window minimum & raster size, and X & Y co-ordinates
+	local tblName = tblNameFor(strName)
+	if strMin then tblName.minsize = tostring(strMin) end
+	if strRas then tblName.rastersize = tostring(strRas) end
+	tblName.MinSize = tblName.minsize		or "x"  -- was iup.NULL
+	tblName.Raster  = tblName.rastersize	or "x"  -- was iup.NULL
+	tblName.CoordX  = tonumber(intX)		or iup.CENTER
+	tblName.CoordY  = tonumber(intY)		or iup.CENTER
+end -- function CustomDialogue
+
+function DefaultDialogue(...)													-- GUI default window minimum & raster size, and X & Y co-ordinates
+	for intName, strName in ipairs(tblOfNames(...)) do
+		CustomDialogue(strName)
+	end
+end -- function DefaultDialogue
+
+function DialogueAttributes(strName)											-- Provide named Dialogue Attributes
+	local tblName = tblNameFor(strName)											-- tblName.Dialog = dialog handle, so any other attributes could be retrieved
+--x	local tblSize = (tblName.Raster or "x"):splitnumbers()					-- Split Raster Size into width=tblSize[1] and height=tblSize[2]
+	local tblSize = stringx.splitnumbers(tblName.Raster or "x")			-- Split Raster Size into width=tblSize[1] and height=tblSize[2]
+	tblName.Width  = tblSize[1]
+	tblName.Height = tblSize[2]
+	tblName.Font = FontBody														-- Following only needed for NewProgressBar
+	tblName.Back = Back
+	tblName.Stop = Risk
+	tblName.GUI  = fh																-- Module table
+	return tblName
+end -- function DialogueAttributes
+
+local tblLoadData = {}
+
+function LoadLocal(strParam,strDefault)										-- Load Local Parameter for this PC
+	return tblLoadData[ComputerName.."-"..strParam] or strDefault
+end -- function LoadLocal
+
+function LoadGlobal(strParam,strDefault)										-- Load Global Parameter for all PC
+	return tblLoadData[strParam] or strDefault
+end -- function LoadGlobal
+
+function LoadDialogue(...)														-- Load Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		tblName.Raster = tostring(LoadLocal(strName.."S",tblName.Raster))  -- Legacy of "S" becomes "R"
+		tblName.Raster = tostring(LoadLocal(strName.."R",tblName.Raster))
+		tblName.CoordX = tonumber(LoadLocal(strName.."X",tblName.CoordX))
+		tblName.CoordY = tonumber(LoadLocal(strName.."Y",tblName.CoordY))
+		CheckWindowPosition(tblName)
+	end
+end -- function LoadDialogue
+
+function LoadSettings(...)														-- Load Sticky Settings from File
+	local strFileName = StickyFile
+	if general.FlgFileExists(strFileName) then								-- Load Settings File in table lines with key & val fields
+		local tblField = {}
+		for strLine in io.lines(strFileName) do
+			if strLine == "return {"												-- Unless entire Sticky Data table was saved
+			and type(table.load) == "function" then
+				tblLoadData, StrErr = table.load(strFileName)				-- Load Settings File table
+				break
+			end
+--x			tblField = strLine:split("=")
+			tblField = stringx.split(strLine,"=")
+			tblLoadData[tblField[1]] = tblField[2]
+		end
+		FontSet = tonumber(LoadGlobal("FontSet",FontSet))
+		History = tostring(LoadGlobal("History",History))
+	end
+	LoadDialogue(...)
+	FontAssignment(FontSet)
+end -- function LoadSettings
+
+local tblSaveData = {}
+
+function SaveLocal(strParam,anyValue)											-- Save Local Parameter for this PC
+	tblSaveData[ComputerName.."-"..strParam] = anyValue
+end -- function SaveLocal
+
+function SaveGlobal(strParam,anyValue)											-- Save Global Parameter for all PC
+	tblSaveData[strParam] = anyValue
+end -- function SaveGlobal
+
+function SaveDialogue(...)														-- Save Dialogue Parameters for "Font","Help","Main" by default
+	for intName, strName in ipairs(tblOfNames(...)) do
+		local tblName = tblNameFor(strName)
+		SaveLocal(strName.."R",tblName.Raster)
+		SaveLocal(strName.."X",tblName.CoordX)
+		SaveLocal(strName.."Y",tblName.CoordY)
+	end
+end -- function SaveDialogue
+
+function SaveSettings(...)														-- Save Sticky Settings to File
+	SaveDialogue(...)
+	SaveGlobal("FontSet",FontSet)
+	SaveGlobal("History",History)
+	local strFileName = StickyFile
+	if type(table.save) == "function" then										-- Save entire Settings File table
+		table.save(tblSaveData,strFileName)
+	else
+		local fileHandle = general.OpenFile(strFileName,"w")				-- Else save Settings File lines with key & val fields
+		for strKey,strVal in pairs(tblSaveData) do
+			fileHandle:write(strKey.."="..strVal.."\n")
+		end
+		fileHandle:close()
+	end
+end -- function SaveSettings
+
+-- tblScrn[1] = origin x, tblScrn[2] = origin y, tblScrn[3] = width, tblScrn[4] = height
+--x 	local tblScrn = iup.GetGlobal("VIRTUALSCREEN"):splitnumbers()
+local tblScrn = stringx.splitnumbers(iup.GetGlobal("VIRTUALSCREEN"))	-- Used only by CheckWindowPosition below
+
+function CheckWindowPosition(tblName)											-- Ensure dialogue window coordinates are on Screen
+	if tonumber(tblName.CoordX) == nil
+	or tonumber(tblName.CoordX) > tblScrn[3] then
+		tblName.CoordX = iup.CENTER
+	end
+	if tonumber(tblName.CoordY) == nil
+	or tonumber(tblName.CoordY) > tblScrn[4] then
+		tblName.CoordY = iup.CENTER
+	end
+end -- function CheckWindowPosition
+
+function IsNormalWindow(iupDialog)												-- Check dialogue window is not Maximised or Minimised
+	-- tblPosn[1] = origin x, tblPosn[2] = origin y, tblPosn[3] = width, tblPosn[4] = height
+--x 	local tblPosn = iupDialog.screenposition:splitnumbers()
+	local tblPosn = stringx.splitnumbers(iupDialog.screenposition)
+	local intPosX = tblPosn[1]
+	local intPosY = tblPosn[2]
+	if intPosX < 0 and intPosY < 0 then											-- If origin is negative (-8, -8 = Maximised, -3200, -3200 = Minimised)
+		return false																	-- then is Maximised or Minimised
+	end
+	return true
+end -- function IsNormalWindow
+
+function ShowDialogue(strName,iupDialog,btnFocus,strFrame)				-- Set standard frame attributes and display dialogue window
+	local tblName = tblNameFor(strName)
+	iupDialog = iupDialog or tblName.Dialog									-- Retrieve previous parameters if needed
+	btnFocus  = btnFocus  or tblName.Focus
+	strFrame  = strFrame  or tblName.Frame
+	strFrame  = strFrame  or "NO"												-- Default frame mode is dialog:showxy(X,Y) with dialogframe="NO"
+	strFrame  = strFrame:lower()													-- Other modes are "show", "popup" & "keep" with dialogframe="YES"
+	if strFrame:gsub("%s-%a-map%a*[%s%p]*","") == "" then					-- May be prefixed with "map" mode to just map dialogue initially
+		strFrame = strFrame.." & no"
+	end
+	if type(iupDialog) == "userdata" then
+		tblName.Dialog = iupDialog
+		tblName.Focus  = btnFocus													-- Preserve parameters
+		tblName.Frame  = strFrame
+		iupDialog.Background = Back												-- Background colour
+		iupDialog.Shrink = "YES"													-- Sometimes needed to shrink controls to raster size
+		if type(btnFocus) == "userdata" then									-- Set button as focus for Esc and Enter keys
+			iupDialog.StartFocus   = iupDialog.StartFocus   or btnFocus
+			iupDialog.DefaultEsc   = iupDialog.DefaultEsc   or btnFocus
+			iupDialog.DefaultEnter = iupDialog.DefaultEnter or btnFocus
+		end
+		iupDialog.MinSize    = tblName.MinSize or "x"						-- Minimum size (default "x" becomes nil)
+		iupDialog.RasterSize = tblName.Raster  or "x"						-- Raster size  (default "x" becomes nil)
+		if strFrame:match("no") then												-- The dialogframe mode is "NO" by default
+			strFrame = strFrame.." & show"										-- Define display mode, and move & resize functions
+			iupDialog.move_cb = iupDialog.move_cb or function(self,x,y) if IsNormalWindow(self) then tblName.CoordX=x tblName.CoordY=y end end
+			iupDialog.resize_cb = iupDialog.resize_cb or function(self) if IsNormalWindow(self) then tblName.Raster=self.RasterSize end end
+		else
+			iupDialog.DialogFrame = "YES"										-- Define dialogframe mode, and move & resize function
+			iupDialog.move_cb = iupDialog.move_cb or function(self,x,y) tblName.CoordX=x tblName.CoordY=y end
+			iupDialog.resize_cb = iupDialog.resize_cb or function(self) tblName.Raster=self.RasterSize end
+		end
+		iupDialog.close_cb = iupDialog.close_cb or function() return iup.CLOSE end	-- Define default X Close action
+		if strFrame:match("map") then											-- Only dialogue mapping is required
+			iupDialog:map()
+			tblName.Frame = strFrame:gsub("map","")							-- Remove "map" from frame mode ready for subsequent call
+			return
+		end
+		if iup.MainLoopLevel() == 0												-- Called from outside Main GUI, so must use showxy() and not popup()
+		or strFrame:match("sho") then											-- Use showxy() to dispay dialogue window for "showxy" mode
+			iupDialog:showxy(tblName.CoordX,tblName.CoordY)
+			if History ~= Version then											-- Initially show new Version History Help
+				if type(HelpDialogue) == "function" then
+					History = Version
+					HelpDialogue(Version)											-- But only after Help dialogue exists
+					iupDialog.BringFront = "YES"
+				end
+			end
+			if strName ~= "Help" and iup.MainLoopLevel() == 0 then iup.MainLoop() end
+		else
+			iupDialog:popup(tblName.CoordX,tblName.CoordY)					-- Use popup() to display dialogue window for "popup" or "keep" modes
+		end
+		if strFrame:match("pop") then
+			tblName.Dialog = nil													-- When popup closed, clear key parameters, but not for "keep" mode
+			tblName.Raster = nil
+		end
+--x		local tblPosn = iupDialog.ScreenPosition:splitnumbers()
+		local tblPosn = stringx.splitnumbers(iupDialog.ScreenPosition)	-- Ensure X & Y coordinates are raster values
+		tblName.CoordX = tblPosn[1]
+		tblName.CoordY = tblPosn[2]
+	end
+end -- function ShowDialogue
+
+-- Font Dialogue Attributes and Functions --
+
+local intFontPlain  = 1															-- Font Face & Style values for FontSet in Font... functions
+local intFontBold   = 2
+local intArialPlain = 3
+local intArialBold  = 4
+local intTahomaPlain= 5
+local intTahomaBold = 6
+local strFontFace   = iup.GetGlobal("DEFAULTFONT"):gsub(",.*","")
+
+local tblFontSet = {}																-- Lookup table for FontHead and FontBody in Font... functions
+tblFontSet[intFontPlain]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..",      -16", }
+tblFontSet[intFontBold]		=	{ Head=strFontFace..", Bold -16",	Body=strFontFace..", Bold -15", }
+tblFontSet[intArialPlain]		=	{ Head="Arial,         Bold -16",	Body="Arial,              -16", }
+tblFontSet[intArialBold]		=	{ Head="Arial,         Bold -16",	Body="Arial,         Bold -15", }
+tblFontSet[intTahomaPlain]	=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,             -16", }
+tblFontSet[intTahomaBold]		=	{ Head="Tahoma,        Bold -15",	Body="Tahoma,        Bold -14", }
+-- Note: Pixel sizes -21 = -20 & -17 = -16 & -14 = -13 and pixel sizes -22, -18 & -13 have no point size equivalent.
+
+function FontAssignment(intFontSet)												-- Assign Font Face & Style GUI values
+	FontSet  = intFontSet
+	FontHead = tblFontSet[intFontSet]["Head"]									-- Font for all GUI dialog header text
+	FontBody = tblFontSet[intFontSet]["Body"]									-- Font for all GUI dialog body text
+	local tblHelp = tblNameFor("Help")
+	if type(tblHelp.Dialog) == "userdata" then
+		tblHelp.Dialog.Font = FontBody											-- Update Help dialogue font if it exists
+	end
+end -- function FontAssignment
+
+function FontDialogue()															-- GUI Font Face & Style Dialogue
+
+	local isFontChosen = true
+
+	local strFontPlainTitle	= strFontFace.." Plain"
+	local strFontBoldTitle 	= strFontFace.." Bold"
+	local strArialPlainTitle	= "Arial Plain"
+	local strArialBoldTitle	= "Arial Bold"
+	local strTahomaPlainTitle	= "Tahoma Plain"
+	local strTahomaBoldTitle	= "Tahoma Bold"
+
+	-- Create each GUI label and button with title and tooltip
+	local lblHeadName		= iup.label	{ Title=" Name :"				, Tip="Names of the available Fonts"				, }
+	local lblHeadPlain		= iup.label	{ Title=" Plain :"				, Tip="Plain versions of the Fonts"					, }
+	local lblHeadBold		= iup.label	{ Title=" Bold :"				, Tip="Bold versions of the Fonts"					, }
+	local lblFontName		= iup.label	{ Title="Font "..strFontFace	, Tip="Default Windows fontface"					, }
+	local btnFontPlain		= iup.button	{ Title=strFontPlainTitle		, Tip="Choose "..strFontPlainTitle.." style"		, }
+	local btnFontBold		= iup.button	{ Title=strFontBoldTitle		, Tip="Choose "..strFontBoldTitle.." style"		, }
+	local lblArialName		= iup.label	{ Title="Font Arial"			, Tip="Arial alternative fontface"					, }
+	local btnArialPlain		= iup.button	{ Title=strArialPlainTitle	, Tip="Choose "..strArialPlainTitle.." style"	, }
+	local btnArialBold		= iup.button	{ Title=strArialBoldTitle		, Tip="Choose "..strArialBoldTitle.." style"		, }
+	local lblTahomaName		= iup.label	{ Title="Font Tahoma"			, Tip="Tahoma alternative fontface"					, }
+	local btnTahomaPlain	= iup.button	{ Title=strTahomaPlainTitle	, Tip="Choose "..strTahomaPlainTitle.." style"	, }
+	local btnTahomaBold		= iup.button	{ Title=strTahomaBoldTitle	, Tip="Choose "..strTahomaBoldTitle.." style"	, }
+	local lblChoose 		= iup.label	{ Title="Choose your window font style or"											, }
+	local btnDestroy		= iup.button	{ Title="Close"					, Tip="Close this Font Style window"				, }
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local	dialogFont		= iup.dialog { Title=Plugin.." Font Style",
+										iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Border,
+											iup.frame { Font=FontHead, FgColor=Info, Active="YES", Title="Font Style",
+												iup.vbox { Margin=Margin,
+													iup.hbox { Homogeneous="YES", lblHeadName,	lblHeadPlain,	lblHeadBold,		},
+													iup.hbox { Homogeneous="YES", lblFontName,	btnFontPlain,	btnFontBold,		},
+													iup.hbox { Homogeneous="YES", lblArialName,	btnArialPlain,	btnArialBold,	},
+													iup.hbox { Homogeneous="YES", lblTahomaName,	btnTahomaPlain,	btnTahomaBold,	},
+													iup.hbox { lblChoose, btnDestroy, },
+												},
+											},
+										},
+										close_cb = function() isFontChosen=false return iup.CLOSE end,
+									}
+
+	-- Assign font styles for GUI labels and buttons
+	local strFontPlain		= tblFontSet	[intFontPlain]	["Body"]
+	local strFontBold		= tblFontSet	[intFontBold]	["Body"]
+	local strArialPlain		= tblFontSet	[intArialPlain]	["Body"]
+	local strArialBold		= tblFontSet	[intArialBold]	["Body"]
+	local strTahomaPlain	= tblFontSet	[intTahomaPlain]["Body"]
+	local strTahomaBold		= tblFontSet	[intTahomaBold]	["Body"]
+
+	-- Set other GUI attributes for labels and buttons
+	for iupName, tblAttr in pairs( {
+		--	Control		= 1~FgColor	, 2~Font		, 3~FontSet		, 4~action function()
+		[lblHeadName]	= { Info	, FontBody		, false			, false	},
+		[lblHeadPlain]	= { Info	, strFontPlain	, false			, false	},
+		[lblHeadBold]	= { Info	, strFontBold	, false			, false	},
+		[lblFontName]	= { Info	, strFontPlain	, false			, false	},
+		[btnFontPlain]	= { Safe	, strFontPlain	, intFontPlain	, false	},
+		[btnFontBold]	= { Safe	, strFontBold	, intFontBold	, false	},
+		[lblArialName]	= { Info	, strArialPlain	, false			, false	},
+		[btnArialPlain]	= { Safe	, strArialPlain	, intArialPlain	, false	},
+		[btnArialBold]	= { Safe	, strArialBold	, intArialBold	, false	},
+		[lblTahomaName]	= { Info	, strTahomaPlain, false			, false	},
+		[btnTahomaPlain]= { Safe	, strTahomaPlain, intTahomaPlain, false	},
+		[btnTahomaBold]	= { Safe	, strTahomaBold	, intTahomaBold	, false	},
+		[lblChoose]		= { Info	, FontBody		, false			, false	},
+		[btnDestroy]		= { Risk	, FontBody		, false			, dialogFont.close_cb },
+		} ) do
+		iupName.TipBalloon	= Balloon
+		iupName.Expand	= "YES"
+		iupName.FgColor	= tblAttr[1]
+		iupName.Font		= tblAttr[2]
+		if tblAttr[3] then
+			if tblAttr[3] == FontSet then iupName.Active = "NO" end		-- Disable button for currently selected font
+			iupName.action = function() FontAssignment(tblAttr[3]) return iup.CLOSE end
+		end
+		if tblAttr[4] then iupName.action = tblAttr[4] end
+	end
+
+	ShowDialogue("Font",dialogFont,btnDestroy,"popup")
+
+	return isFontChosen
+end -- function FontDialogue
+
+-- Help Dialogue Attributes and Functions
+
+HelpDialogue = ""																	-- HelpDialogue must be declared for ShowDialogue
+
+local strHelpButtonActive = nil  -- defaults to "YES"						-- Help button active attribute mode used only in NewHelpDialogue
+
+function NewHelpDialogue(btnGetHelp,strRootURL)								-- Prototype for GUI Help Dialogue, with parent Help button, and web page root/namespace URL
+	local tblHelp = tblNameFor("Help")
+	local oleControl, btnDestroy, hboxHelp, dialogHelp						-- Dialogue component upvalues
+	if type(btnGetHelp) == "userdata" then
+		btnGetHelp.Active = strHelpButtonActive
+		if btnGetHelp.Active == "NO" then										-- Help button inactive, so Help dialogue exists, so just update parent button
+			tblHelp.GetHelp = btnGetHelp											-- Allows successive parent GUI to share one Help dialogue
+			return
+		end
+	end
+	tblHelp.GetHelp = btnGetHelp
+	strRootURL = strRootURL or Plugin:gsub(" ","_"):lower()				-- Default to Plugin name as Wiki namespace
+	if strRootURL:match("^[%w_]+$") then										-- Append Wiki namespace to Wiki root URL
+		strRootURL = "http://www.fhug.org.uk/wiki/doku.php?id=plugins:help:"..strRootURL..":"
+	end
+	tblHelp.RootURL = strRootURL
+	local intURL = 1																-- Index to Version History help page URL
+	local tblURL = { }																-- List of help page URL
+
+	local function doCommonAction()												-- Common action when creating/destroying Help dialogue
+		local strMode = "NO"
+		if dialogHelp then
+			dialogHelp:destroy()													-- If dialogue exists then destroy window
+			dialogHelp = nil
+			tblHelp.Dialog = nil													-- Also clear dialog handle
+			strMode = nil -- defaults to "YES"
+		end 
+		if type(tblHelp.GetHelp) == "userdata" then							-- Set parent dialogue Help button active mode
+			tblHelp.GetHelp.Active = strMode
+		end
+		strHelpButtonActive = strMode
+	end -- local function doCommonAction
+
+	function HelpDialogue(anyPage)												-- GUI Help Dialogue for chosen web page
+		--[=[
+			Parameter anyPage can be one of several values:
+			1. Page number from 0 to index tblURL, often equal to intTabPosn.
+			2. Version to display Version History page for version chosen.
+			3. String with " "="_" and lowercase substring of a page name in tblURL.
+		--]=]
+
+		if not dialogHelp then
+			doCommonAction()
+			-- Create the WebBrowser based on its ProgID and connect it to LuaCOM
+			oleControl = iup.olecontrol{ "Shell.Explorer.1", designmode="NO", }
+			oleControl:CreateLuaCOM()
+			btnDestroy = iup.button { Title="Close Window", Tip="Close this Help and Advice window", TipBalloon=Balloon, Expand="HORIZONTAL", Size="x10", FgColor=Risk, action=function() doCommonAction() end }
+			hboxHelp = iup.hbox { margin=Margin, homogeneous="NO" }
+			-- Create each GUI button with title, tooltip, color, action, etc, and table of web page URL
+			for intButton, tblButton in ipairs(tblHelp) do
+				local intPage = tblButton.Page or intButton
+				local strURL  = tblButton.URL
+				if strURL:match("ver.-hist") then intURL = intPage end
+				tblURL[intPage] = strURL
+				local btnName = iup.button { Title=tblButton.Name, Tip=tblButton.Tip, TipBalloon=Balloon, Expand=btnDestroy.Expand, Size=btnDestroy.Size, FgColor=Safe, action=function() oleControl.com:Navigate(tblHelp.RootURL..strURL) end }
+				iup.Append(hboxHelp,btnName)
+			end
+			iup.Append(hboxHelp,btnDestroy)
+			dialogHelp = iup.dialog { Title=Plugin.." Help & Advice", Font=FontBody,
+								iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Border, ExpandChildren="YES",
+									oleControl,
+									hboxHelp,
+								},
+								close_cb = function() doCommonAction() end,
+							}
+			ShowDialogue("Help",dialogHelp,btnDestroy)						-- Show Help dialogue window
+		end
+		anyPage = anyPage or 0
+		if type(anyPage) == "number" then										-- Select page by Tab = Button = Help page index
+			anyPage = math.max(1,math.min(#tblURL,anyPage+1))
+			anyPage = tblURL[anyPage] or ""
+		elseif anyPage == Version then											-- Select the Version History features section
+			anyPage = anyPage:gsub("[%s%p]","")
+			anyPage = anyPage:gsub("^(%d)","V%1")
+			anyPage = tblURL[intURL].."#features_of_"..anyPage
+		elseif type(anyPage) == "string" then									-- Select page by matching name text
+			local strPage = anyPage:gsub(" ","_"):lower()
+			anyPage = tblURL[1] or ""												-- Default to first web page
+			for intURL = 1, #tblURL do
+				local strURL = tblURL[intURL]
+				if strURL:match(strPage) then
+					anyPage = strURL
+					break
+				end
+			end
+		else
+			anyPage = tblURL[1] or ""												-- Default to first web page
+		end
+		oleControl.com:Navigate(tblHelp.RootURL..anyPage)					-- Navigate to chosen web page
+	end -- function HelpDialogue
+
+end -- function NewHelpDialogue
+
+function AddHelpButton(strName,strTip,strURL,intPage)						-- Add button to GUI Help Dialogue
+	local tblHelp = tblNameFor("Help")
+	if tblHelp and not strHelpButtonActive then
+		for intHelp, tblHelp in ipairs(tblHelp) do							-- Check button does not already exist
+			if tblHelp.Name == strName then return end
+		end
+		if tonumber(intPage) then intPage = intPage + 1 end					-- Optional external intPage number matches intTabPosn
+		table.insert( tblHelp, { Name=strName, Tip=strTip, URL=strURL, Page=intPage } )
+	end
+end -- function AddHelpButton
+
+local function anyMemoControl(anyName,fgColor)								-- Compose any control Title and FgColor
+	local strName = tostring(anyName)											-- anyName may be a string, and fgColor is default FgColor
+	local tipText = nil
+	if type(anyName) == "table" then											-- anyName may be a table = { Title string , FgColor string , ToolTip string (optional) }
+		strName = anyName[1]
+		fgColor = anyName[2]:match("%d* %d* %d*") or fgColor
+		tipText = anyName[3]
+	end
+	return strName, fgColor, tipText
+end -- local function anyMemoControl
+
+local function anyMemoDialogue(anyHead,anyMemo,...)							-- Display framed memo dialogue with buttons
+	local intButt = 0																-- Returned value if "X Close" button is used
+	local tblButt = { [0]="X Close" }											-- Button names lookup table
+	if not anyHead then anyHead = "" end
+	local strHead, fgcHead, tipHead = anyMemoControl(anyHead,Info)
+	local strMemo, fgcMemo, tipMemo = anyMemoControl(anyMemo,Info)
+	-- Create the GUI labels and buttons
+	local lblMemo = iup.label { Title=strMemo, FgColor=fgcMemo, Tip=tipMemo, TipBalloon=Balloon, Alignment="ACENTER", Padding=Margin, Expand="YES", WordWrap="YES" }
+	local lblLine = iup.label { Separator="HORIZONTAL" }
+	local iupHbox = iup.hbox  { Homogeneous="YES" }
+	local btnButt = iup.button { }
+	if #arg == 0 then arg[1] = "OK" end											-- If no buttons listed then default to an "OK" button
+	for intArg, anyButt in ipairs(arg) do
+		local strButt, fgcButt, tipButt = anyMemoControl(anyButt,Safe)
+		tblButt[intArg] = strButt
+		btnButt = iup.button { Title=strButt, FgColor=fgcButt, Tip=tipButt, TipBalloon=Balloon, Expand="NO", MinSize="80", Padding=Margin, action=function() intButt=intArg return iup.CLOSE end }
+		iup.Append( iupHbox, btnButt )
+	end
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button
+	local iupMemo = iup.dialog { Title=Plugin..Version..strHead,
+							iup.vbox { Alignment="ACENTER", Gap=Gap, Margin=Margin,
+								iup.frame { Title=strHead, FgColor=fgcHead, Font=FontHead,
+									iup.vbox { Alignment="ACENTER", Font=FontBody, lblMemo, lblLine, iupHbox },
+								},
+							},
+						}
+	ShowDialogue("Memo",iupMemo,btnButt,"popup")								-- Show popup Memo dialogue window with righthand button in focus
+	iupMemo:destroy()
+	return intButt, tblButt[intButt]
+end -- local function anyMemoDialogue
+
+function MemoDialogue(anyMemo,...)												-- Multi-Button GUI like iup.Alarm and fhMessageBox, with "Memo" in frame
+	return anyMemoDialogue("Memo",anyMemo,...)
+end -- function MemoDialogue
+
+function WarnDialogue(anyHead,anyMemo,...)									-- Multi-Button GUI like iup.Alarm and fhMessageBox, with heading in frame
+	return anyMemoDialogue(anyHead,anyMemo,...)
+end -- function WarnDialogue
+
+function VersionInStore(anyPlugin)												-- Obtain the Version in Plugin Store by Name or Id
+	local strType = "name="
+	if type(anyPlugin) == "number"
+	or tonumber(anyPlugin) then strType = "id=" end
+	if anyPlugin then
+		local http = luacom.CreateObject("winhttp.winhttprequest.5.1")
+		local strRequest ="http://www.family-historian.co.uk/lnk/checkpluginversion.php?"..strType..anyPlugin
+ 		http:Open("GET",strRequest,false)
+		http:Send()
+		local strReturn = http.Responsebody
+		local strVersion = "0"
+		if strReturn ~= nil then
+			strVersion = strReturn:match("([%d%.]*),%d*")					-- Version digits & dots then comma and Id digits 
+		end
+		return strVersion or "0"
+	else
+		return "0"
+	end
+end -- function VersionInStore
+
+local function intVersion(strVersion)											-- Convert version string to comparable integer
+	local intVersion = 0
+--x	local tblVersion = strVersion:split(".")
+	local tblVersion = stringx.split(strVersion,".")
+	for i=1,5 do
+		intVersion = intVersion * 1000 + tonumber(tblVersion[i] or 0)
+	end
+	return intVersion
+end -- local function intVersion
+
+function CheckVersionInStore()													-- Check if later Version available in Plugin Store
+	local strPlugin = fhGetContextInfo("CI_PLUGIN_NAME")
+	local strNewVer = VersionInStore(strPlugin:gsub(" %- .*",""))
+	local strOldVer = Version
+	if intVersion(strNewVer) > intVersion(strOldVer:match("[^%d]*([%d%.]*)")) then
+		MemoDialogue( "Later Version "..strNewVer.." of this Plugin is available from the Family Historian 'Plugin Store'.", "OK" )
+	end
+end -- function CheckVersionInStore
+
+function Initialise(strVersion,strPlugin)										-- Initialise the GUI module with optional Version & Plugin name
+
+	local strAppData = fhGetContextInfo("CI_APP_DATA_FOLDER")
+
+	Plugin = fhGetContextInfo("CI_PLUGIN_NAME")								-- Plugin Name from file
+	Version = strVersion or " "													-- Plugin Version
+	if Version == " " then
+		local strPlugin = strAppData.."\\Plugins\\"..Plugin..".fh_lua"
+		for strLine in io.lines(strPlugin) do									-- Read each line from the Plugin file
+			strPlugin = strLine:match("^@Title:%s*(.*)")
+			if strPlugin and Plugin:match("^"..strPlugin) then
+				Plugin = strPlugin													-- Prefer Title to Filename if it matches
+			end
+			Version = strLine:gsub("^@Version:[^%d]*([%d%.]*)[^%d]*"," %1 ")
+			if Version ~= strLine then break end								-- Obtain the @Version from Plugin file
+		end
+	end
+	History = Version																-- Version History
+	Plugin  = strPlugin or Plugin												-- Plugin Name from argument or default from file
+
+	CustomDialogue("Help","800x600","1030x730")								-- Custom "Help" dialogue sizes
+
+	DefaultDialogue()																-- Default "Font","Help","Main" dialogues
+
+	FontAssignment(intFontPlain)													-- Assign default Font Face & Style
+
+	-- File System & Sticky Data Names & Functions --
+
+	local strStickyFile = fhGetPluginDataFileName()
+	-- Allow plugins with variant filenames to use same plugin data files
+	strStickyFile = strStickyFile:gsub("\\"..Plugin:gsub(" ","_"):lower(),"\\"..Plugin)
+	strStickyFile = strStickyFile:gsub("\\"..Plugin..".+%.[D,d][A,a][T,t]$","\\"..Plugin..".dat")
+	if strStickyFile == "" then
+		-- Use standalone GEDCOM path & filename..".fh_data\Plugin Data\" as the folder + the Plugin Filename..".dat"
+		strStickyFile = fhGetContextInfo("CI_GEDCOM_FILE")
+		strStickyFile = strStickyFile:gsub("%.[G,g][E,e][D,d]",".fh_data")
+		lfs.mkdir(strStickyFile)
+		strStickyFile = strStickyFile.."\\Plugin Data"
+		lfs.mkdir(strStickyFile)
+		strStickyFile = strStickyFile.."\\"..Plugin..".dat"
+	end
+
+	-- Sticky File name for saving parameters
+	StickyFile = strStickyFile
+
+	-- Plugin data folder path name
+	PluginPath = StickyFile:gsub("\\"..Plugin.."%.[D,d][A,a][T,t]$","")
+
+	-- Plugin data file root name
+	PluginRoot = PluginPath.."\\"..Plugin
+
+	-- Public data folder path name
+	PublicPath = fhGetContextInfo("CI_PROJECT_PUBLIC_FOLDER")
+	if PublicPath == "" then PublicPath = PluginPath end
+
+	-- Program Data Calico Pie path name
+	CalicoPie = strAppData:gsub("\\Calico Pie\\.*","\\Calico Pie")
+
+	-- Local PC Computer Name
+	ComputerName = os.getenv("COMPUTERNAME")
+
+end -- function Initialise
+
+Initialise()		-- Initialise module with default values
+
+return fh
+
+end -- local function iup_gui_v1
+
+stringx_v1 = stringx_v1("stringx")
+tablex_v1  = tablex_v1 ("tablex")
+general_v1 = general_v1("general")
+iterate_v1 = iterate_v1("iterate")
+progbar_v1 = progbar_v1("progbar")
+iup_gui_v1 = iup_gui_v1("iup_gui")
+
+-- All above should eventually become library modules as loaded below --
+
+--]==]
+
+--[==[
+local fhLoadRequire = require("fhLoadRequire").fhLoadRequire				-- Interim fhLoadRequire() API
+
+if not fhLoadRequire("pl","pl.init") then return end						-- Load required Penlight modules
+require("pl.import_into")()
+require("pl.strict")																-- Strict check for undeclared globals
+
+if not fhLoadRequire("fh.library_v2") then return end 						-- Load required FH v2 modules
+require("fh.modules_v2")()
+--]==]
+stringx_v1.import()																	-- To access FH string extension v1 module
+tablex_v1.import()																	-- To access FH table extension v1 module
+local general = general_v1														-- To access FH general useful v1 module
+local iterate = iterate_v1														-- To access FH iterate items v1 module
+local progbar = progbar_v1														-- To access FH progress bar v1 module including "iuplua"
+local iup_gui = iup_gui_v1														-- To access FH GUI builder v1 module including "iuplua", "lfs", "fh.general_v1" & "fh.loadreq_v1", "fh.stringx_v1", etc
+
+-- Preset Global Data Definitions --
+function PresetGlobalData()
+	iup_gui.Gap = "2"
+	iup_gui.Balloon	= "YES"
+	iup_gui.CustomDialogue("Main","800x580","1020x600")						-- Main dialogue minimum and raster size
+	IntRowHeight =  27																-- Matrix pixel height of all rows -- was 26
+	IntHeadWidth =  92																-- Matrix pixel width of most heading columns
+	IntFlagWidth = 130																-- Matrix pixel width of Flag heading columns
+	IntNumbWidth =  48																-- Matrix pixel width of Numeric columns
+	IntAgesWidth =  40																-- Matrix pixel width of Ages columns
+	IntUpdaWidth = 100																-- Matrix pixel width of Update columns
+	IntDateWidth = 130																-- Matrix pixel width of Date columns
+	TblOption = {}																	-- Table of GUI toggle exception options
+	TblAttrib = {}																	-- Table of GUI toggle attributes
+	TblGrid   = {}																	-- Table grid of statistics and related data
+	StrGridFile = iup_gui.PluginPath.."\\"..iup_gui.Plugin..".grid"
+	DatToday  = fhNewDate(2000)													-- Date today for future date checks
+	DatToday:SetSimpleDate(fhCallBuiltInFunction("Today"))
+end -- function PresetGlobalData
+
+-- Reset Sticky Settings to Default Values --
+function ResetDefaultSettings()
+	iup_gui.DefaultDialogue("Bars","Memo")										-- GUI window position X & Y co-ordinates, and minsize & rastersize for "Main","Font","Help" dialogues
+	iup_gui.History = " "															-- Version History reset for initial Help
+	IntTabPosn = 0																	-- Default to tab undefined	-- was IntTabRecds	-- Default to Records tab position	-- 3 Aug 2013
+	for strName, anyValue in pairs ( TblOption ) do
+		TblOption[strName] = "ON"													-- Enable all Option toggles	-- V1.7
+	end
+	TblOption.DateWarning = "ON"
+	TblOption.MaximumAges = 120
+	TblOption.MinimumYear = 1000
+end -- function ResetDefaultSettings
+
+-- Load Sticky Settings from File --
+function LoadSettings()
+	iup_gui.LoadSettings()															-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+	IntTabPosn = tonumber(iup_gui.LoadGlobal("TabPosn",IntTabPosn))
+	TblOption = iup_gui.LoadGlobal("Option",TblOption)						-- V1.7
+	TblOption.DateWarning = TblOption.DateWarning or "ON"
+	TblOption.MaximumAges = TblOption.MaximumAges or 120
+	TblOption.MinimumYear = TblOption.MinimumYear or 1000
+	DatMinimum = fhNewDate(TblOption.MinimumYear)							-- Date earliest year check
+	if general.FlgFileExists(StrGridFile) then
+		TblGrid, StrErr = table.load(StrGridFile)								-- Load Grid table
+		if TblGrid.RepText then													-- Load Result Set Exception Report data
+			for intItem = 1, #TblGrid.RepText do								-- Recreate Report Item pointer from Data Ref & Record Id
+				TblGrid.RepItem[intItem] = general.GetDataRefPtr(TblGrid.DataRef[intItem],TblGrid.RecIdNo[intItem])
+			end
+		end
+	end
+	SaveSettings()																	-- Save sticky data settings
+end -- function LoadSettings
+
+-- Save Sticky Settings to File --
+function SaveSettings()
+	iup_gui.SaveGlobal("TabPosn",IntTabPosn)
+	iup_gui.SaveGlobal("Option" ,TblOption )									-- V1.7
+	iup_gui.SaveSettings()															-- Includes "Main","Font","Help" dialogues and "FontSet" & "History"
+	table.save(TblGrid,StrGridFile)												-- Save Grid table
+end -- function SaveSettings
+
+-- Make New Help Dialogue from Prototype --
+function MakeHelpDialogue(btnGetHelp)
+	iup_gui.NewHelpDialogue(btnGetHelp)											-- Supply control Help button
+	iup_gui.AddHelpButton( "Introduction"		,"Introduction for Help and Advice"			, "show_project_statistics"	)
+	iup_gui.AddHelpButton( "Records Tab"		,"Records Tab statistics Help and Advice"	, "records_tab_statistics"	)
+	iup_gui.AddHelpButton( "Facts Tab"			,"Facts Tab statistics Help and Advice"	, "facts_tab_statistics"		)
+	iup_gui.AddHelpButton( "Options Tab"		,"Options Tab settings Help and Advice"	, "options_tab_settings"		)
+	iup_gui.AddHelpButton( "Result Set"			,"Result Set exceptions Help and Advice"	, "result_set_exceptions"		)
+	iup_gui.AddHelpButton( "Version History"	,"Version History of Features"				, "version_history"				)
+end -- function MakeHelpDialogue
+
+-- Graphical User Interface --
+function GUI_MainDialogue()
+
+	-- Create the data grid of Row & Col headings, etc
+	local strVer = TblGrid.Version or iup_gui.Version
+	if #TblGrid < 2 or strVer ~= iup_gui.Version
+	or not ( TblGrid.MaxRows or TblGrid.Ind.Top or TblGrid.Fla.Top ) then
+		TblGrid = { "Records", "Individuals", "Couples", "Flags", "Facts", }
+		TblGrid.Rec = {}
+		TblGrid.Rec.Col = { "Count", "Links", "Idents", "Oldest Update", "Latest Update", }
+		TblGrid.Rec.Row = { "All", "Individual", "Family", "Note", "Source", "Repository", "Multimedia", "Submitter", "Submission", "Header", }
+		TblGrid.Ind = {}
+		TblGrid.Ind.Col = { "Count", }
+		TblGrid.Ind.Row = { "All", "Male", "Female", "Undefined", "No Birth", "No Death", "Parentless", "Pool 1", "Pool 2", }	-- Always include two Pool names
+		TblGrid.Cou = {}
+		TblGrid.Cou.Col = { "Count", }
+		TblGrid.Cou.Row = { "All", "Both Sex", "Same Sex", "One Parent", "No Parents", "No Marriage", "Childless", "All Children", "Ave.Children", "Max.Children", "Max.Spouses" }
+		TblGrid.Fla = {}
+		TblGrid.Fla.Col = { "Count", }
+		TblGrid.Fla.Row = { " All", "Living", "Private", }	-- Always include two Flag names, and allow Flag name "All"
+		TblGrid.Fac = {}
+		TblGrid.Fac.Col = { "Count", "Source", "Place", "Age", "Min.", "Ave.", "Max.", "Age@", "Min@", "Ave@", "Max@", "Date", "Earliest Date", "Latest Date", }
+		TblGrid.Fac.Row = { "Birth", "Baptism", "Christening", "Marriage", "Divorce", "Census", "Occupation", "Residence", "Death", "Burial", "Cremation", "Probate", "All Other", }
+		TblGrid.MaxRows = #TblGrid.Fac.Row
+		TblGrid.Ind.Top = #TblGrid.Ind.Row - 1													-- Set row sizes for RevealList()
+		TblGrid.Fla.Top = #TblGrid.Fla.Row - 1
+		TblGrid.Updated = "Never"
+		TblGrid.RepName = {}																		-- Result Set Exception Report data
+		TblGrid.RepItem = {}
+		TblGrid.RepText = {}
+		TblGrid.DataRef = {}
+		TblGrid.RecIdNo = {}
+	end
+	TblGrid.Version = iup_gui.Version
+	if strVer ~= iup_gui.Version then
+		iup_gui.MemoDialogue("\n Table Grid"..strVer.."mismatches"..iup_gui.Version.."so a reset is required. \n")
+		ResetGridCells(TblGrid)
+		iup_gui.CustomDialogue("Main","800x580","1020x600")									-- Reset dialogue minimum and raster size as per PresetGlobalData()
+	end
+	local tblVal = {}
+	-- Create the matrix controls
+	for intGrid, strGrid in ipairs(TblGrid) do
+		tblVal = TblGrid[strGrid:sub(1,3)]
+		local tblRow = tblVal.Row
+		local tblCol = tblVal.Col
+		local intRow = #tblRow
+		local intCol = #tblCol
+		local iupMat = iup.matrix { NumCol=intCol, NumCol_Visible=intCol, NumLin=intRow, NumLin_Visible=intRow, ReadOnly="YES", Alignment="ARIGHT", BgColor=iup_gui.Smoke, FrameColor=iup_gui.Smoke, ScrollBar="NO", HideFocus="YES", TipBalloon=iup_gui.Balloon, Tip=strGrid.." related statistics.", }
+		iupMat["font0:0"] = iup_gui.FontHead													-- Grid heading font
+		iupMat:setcell(0,0,strGrid )																-- Grid heading text
+		for intRow = 1, intRow do iupMat:setcell(intRow,0,tblRow[intRow]) end			-- Row headings text
+		for intCol = 1, intCol do iupMat:setcell(0,intCol,tblCol[intCol]) end			-- Col headings text
+		for intRow = 0, intRow do iupMat["rasterheight"..intRow] = IntRowHeight end	-- Pixel height of rows
+		local intWidth = IntHeadWidth
+		if strGrid == "Flags" then intWidth = IntFlagWidth end
+		iupMat["rasterwidth0"] = intWidth														-- Pixel width of heading columns
+		for intCol = 1, intCol do
+			local strCol = tblCol[intCol]
+			intWidth = IntNumbWidth																-- Pixel width of numeric columns
+			if strCol:match("^Min.$")
+			or strCol:match("^Ave.$")
+			or strCol:match("^Max.$") then intWidth = IntAgesWidth end					-- Pixel width of Min & Ave & Max Ages columns
+			if strCol:match("t Update$") then intWidth = IntUpdaWidth end				-- Pixel width of Oldest/Latest Update columns
+			if strCol:match("est Date$") then intWidth = IntDateWidth end				-- Pixel width of Earliest/Latest Date columns
+			iupMat["rasterwidth"..intCol] = intWidth
+		end
+		tblVal.Mat = iupMat
+	end
+
+	local strProjectName = fhGetContextInfo("CI_PROJECT_NAME")							-- Name of the current Project
+
+	local function strLastUpdated(strUpdate)
+		TblGrid.Updated = strUpdate or TblGrid.Updated or "Never"							-- Set Grid last updated value
+		return "Statistics Last Updated : "..TblGrid.Updated								-- Title for lblUpdate control
+	end -- local function strLastUpdated
+
+	local tblToggle = { }																			-- GUI toggle controls -- V1.7
+
+	TblAttrib = {
+		--	1~Toggle Name		, 2~Title and Tip																, 3~Exception Report Detailed Explanation
+		{	"CiteDateFormat"	, "Citation Entry Date : format is not valid"							, "Citation Entry Date : "												},
+		{	"CiteDateFuture"	, "Citation Entry Date found in the future"								, "Citation Entry Date found in the future : "						},
+		{	"CiteDateTooOld"	, "Citation Entry Date found too far in past < Earliest Date Year"	, "Citation Entry Date found too far in past : "					},
+		{	"EventLinkFamily"	, "Event has Link to Parents Family via All tab"						, "Event has Link to Parents Family via All tab."					},
+		{	"FactAgeNegative"	, "Fact Age is negative"														, "Fact Age is negative : "												},
+		{	"FactAgeTooLarge"	, "Fact Age is too large > Maximum Age Years"							, "Fact Age is too large : "												},
+		{	"FactDateFormat"	, "Fact Date : format is not valid"											, "Fact Date : "															},
+		{	"FactDateFuture"	, "Fact Date found in the future"											, "Fact Date found in the future : "									},
+		{	"FactDateTooOld"	, "Fact Date found too far in past < Earliest Date Year"				, "Fact Date found too far in past : "									},
+		{	"FactDateSimple"	, "Fact Date is closer/earlier/later than ..."							, "Fact Date is %a-er than .+"											},
+		{	"FactDatePeriod"	, "Fact Date period extends earlier/later than ..."						, "Fact Date period extends %a-er than .+"							},
+		{	"FactDateRanges"	, "Fact Date range extends earlier/later than ..."						, "Fact Date range extends %a-er than .+"								},
+		{	"GenderIndividual"	, "Gender of Individual is undefined"										, "Gender of Individual is undefined."									},
+		{	"IdentAutoRecId"	, "Ident Automatic Record Id"												, "Ident Automatic Record Id : "										},
+		{	"IdentPermRecNo"	, "Ident Permanent Record No"												, "Ident Permanent Record No : "										},
+		{	"LivingFlagDeath"	, "Living Flag despite Death &&/or Burial &&/or Cremation Event"	, "Living Flag despite Death &/or Burial &/or Cremation Event."	},
+		{	"NoBirthBaptism"	, "No Birth, Baptism, or Christening Event"								, "No Birth, Baptism, or Christening Event."							},
+		{	"NoDeathBuryFlag"	, "No Death, Burial, or Cremation Event nor Living Flag"				, "No Death, Burial, or Cremation Event nor Living Flag."			},
+		{	"NoMarriageEvent"	, "No Marriage Event nor Never Married/Unmarried Couple Status"		, "No Marriage Event nor unmarried Status."							},
+		{	"NoParentButChild"	, "No Parents Family but with Children"									, "No Parents Family but with Children."								},
+		{	"NoParentNorChild"	, "No Parents Family without Children"										, "No Parents Family without Children."								},
+		{	"OneParentNoChild"	, "One Parent Family without Children"										, "One Parent Family without Children."								},
+		{	"SpouseDuplicate"	, "Spouse link is duplicated"												, "Spouse link is duplicated."											},
+		{	"UnusedFlagEntry"	, "Unused Listed Flag : for named flag"									, "Unused Listed Flag : "													},
+	}
+
+	local function iupValue(strValue,tglA,tglB)												-- Return toggle handle depending on toggle value
+		if strValue == "OFF" then
+			return tglB
+		else
+			return tglA
+		end
+	end -- local function iupValue
+
+	local function iupRadio(strValue,tglA,tglB)												-- Return radio handle created from two toggles
+		return iup.radio { iup.vbox	{ tglA, tglB, Homogeneous="YES", Margin="30x0", }, Value=iupValue(strValue,tglA,tglB), }
+	end -- local function iupRadio
+
+	-- Create the controls with title/value and tooltip
+	local lblProject = iup.label  { Title=strProjectName }
+	local lblUpdate  = iup.label  { Title=strLastUpdated() }
+	local lblTickAny = iup.label  { Title="\nChoose which of the Exception Reports to include\nby ticking or clearing the check boxes on the right.", Alignment="ACENTER:ACENTER" }
+	local btnTickAll = iup.button { Title="Tick every box to Report ALL Exceptions" }
+	local btnTickNon = iup.button { Title="Clear every box to Report NO Exceptions" }
+	local lblWarning = iup.label  { Title="\nDisabling the detection of Date Warning Exceptions should\nreduce the Update Statistics run time for very large Projects.", Alignment="ACENTER:ACENTER" }
+	local tglWarnInc = iup.toggle { Title="Enable detection of Date Warning Exceptions" }
+	local tglWarnExc = iup.toggle { Title="Disable detection of Date Warning Exceptions" }
+	local radWarning = iupRadio   ( TblOption.DateWarning, tglWarnInc, tglWarnExc )
+	local lblMinYear = iup.label  { Title="Earliest Date Year : " }
+	local txtMinYear = iup.text   { Spin="YES", SpinValue=TblOption.MinimumYear, SpinMin=0, SpinMax=2000, Alignment="ARIGHT" }
+	local lblMaxAges = iup.label  { Title="Maximum Age Years : " }
+	local txtMaxAges = iup.text   { Spin="YES", SpinValue=TblOption.MaximumAges, SpinMin=50, SpinMax=150, Alignment="ARIGHT" }
+	local btnUpdate  = iup.button { Title="Update Statistics" }
+	local btnExport  = iup.button { Title="Export CSV Files" }
+	local btnDefault = iup.button { Title="Restore Defaults" }
+	local btnSetFont = iup.button { Title="Set Window Font" }
+	local btnGetHelp = iup.button { Title="  Help && Advice" }
+	local btnDestroy = iup.button { Title="  Close && Report" }
+
+	-- Set other GUI control attributes
+	for iupName, tblAttr in pairs( {
+		-- Controls  =   1~FgColor	, 2~Padding, 3~Tip
+		[lblProject] = { iup_gui.Info, "10x0"	, "Name of the currently open Project." },
+		[lblUpdate]  = { iup_gui.Info, "10x0"	, "Latest statistics update date and time." },
+		[lblTickAny] = { iup_gui.Info, "0x0"	, "Choose which of the Exception Reports to include." },
+		[btnTickAll] = { iup_gui.Safe, "0x0"	, "Include all the Exception Reports." },
+		[btnTickNon] = { iup_gui.Risk, "0x0"	, "Exclude all the Exception Reports." },
+		[lblWarning] = { iup_gui.Info, "0x0"	, "Disable the date warning detection to reduce\nUpdate Statistics run time for large Projects." },
+		[tglWarnInc] = { iup_gui.Safe, "4x0"	, "Enable Date Warning Exception detection." },
+		[tglWarnExc] = { iup_gui.Safe, "4x0"	, "Disable Date Warning Exception detection." },
+		[lblMinYear] = { iup_gui.Info, "4x0"	, "Set earliest year for any Dates." },
+		[txtMinYear] = { iup_gui.Safe, "4x0"	, "Set earliest year for any Dates." },
+		[lblMaxAges] = { iup_gui.Info, "4x0"	, "Set maximum years for any Ages." },
+		[txtMaxAges] = { iup_gui.Safe, "4x0"	, "Set maximum years for any Ages." },
+		[btnUpdate]  = { iup_gui.Safe, "4x0"	, "Update all the project statistics and\nthe Result Set Exception Report." },
+		[btnExport]  = { iup_gui.Safe, "4x0"	, "Export the statistics to CSV files." },
+		[btnDefault] = { iup_gui.Safe, "4x0"	, "Clear the statistics, reset the options\nand restore window positions and sizes." },
+		[btnSetFont] = { iup_gui.Safe, "4x0"	, "Alter the window interface font." },
+		[btnGetHelp] = { iup_gui.Safe, "4x0"	, "Access the online Help and Advice pages." },
+		[btnDestroy] = { iup_gui.Risk, "4x0"	, "Close the Plugin and show the\n Result Set Exception Report." },
+		} ) do
+		iupName.Expand = "YES"
+		iupName.FgColor	= tblAttr[1]
+		iupName.Padding = tblAttr[2]
+		iupName.Tip = tblAttr[3]
+		iupName.TipBalloon = iup_gui.Balloon
+	end
+
+	-- Create the Records tab layout
+	local boxRecords = iup.hbox { Font=iup_gui.FontBody, Gap=iup_gui.Gap, iup.vbox { TblGrid.Rec.Mat, lblProject, lblUpdate, }, TblGrid.Ind.Mat, TblGrid.Cou.Mat, TblGrid.Fla.Mat, }
+
+	-- Create the Facts tab layout
+	local boxFacts   = iup.hbox { Font=iup_gui.FontBody, Gap=iup_gui.Gap, TblGrid.Fac.Mat, }
+
+	-- Create the Options tab layout -- V1.7
+	local boxControl = iup.vbox { Gap="12", lblTickAny, btnTickAll, btnTickNon, lblWarning, radWarning, iup.label{}, iup.hbox { lblMinYear, txtMinYear, Margin="60x0", }, iup.hbox { lblMaxAges, txtMaxAges, Margin="60x0", }, iup.label{ Title="\n" }, }
+	local boxToggles = iup.vbox { Homogeneous="YES", MaxSize="x490", }
+	local boxOptions = iup.hbox { Font=iup_gui.FontBody, Gap=iup_gui.Gap, Margin="15x0", boxControl, boxToggles, }
+
+	for intPos, tblAttr in ipairs( TblAttrib ) do											-- Add all the Report toggle Option attributes -- V1.7
+		TblAttrib[tblAttr[1]] = intPos															-- Index to Attrib used mainly in MarkCell() but also in parameters to ExceptionReport()
+		TblOption[tblAttr[1]] = TblOption[tblAttr[1]] or "ON"
+		tblToggle[tblAttr[1]] = iup.toggle { Value=TblOption[tblAttr[1]], Title="  "..tblAttr[2], Tip=tblAttr[2]:gsub("&&","and"), TipBalloon=iup_gui.Balloon, Expand="HORIZONTAL", }
+		iup.Append(boxToggles,tblToggle[tblAttr[1]])
+	end
+
+	-- Create the Tab controls layout
+	local tabControl = iup.tabs { Font=iup_gui.FontHead, Padding="8x4", Tip="Show 'Records' or 'Facts' statistics, or review 'Options'.",
+								boxRecords, TabTitle0="  Records  ",
+								boxFacts  , TabTitle1="   Facts   ", 
+								boxOptions, TabTitle2="  Options  ", 
+							}
+
+	-- Create the Button controls
+	local boxButtons = iup.hbox { Homogeneous="YES", Gap="4", Margin="4x4", btnUpdate, btnExport, btnDefault, btnSetFont, btnGetHelp, btnDestroy, }
+
+	-- Combine all the above controls
+	local allControl = iup.vbox { font=iup_gui.FontBody, Margin="0x0",
+								tabControl,
+								boxButtons,
+ 							}
+
+	-- Create dialogue and turn off resize, maximize, minimize, and menubox except Close button, which quits Plugin without Exception Report Result Set
+	local dialogMain = iup.dialog { Title=iup_gui.Plugin..iup_gui.Version, Font=iup_gui.FontBody,
+								allControl,
+							}
+
+	MakeHelpDialogue(btnGetHelp)																	-- Create the Help & Advice window controls
+
+	local function saveOptions()																	-- V1.7 Save all GUI settings 
+		for strName, anyValue in pairs ( tblToggle ) do
+			TblOption[strName] = tblToggle[strName].Value									-- Save all Option toggles
+		end
+		TblOption.DateWarning = tostring(tglWarnInc.Value)									-- Enable/Disable Date Warning checks
+		TblOption.MaximumAges = tonumber(txtMaxAges.SpinValue)								-- Maximum Age for too large Age check
+		TblOption.MinimumYear = tonumber(txtMinYear.SpinValue)								-- Minimum Year for too early Date check
+		DatMinimum = fhNewDate(TblOption.MinimumYear)
+		SaveSettings()																				-- Save sticky data settings
+	end -- local function saveOptions
+
+	function btnTickAll:action()																	-- Action for Tick every box to Report ALL Exceptions button
+		for strName, anyValue in pairs ( tblToggle ) do
+			tblToggle[strName].Value = "ON"
+		end
+	end -- function btnTickAll:action
+
+	function btnTickNon:action()																	-- Action for Clear every box to Report NO Exceptions button
+		for strName, anyValue in pairs ( tblToggle ) do
+			tblToggle[strName].Value = "OFF"
+		end
+	end -- function btnTickNon:action
+
+	function btnUpdate:action()																	-- Action for Update Statistics button
+		boxButtons.Active = "NO"
+		dialogMain.Active = "NO"
+		saveOptions()
+		if UpdateStatistics(TblGrid) then
+			lblUpdate.title = strLastUpdated(os.date())										-- Update OK so record date & time
+			ShowStatistics(TblGrid)
+		else
+			lblUpdate.title = strLastUpdated("Never")											-- Update stopped so reset statistics grid
+			ResetGridCells(TblGrid)
+		end
+		SaveSettings()																				-- Save sticky data settings
+		dialogMain.Active = "YES"
+		dialogMain.BringFront = "YES"
+		boxButtons.Active = "YES"
+	end -- function btnUpdate:action
+
+	function btnExport:action()																	-- Action for Export Statistics button
+		boxButtons.Active = "NO"
+		ExportStatistics(TblGrid)
+		boxButtons.Active = "YES"
+	end -- function btnExport:action
+
+	function btnDefault:action()																	-- Action for Restore Defaults button
+		ResetDefaultSettings()
+		lblUpdate.Title = strLastUpdated("Never")												-- Reset statistics grid
+		ResetGridCells(TblGrid)
+		iup_gui.ShowDialogue("Help")
+		iup_gui.ShowDialogue("Main")
+		tabControl.ValuePos = math.max(0,IntTabPosn - 1)									-- Adjust tab selection -- 3 Aug 2013
+		for strName, iupName in pairs ( tblToggle ) do
+			tblToggle[strName].Value = TblOption[strName]									-- Load all Option toggles -- V1.7
+		end
+		radWarning.Value = iupValue(TblOption.DateWarning,tglWarnInc,tglWarnExc)		-- Enable the Date Warning checks
+		txtMaxAges.SpinValue = TblOption.MaximumAges											-- Maximum Age for too large Age check
+		txtMinYear.SpinValue = TblOption.MinimumYear											-- Minimum Year for too early Date check
+		SaveSettings()																				-- Save sticky data settings
+	end -- function btnDefault:action
+
+	function btnSetFont:action()																	-- Action for Set Interface Font button
+		boxButtons.Active = "NO"
+		if iup_gui.FontDialogue() then
+			for i, control in ipairs({tabControl}) do
+				control.font = iup_gui.FontHead													-- Controls using head font
+			end
+			for i, control in ipairs({allControl,boxRecords,boxFacts,boxOptions,lblUpdate}) do
+				control.font = iup_gui.FontBody													-- Controls using body font
+			end
+			for intGrid, strGrid in ipairs(TblGrid) do
+				tblVal = TblGrid[strGrid:sub(1,3)]
+				tblVal.Mat["FONT0:0"] = iup_gui.FontHead										-- Grid heading head font
+				tblVal.Mat["FONT0:*"] = iup_gui.FontBody										-- Row heading body font
+				tblVal.Mat["FONT*:0"] = iup_gui.FontBody										-- Col heading body font
+				for intCol = 1, #tblVal.Col do
+					tblVal.Mat["FONT*:"..intCol] = iup_gui.FontBody							-- Col data body font
+				end
+				tblVal.Mat.redraw = "ALL"
+			end
+			SaveSettings()																			-- Save sticky data settings
+		end
+		boxButtons.Active = "YES"
+	end -- function btnSetFont:action
+
+	function btnGetHelp:action()																	-- Action for Help & Advice button
+		iup_gui.HelpDialogue(IntTabPosn)														-- 3 Aug 2013
+	end -- function btnGetHelp:action
+
+	function btnDestroy:action()																	-- Action for Close Plugin button
+		saveOptions()																				-- V1.7 Save options
+		local tblRepName = {}
+		local tblRepItem = {}
+		local tblRepText = {}
+		for intText, strText in ipairs ( TblGrid.RepText ) do								-- Search through each Exception Report
+			for intPos, tblAttr in ipairs( TblAttrib ) do
+				if strText:match(tblAttr[3]) then												-- Only include Report in Result Set
+					if TblOption[tblAttr[1]] == "ON" then										-- if its tick box Option is "ON"
+						table.insert(tblRepName,TblGrid.RepName[intText])
+						table.insert(tblRepItem,TblGrid.RepItem[intText])
+						table.insert(tblRepText,TblGrid.RepText[intText])
+					end
+					break
+				end
+			end
+		end
+		if tblRepText and #tblRepText > 0 then													-- Output Exception Report Result Set data
+			fhOutputResultSetTitles(iup_gui.Plugin..iup_gui.Version.."Exceptions Report")
+			fhOutputResultSetColumn("Individual / Family Couple / Fact Item" ,"text",tblRepName,#tblRepText,200,"align_left",0)
+			fhOutputResultSetColumn("Individual / Family Couple / Fact Buddy","item",tblRepItem,#tblRepText,200,"align_left",0,true,"default","buddy")	-- V1.5 addition
+			fhOutputResultSetColumn("Exception Report Detailed Explanation"	 ,"text",tblRepText,#tblRepText,360,"align_left",1)
+		end
+		return iup.CLOSE
+	end -- function btnDestroy:action
+
+	function tabControl:tabchangepos_cb(intNew,intOld)										-- Call back when Main tab position is changed  
+		IntTabPosn = intNew + 1																	-- 3 Aug 2013
+		saveOptions()																				-- V1.7 Save options
+		if intOld == 2 then ShowStatistics(TblGrid) end										-- V1.7 Update display in case Options changed 
+	end -- function tabControl:tabchangepos_cb
+
+	iup_gui.ShowDialogue("Main",dialogMain,btnDestroy,"map & showxy")					-- Map needed to honour setting tabControl.valuepos below
+
+	tabControl.ValuePos = math.max(0,IntTabPosn - 1)										-- Adjust tab selection	-- 3 Aug 2013
+
+	ShowStatistics(TblGrid)																		-- Display the statistics grids
+
+	iup_gui.ShowDialogue("Main")																	-- Now show fixed size dialogue and optionally Version History Help
+
+end -- function GUI_MainDialogue
+
+function ExceptionReport(ptrName,ptrItem,strText)											-- Update Result Set Exception Report data
+	table.insert(TblGrid.RepName,fhGetDisplayText(ptrName))								-- Individual/Family Couple/Fact Item display name for V1.7
+	table.insert(TblGrid.RepItem,ptrItem:Clone())											-- Individual/Family Couple/Fact Item buddy pointer for V1.5
+	table.insert(TblGrid.RepText,strText)														-- Exception Report Text
+	local strRef = ""
+	local intRec = 0																				-- Avoid debug mode printing "is Invalid" for Unused Flags with null ptrItem
+	if ptrItem:IsNotNull() then strRef, intRec = general.BuildDataRef(ptrItem) end	-- Convert the Item pointer to Data Ref & Record Id
+	table.insert(TblGrid.DataRef,strRef)														-- because userdata pointers cannot be saved to file
+	table.insert(TblGrid.RecIdNo,intRec)
+end -- function ExceptionReport
+
+function SetGridLastRow(tblVal)																	-- Set a Grid new last Row
+	local intRow = #tblVal.Row																	-- Row number
+	local strRow = tblVal.Row[intRow]															-- Row heading
+	if not tblVal[intRow] then tblVal[intRow] = {} end										-- Row of cells
+	tblVal.Row[strRow] = intRow																	-- Row lookup dictionary entry
+	if tblVal.Mat then
+		tblVal.Mat.numlin = intRow																-- Matrix control adjustments
+		tblVal.Mat.numlin_visible = intRow
+		tblVal.Mat["rasterheight"..intRow] = IntRowHeight
+		tblVal.Mat:setcell( intRow, 0, strRow )
+	end
+end -- function SetGridLastRow
+
+function ResetGridCells(tblGrid)																-- Reset each Grid and empty the cells
+	for intGrid, strGrid in ipairs(tblGrid) do												-- Loop through all grid cells
+		tblVal = tblGrid[strGrid:sub(1,3)]
+		for intRow, strRow in ipairs(tblVal.Row) do
+			tblVal.Row[tblVal.Row[intRow]] = intRow											-- Row lookup dictionary
+			tblVal[intRow] = {}
+			for intCol, strCol in ipairs(tblVal.Col) do
+				if intRow == 1 then
+					tblVal.Col[tblVal.Col[intCol]] = intCol									-- Col lookup dictionary
+				end
+				tblVal[intRow][intCol] = nil														-- Empty all grid cells
+			end
+		end
+		tblVal.Err = nil																			-- Clear all error colours
+	end
+	tblGrid.Fla.Living = nil																		-- Clear Living Flag exception signal
+	tblGrid.RepName = {}																			-- Added V1.6 correction for 'buddy' pointers
+	tblGrid.RepItem = {}
+	tblGrid.RepText = {}																			-- Clear the Result Set Exception Report data
+	tblGrid.DataRef = {}
+	tblGrid.RecIdNo = {}
+	ShowStatistics(tblGrid)
+end -- function ResetGridCells
+
+function ShowStatistics(tblGrid)																-- Display each Grid in each GUI Matrix
+	for intGrid, strGrid in ipairs(tblGrid) do												-- Loop through all grid cells
+		local tblVal = tblGrid[strGrid:sub(1,3)]
+		if tblVal.Mat then
+			for intRow, strRow in ipairs(tblVal.Row) do
+				for intCol, strCol in ipairs(tblVal.Col) do
+					local strBak = iup_gui.Smoke													-- Empty cell background colour
+					local strErr = nil																-- Empty cell foreground colour
+					local strVal = nil																-- Empty cell nil value
+					if tblVal[intRow] and tblVal[intRow][intCol] then
+						strBak = iup_gui.White														-- Data cell background colour
+						strVal = tblVal[intRow][intCol]											-- Data cell statistic value
+						if tblVal.Err and tblVal.Err[intRow] and tblVal.Err[intRow][intCol] then
+							local intMark = tblVal.Err[intRow][intCol]["Mark"] or 0		-- Quantity of all exception reports -- V1.7
+							for strName, intName in pairs ( tblVal.Err[intRow][intCol] ) do
+								if TblOption[strName] == "OFF" then
+									intMark = intMark - intName									-- Subtract quantity for disabled reports -- V1.7
+								end
+							end
+							if intMark > 0 then strErr = iup_gui.Risk end					-- Data cell foreground error colour
+						end
+					end
+					tblVal.Mat["bgcolor"..intRow..":"..intCol] = strBak
+					tblVal.Mat["fgcolor"..intRow..":"..intCol] = strErr
+					tblVal.Mat:setcell(intRow,intCol,strVal)
+				end
+			end
+			tblVal.Mat.redraw = "ALL"
+		end
+	end
+end -- function ShowStatistics
+
+function MarkCell(tblVal,anyRow,anyCol,strOpt)												-- Mark the single Cell to signal exception
+	local intRow = anyRow
+	local strRow = anyRow
+	local intCol = anyCol
+	local strCol = anyCol
+	if not tonumber(anyRow) then intRow = tblVal.Row[strRow] end							-- If Row not numeric then assume Row Name
+	if not tonumber(anyCol) then intCol = tblVal.Col[strCol] end							-- If Col not numeric then assume Col Name
+	if not tblVal.Err                 then tblVal.Err                 = {} end
+	if not tblVal.Err[intRow]         then tblVal.Err[intRow]         = {} end
+	if not tblVal.Err[intRow][intCol] then tblVal.Err[intRow][intCol] = {} end
+	local tblError = tblVal.Err[intRow][intCol]
+	tblError["Mark"] = ( tblError["Mark"] or 0 ) + 1										-- Quantity of marked exception reports -- V1.7
+	tblError[strOpt] = ( tblError[strOpt] or 0 ) + 1										-- Quantity to hide if Option is chosen -- V1.7
+	return TblAttrib[TblAttrib[strOpt]][3]														-- Return the Exception Report Detailed Explanation text
+end -- function MarkCell
+
+function GetCell(tblVal,strRow,strCol)															-- Get the value of a single Cell
+	return tblVal[tblVal.Row[strRow]][tblVal.Col[strCol]] or 0
+end -- function GetCell
+
+function SetCell(tblVal,strRow,strCol,strVal)												-- Set the value of a single Cell
+	tblVal[tblVal.Row[strRow]][tblVal.Col[strCol]] = strVal
+end -- function SetCell
+
+function UpdateCount(tblVal,strRow,strCol,intAdd)											-- Update the Count of a single Cell
+	local intRow = tblVal.Row[strRow]
+	local intCol = tblVal.Col[strCol]
+	if not intAdd then intAdd = 1 end
+	tblVal[intRow][intCol] = ( tblVal[intRow][intCol] or 0 ) + intAdd
+end -- function UpdateCount
+
+function UpdateDate(tblVal,datDat,strRow,strMin,strMax,ptrRef,strDat,ptrDat)			-- Update the Oldest/Latest Update & Earliest/Latest Date cells & check for Date warnings
+	if not datDat:IsNull() then
+		local datMin = fhNewDate(9999)															-- Minimum Date
+		local datMax = fhNewDate(0001)															-- Maximum date
+		local intRow = tblVal.Row[strRow]
+		local intMin = tblVal.Col[strMin]
+		local intMax = tblVal.Col[strMax]
+		datMin:SetValueAsText(tblVal[intRow][intMin] or "9999",true) 
+		if datDat:Compare(datMin) < 0 then
+			tblVal[intRow][intMin] = datDat:GetDisplayText("ABBREV")						-- Set minimum Date so far
+			if ptrRef and datDat:Compare(DatMinimum) < 0 then								-- Report a Fact Date/Citation Entry Date found before earliest year
+				ExceptionReport(ptrRef,ptrDat,													-- V1.7
+				MarkCell(tblVal,intRow,intMin,strDat.."DateTooOld")..tblVal[intRow][intMin])
+			end
+		end
+		datMax:SetValueAsText(tblVal[intRow][intMax] or "0001",true) 
+		if datDat:Compare(datMax) > 0 then
+			tblVal[intRow][intMax] = datDat:GetDisplayText("ABBREV")						-- Set maximum Date so far
+			if ptrRef and datDat:Compare(DatToday) > 0 then									-- Report a Fact Date/Citation Entry Date found in the future
+				ExceptionReport(ptrRef,ptrDat,													-- V1.7 & V1.6 ptrDat was ptrRef
+				MarkCell(tblVal,intRow,intMax,strDat.."DateFuture")..tblVal[intRow][intMax])
+			end
+		end
+		if ptrDat and TblOption.DateWarning == "ON" then									-- Check for Date warnings	-- V1.7 tglWarnings
+			local strWarn = fhCallBuiltInFunction("GetDataWarning",ptrDat,1)
+			if strWarn ~= "" then
+				if strWarn:match("^Date range ") then
+					MarkCell(tblVal,intRow,tblVal.Col["Date"],"FactDateRanges")			-- Report a Fact Date Range warning
+					strWarn = "Fact "..strWarn
+				elseif strWarn:match("^Period ") then
+					MarkCell(tblVal,intRow,tblVal.Col["Date"],"FactDatePeriod")			-- Report a Fact Date Period warning
+					strWarn = strWarn:gsub("^Period ","Fact Date period ")
+				elseif strWarn:match("^Date is ") then
+					MarkCell(tblVal,intRow,tblVal.Col["Date"],"FactDateSimple")			-- Report a Fact simple Date warning
+					strWarn = "Fact "..strWarn
+				else
+					MarkCell(tblVal,intRow,tblVal.Col["Date"],strDat.."DateFormat")		-- Report a Fact Date/Citation Entry Date not valid
+					if strDat == "Cite" then strDat = "Citation Entry" end
+					strWarn = strDat.." Date : "..strWarn
+				end
+				ExceptionReport(ptrRef,ptrDat,strWarn)											-- V1.7 & V1.6 ptrDat was ptrRef
+			end
+		end
+	end
+end -- function UpdateDate
+
+function UpdateAge(tblVal,intAge,strRow,strNum,strMin,strAve,strMax,ptrRef,ptrVal)	-- Update the Age cells statistics V1.7 added ptrVal
+	if intAge then
+		local intRow = tblVal.Row[strRow]
+		local intNum = tblVal.Col[strNum]
+		local intAve = tblVal.Col[strAve]
+		local intMin = tblVal.Col[strMin]
+		local intMax = tblVal.Col[strMax]
+		if intAge < 0 then																			-- Report negative Fact Age
+			intAge = intAge - 1																		-- Bug fix for AgeAt getting -ve Ages wrong !!!!!!!!!!!!!!!!!!???????
+			ExceptionReport(ptrRef,ptrVal,
+			MarkCell(tblVal,intRow,intMin,"FactAgeNegative")..intAge)						-- V1.7
+		end
+		if intAge > TblOption.MaximumAges then													-- Report too large Fact Age
+			ExceptionReport(ptrRef,ptrVal,
+			MarkCell(tblVal,intRow,intMax,"FactAgeTooLarge")..intAge)						-- V1.7
+		end
+		tblVal[intRow][intNum] = ( tblVal[intRow][intNum] or 0 ) + 1						-- Increment count of Ages detected
+		tblVal[intRow][intAve] = ( tblVal[intRow][intAve] or 0 ) + intAge				-- Accumulate value of Ages for averaging later
+		tblVal[intRow][intMin] = math.min( ( tblVal[intRow][intMin] or 999 ), intAge )
+		tblVal[intRow][intMax] = math.max( ( tblVal[intRow][intMax] or 000 ), intAge )
+	end
+end -- function UpdateAge
+
+function UpdateList(tblList,anyLeaf)															-- Update a Pool/Flag list leaf
+	local intLeaf = anyLeaf
+	local strLeaf = anyLeaf
+	if tonumber(anyLeaf) then																		-- Numeric leaf is Pool number in leaf order
+		strLeaf = "Pool "..intLeaf
+		tblList[intLeaf] = strLeaf
+	elseif not tblList[strLeaf] then															-- Otherwise create new Flag leaf name to be sorted later
+		table.insert(tblList,strLeaf)
+	end
+	tblList[strLeaf] = ( tblList[strLeaf] or 0 ) + 1										-- Increment leaf count
+end -- function UpdateList
+
+function RevealList(tblGrid,tblVal,tblList,strFlag)											-- Display list of Pools/Flags
+	local intTopRow = tblVal.Top																	-- Top row number in Grid for Pools/Flags list
+	local intMaxRow = tblGrid.MaxRows															-- Max row number in Grid
+	for intRow = intTopRow, intMaxRow do
+		local strRow = tblVal.Row[intRow]														-- Clear the Pool/Flag grid cells
+		if tblVal.Row[strRow] then
+			tblVal.Row[strRow] = nil
+			tblVal.Row[intRow] = nil
+		end
+	end
+	SetGridLastRow(tblVal)
+	intTopRow = intTopRow - 1																		-- Row number in Grid above Pools/Flags list
+	if #tblList > 0 then
+		local intMiddle = intMaxRow + 1
+		local intSpaces = intMaxRow - intTopRow												-- Spaces provided for Pools/Flags
+		local intExcess = #tblList - intSpaces													-- Excess quantity of Pools/Flags
+		if intExcess > 0 then
+			intMiddle = math.ceil( ( intSpaces + 1 ) / 2 ) + intTopRow					-- Middle row to accumulate excess Pools/Flags
+		end
+		local intOthers = intMaxRow - intMiddle												-- Others value to identify excess Pools/Flags
+		local strMiddle
+		if tblList[1]:match("Pool") then
+			strMiddle = "Pool "..intMiddle-intTopRow.." - "..#tblList-intOthers			-- Middle Pool row name is "Pool 3 - 99"
+		else
+			strMiddle = tostring(intExcess + 1).." other Flags"								-- Middle Flag row name is "99 other Flags"
+		end
+		for intLeaf = 1, #tblList do
+			local strName = tblList[intLeaf]													-- Pool/Flag name
+			local intName = tblList[strName]													-- Pool/Flag count
+			local intRow = intTopRow + intLeaf													-- Row number
+			if intRow >= intMiddle then
+				intRow = intRow - intExcess														-- Reduce row by Excess once past Middle row
+				if #tblList - intLeaf >= intOthers then
+					intRow = intMiddle																-- Middle row accumulates all other Pools/Flags
+					strName = strMiddle
+				end
+			end
+			if tblVal.Row[intRow] ~= strName then
+				tblVal.Row[intRow] = strName														-- Make new Pool/Flag name row
+				tblVal.Row[intRow+1] = nil
+				SetGridLastRow(tblVal)
+			end
+			UpdateCount(tblVal,strName,"Count",intName)										-- Increment Pool/Flag statistics
+			if strName == strFlag then
+				MarkCell(tblVal,strName,"Count","LivingFlagDeath")						-- Mark exception for Flag name (Living Flag despite Death/Burial/Cremation Event)
+			end
+		end
+	end
+end -- function RevealList
+
+function UpdateStatistics(tblGrid)																-- Update each Grid of statistics
+
+	local tblVal = {}																				-- Values Grid table pointer
+	local ptrRec = fhNewItemPtr()																-- Record pointer
+	local ptrRef = fhNewItemPtr()																-- Reference pointer
+	local ptrVal = fhNewItemPtr()																-- Value pointer
+	local ptrDat = fhNewItemPtr()																-- Date pointer
+	local datDat = fhNewDate(0001)																-- Date value
+	local isStop = true																				-- Returned Progress Bar mode
+
+	-- Used by Compose the Record statistics
+	local tblRecord = { INDI="Individual", FAM="Family", NOTE="Note", SOUR="Source", REPO="Repository", OBJE="Multimedia", SUBM="Submitter", SUBN="Submission", HEAD="Header" }
+
+	-- Used by Compose the Couples statistics
+	local tblParent = { "~.HUSB[1]>", "~.WIFE[1]>", "~.HUSB[2]>", "~.WIFE[2]>" }
+	local tblCouple = { [00]="No Parents", [10]="One Parent", [11]="One Parent", [20]="Same Sex", [21]="Both Sex", [22]="Same Sex" }
+
+	-- Used by Compose the Facts statistics
+	local tblFacts = {
+				INDI = { BIRT="Birth", BAPM="Baptism", CHR="Christening", CENS="Census", OCCU="Occupation", RESI="Residence", DEAT="Death", BURI="Burial", CREM="Cremation", PROB="Probate" },
+				FAM  = { MARR="Marriage", DIV="Divorce", CENS="Census" }
+				}
+
+	-- Used by Check for Idents except in Header
+	local tblIdent = { ["~.REFN"]="CustomId", ["~.RFN"]="IdentPermRecNo", ["~.RIN"]="IdentAutoRecId" }
+
+	-- Used by Check for Event Link to Parents Family Record
+	local tblEvent = { BIRT="Birth", CHR="Christening", ADOP="Adoption" }
+
+	-- Used by Process each Age field and each Age At Date
+	local tblAge = {
+				INDI = { "~" },
+				FAM  = { "~.HUSB", "~.WIFE" }
+				}
+
+	local tblFlag = {}																				-- Internal Flag statistics
+	local tblPool = {}																				-- Internal Pool statistics
+
+	ResetGridCells(tblGrid)																		-- Reset all Cells
+
+	tblVal = tblGrid.Rec																			-- Compose the Record statistics
+	for strRec, strRow in pairs(tblRecord) do
+		ptrRec:MoveToFirstRecord(strRec)
+		while ptrRec:IsNotNull() do																-- Count each Record type
+			UpdateCount(tblVal,"All","Count")
+			UpdateCount(tblVal,strRow,"Count")
+			if strRec ~= "HEAD" then
+				local intLinks = fhCallBuiltInFunction("LinksTo",ptrRec)					-- Count the Links To each Record except Header
+				UpdateCount(tblVal,"All","Links",intLinks)
+				UpdateCount(tblVal,strRow,"Links",intLinks)
+				for strRef, strName in pairs(tblIdent) do										-- Check for Idents except in Header
+					ptrRef = fhGetItemPtr(ptrRec,strRef)
+					local strIdent = fhGetValueAsText(ptrRef)									-- V1.6 introduced ptrRef
+					if strIdent ~= "" then
+						UpdateCount(tblVal,"All","Idents")										-- Count the Idents
+						UpdateCount(tblVal,strRow,"Idents")
+						if strName:match("^Ident%a+Rec") then									-- Report Permanent/Automatic Record Idents
+							ExceptionReport(ptrRec,ptrRef,										--  V1.7 & V1.6 ptrRef was ptrRec
+							MarkCell(tblVal,strRow,"Idents",strName)..strIdent)
+						end
+					end
+				end
+			end
+			datDat:SetSimpleDate(fhCallBuiltInFunction("LastUpdated",ptrRec))			-- Process last updated Dates
+			UpdateDate(tblVal,datDat,"All","Oldest Update","Latest Update")
+			UpdateDate(tblVal,datDat,strRow,"Oldest Update","Latest Update")
+			ptrRec:MoveNext()
+		end
+	end
+	if GetCell(tblVal,"Family","Links") > GetCell(tblVal,"Individual","Links") then
+		MarkCell(tblVal,"Family","Links","EventLinkFamily")									-- Report that Links To Family Records > Links To Individual Records
+	end
+	local intInd = GetCell(tblGrid.Rec,"Individual","Count")								-- Load the Individual and Family record counts 
+	local intFam = GetCell(tblGrid.Rec,"Family","Count")
+	SetCell(tblGrid.Ind,"All","Count",intInd)
+	SetCell(tblGrid.Cou,"All","Count",intFam)
+
+	progbar.Setup(iup_gui.DialogueAttributes("Bars"))										-- Pass parameters into new Progress Bar prototype
+
+	progbar.Start("Statistical Analysis",intInd+intFam)										-- Start the Progress Bar with number of Individual & Family Records
+
+	for intRec, strRec in ipairs({"INDI","FAM"}) do
+		local strBar = tblRecord[strRec].." Record Id "
+		ptrRec:MoveToFirstRecord(strRec)
+		while ptrRec:IsNotNull() do																-- Loop through each Individual & Family Record
+
+			if strRec == "INDI" then																-- Compose the Individuals statistics
+				tblVal = tblGrid.Ind
+				local strSex = fhGetDisplayText(ptrRec,"~.SEX","MIN")						-- Count number of each Gender
+				if strSex == "" then
+					strSex = "Undefined"
+					ExceptionReport(ptrRec,ptrRec,
+					MarkCell(tblVal,"Undefined","Count","GenderIndividual"))				-- Report undefined Gender
+				end
+				UpdateCount(tblVal,strSex,"Count")
+				if  fhGetItemPtr(ptrRec,"~.BIRT[1]"):IsNull()
+				and fhGetItemPtr(ptrRec,"~.BAPM[1]"):IsNull()
+				and fhGetItemPtr(ptrRec,"~.CHR[1]"):IsNull() then
+					UpdateCount(tblVal,"No Birth","Count")										-- Update the No Birth/Baptism/Christening count
+					ExceptionReport(ptrRec,ptrRec,
+					MarkCell(tblVal,"No Birth","Count","NoBirthBaptism"))
+				end
+				if  fhGetItemPtr(ptrRec,"~.DEAT[1]"):IsNull()
+				and fhGetItemPtr(ptrRec,"~.BURI[1]"):IsNull()
+				and fhGetItemPtr(ptrRec,"~.CREM[1]"):IsNull() then
+					if 	fhGetItemPtr(ptrRec,"~._FLGS.__LIVING"):IsNull() then
+						UpdateCount(tblVal,"No Death","Count")									-- Update the No Death/Burial/Cremation count, unless Living Flag
+						ExceptionReport(ptrRec,ptrRec,
+						MarkCell(tblVal,"No Death","Count","NoDeathBuryFlag"))
+					end
+				else
+					ptrRef = fhGetItemPtr(ptrRec,"~._FLGS.__LIVING")						-- V1.7
+					if ptrRef:IsNotNull() then
+						tblGrid.Fla.Living = "Living"											-- Report a Living Flag despite Death/Burial/Cremation Event
+						ExceptionReport(ptrRec,ptrRef,
+						TblAttrib[TblAttrib["LivingFlagDeath"]][3])
+					end
+				end
+				if fhGetItemPtr(ptrRec,"~.FAMC[1]>"):IsNull() then
+					UpdateCount(tblVal,"Parentless","Count")									-- Update the Parentless count
+				end
+				local intPool = fhCallBuiltInFunction("RelationPool",ptrRec)				-- Count number in each Relation Pool
+--[=[
+				local intPool = fhCallBuiltInFunction("LinksTo",ptrRec)					-- Temporary to test logic ~ delete when bug fixed
+				for intPool = 1, 8 do
+					local strPool = "Pool "..intPool
+					tblPool[intPool] = strPool
+					tblPool[strPool] = 19 - intPool
+				end
+--]=]
+				if intPool and intPool > 0 then													-- Update list of Pools
+					UpdateList(tblPool,intPool)
+				end
+
+				tblVal = tblGrid.Cou																-- Count and check Spouses
+				local intMax = tblVal.Row["Max.Spouses"]
+				local intCol = tblVal.Col["Count"]
+				local intSpouse = 0
+				local tblSpouse = {}
+				repeat intSpouse = intSpouse + 1
+					ptrRef = fhGetItemPtr(ptrRec,"~.~SPOU["..intSpouse.."]>")				-- Count the Spouse[*]> instances
+					tblSpouse[intSpouse] = ptrRef
+					for intSpou = 1, intSpouse-1 do
+						if ptrRef:IsSame(tblSpouse[intSpou]) then								-- Same spouse record is duplicated
+							ExceptionReport(ptrRec,ptrRec,
+							MarkCell(tblVal,intMax,intCol,"SpouseDuplicate"))
+						end
+					end
+				until ptrRef:IsNull()
+				intSpouse = intSpouse - 1
+				tblVal[intMax][intCol] = math.max( ( tblVal[intMax][intCol] or 0 ), intSpouse )
+
+			elseif strRec == "FAM" then															-- Compose the Couples statistics
+				tblVal = tblGrid.Cou
+				local intNum = 0																	-- Number of husbands & parents
+				for intRef, strRef in pairs(tblParent) do
+					if fhGetItemPtr(ptrRec,strRef):IsNotNull() then
+						if strRef:match("HUSB") then intNum = intNum + 1 end				-- Husband adds 1, so may be  0, or  1, or  2 
+						intNum = intNum + 10														-- Parent adds 10, so may be 00, or 10, or 20
+					end
+				end
+				UpdateCount(tblVal,tblCouple[intNum],"Count")								-- Update "Both Sex"(21), "Same Sex"(20 & 22), "One Parent"(10 & 11), "No Parents"(00) counts
+				local intChild = 0
+				repeat intChild = intChild + 1													-- Count the Child[*]> instances
+				until fhGetItemPtr(ptrRec,"~.CHIL["..intChild.."]>"):IsNull()
+				intChild = intChild - 1
+				if intChild == 0 then
+					UpdateCount(tblVal,"Childless","Count")									-- Count the Childless Couples
+				else
+					UpdateCount(tblVal,"All Children","Count",intChild)						-- Count the total Children and set Max Children per Couple
+					local intMax = tblVal.Row["Max.Children"]
+					local intCol = tblVal.Col["Count"]
+					tblVal[intMax][intCol] = math.max( ( tblVal[intMax][intCol] or 0 ), intChild )
+				end
+				if intNum == 00 then																-- No Parents Family exceptions
+					if intChild == 0 then
+						ExceptionReport(ptrRec,ptrRec,
+						MarkCell(tblVal,"No Parents","Count","NoParentNorChild"))
+					else
+						ExceptionReport(ptrRec,fhGetItemPtr(ptrRec,"~.CHIL"),				-- V1.7
+						MarkCell(tblVal,"No Parents","Count","NoParentButChild"))
+					end
+				elseif intNum <= 11 and intChild == 0 then									-- One Parent Family exceptions
+					ptrRef = fhGetItemPtr(ptrRec,"~.HUSB")
+					if ptrRef:IsNull() then
+						ptrRef = fhGetItemPtr(ptrRec,"~.WIFE")									-- V1.7
+					end
+					ExceptionReport(ptrRec,ptrRef,
+					MarkCell(tblVal,"One Parent","Count","OneParentNoChild"))
+				elseif intNum >= 20 and fhGetItemPtr(ptrRec,"~.MARR[1]"):IsNull() then
+					ptrRef = fhGetItemPtr(ptrRec,"~._STAT")									-- V1.7 Check marriage Status
+					local strStatus = fhGetValueAsText(ptrRef)
+					if not ( strStatus == "Never Married" or strStatus == "Unmarried Couple" ) then
+						UpdateCount(tblVal,"No Marriage","Count")								-- Update the No Marriage count, for two parent Family, unless umarried Status
+						if ptrRef:IsNull() then ptrRef = ptrRec:Clone() end 				-- V1.7
+						ExceptionReport(ptrRec,ptrRef,
+						MarkCell(tblVal,"No Marriage","Count","NoMarriageEvent"))
+					end
+				end
+			end
+
+			local strTag = ""
+			ptrRef:MoveToFirstChildItem(ptrRec)
+			while ptrRef:IsNotNull() do															-- Loop through each instance of each level 1 Data Ref
+				strTag = fhGetTag(ptrRef)
+				if strTag == "_FLGS" then
+					tblVal = tblGrid.Fla															-- Compose the Flags statistics
+					ptrRef:MoveToFirstChildItem(ptrRef)
+					while ptrRef:IsNotNull() do													-- Loop through each FLGS Tag
+						local strFlag = fhGetDisplayText(ptrRef,"~","STD"):gsub(": Y","")
+						UpdateCount(tblVal," All","Count")										-- Count each Flag
+						UpdateList(tblFlag,strFlag)												-- Update list of Flags
+						ptrRef:MoveNext("ANY")
+					end
+				elseif fhIsFact(ptrRef) then
+					tblVal = tblGrid.Fac															-- Compose the Facts statistics
+					local strRow = tblFacts[strRec][strTag]
+					if not strRow then strRow = "All Other" end
+					if tblEvent[strTag]																-- Check for Event Link to Parents Family Record
+					and fhGetItemPtr(ptrRef,"~.FAMC>"):IsNotNull() then
+						ExceptionReport(ptrRef,ptrRef,
+						TblAttrib[TblAttrib["EventLinkFamily"]][3])
+					end
+					UpdateCount(tblVal,strRow,"Count")											-- Count each Fact
+					if fhGetItemPtr(ptrRef,"~.SOUR[1]>"):IsNotNull() then
+						UpdateCount(tblVal,strRow,"Source")										-- Count existing Source citations
+						local intCite = 0
+						ptrVal:MoveTo(ptrRef,"~.SOUR")
+						while ptrVal:IsNotNull() do												-- Loop through each Citation and check Entry Date
+							intCite = intCite + 1
+							ptrDat = fhGetItemPtr(ptrVal,"~.DATA.DATE")
+							datDat = fhGetValueAsDate(ptrDat)
+							UpdateDate(tblVal,datDat,strRow,"Earliest Date","Latest Date",ptrVal,"Cite",ptrDat)
+							ptrVal:MoveNext("SAME_TAG")
+						end
+					end
+					if fhGetItemPtr(ptrRef,"~.PLAC"):IsNotNull()
+					or fhGetItemPtr(ptrRef,"~.ADDR"):IsNotNull()
+					or fhGetItemPtr(ptrRef,"~._PLAC"):IsNotNull() then
+						UpdateCount(tblVal,strRow,"Place")										-- Count existing Place/Address fields
+					end
+					ptrDat = fhGetItemPtr(ptrRef,"~.DATE")										-- Process each Fact Date
+					if ptrDat:IsNotNull() then
+						datDat = fhGetValueAsDate(ptrDat)										-- datDat is also used by Age At Date below
+						UpdateDate(tblVal,datDat,strRow,"Earliest Date","Latest Date",ptrRef,"Fact",ptrDat)
+						UpdateCount(tblVal,strRow,"Date")										-- Count each Date
+					else
+						datDat = nil																	-- datDat is also used by Age At Date below
+					end
+					for intRef, strRef in ipairs(tblAge[strRec]) do							-- Individual or Husband and Wife
+						ptrVal = fhGetItemPtr(ptrRef,strRef..".AGE")							-- Process each Age field
+						if ptrVal:IsNotNull() then
+							local strAge, intAge
+							strAge = fhGetValueAsText(ptrVal)									-- Obtain the Age text string
+							intAge = tonumber(strAge:match("(%d*) yr"))						-- Extract the Age in years if possible
+							if not intAge and strAge then intAge = 0 end						-- Otherwise, use 0 Years for any other Age text
+							UpdateAge(tblVal,intAge,strRow,"Age","Min.","Ave.","Max.",ptrRef,ptrVal)
+						end
+						if strRec == "FAM" then strRef = strRef..">" end
+						ptrVal = fhGetItemPtr(ptrRec,strRef)									-- Process each Age At Date
+						if datDat and ptrVal:IsNotNull() then
+							intAge = fhCallBuiltInFunction("AgeAt",ptrVal,datDat:GetDatePt1())
+							UpdateAge(tblVal,intAge,strRow,"Age@","Min@","Ave@","Max@",ptrRef,ptrRef)
+						end
+					end
+				end
+				ptrRef:MoveNext("ANY")
+			end
+
+			progbar.Message(strBar..fhGetRecordId(ptrRec))									-- Update the Progress Bar
+			progbar.Step(1)
+			isStop = progbar.Stop()
+			if isStop then break end																-- Break out of inner loop
+			ptrRec:MoveNext()
+		end
+		if isStop then break end																	-- Break out of outer loop
+	end
+	progbar.Step(2)
+
+	tblVal = tblGrid.Ind																			-- Display List of Individual Pools
+	RevealList(tblGrid,tblVal,tblPool)
+
+	tblVal = tblGrid.Cou																			-- Calculate the Average Children for Couples
+	local intCol = tblVal.Col["Count"]
+	local intAll = tblVal[tblVal.Row["All Children"]][intCol]
+	if intAll and intFam then
+		tblVal[tblVal.Row["Ave.Children"]][intCol] = math.floor( intAll / intFam * 10 + 0.5 ) / 10
+	end
+
+	tblVal = tblGrid.Fla																			-- Display sorted List of Flags
+	table.sort(tblFlag, function(tblA,tblB) if tblFlag[tblA] == tblFlag[tblB] then return tblA < tblB else return tblFlag[tblA] > tblFlag[tblB] end end )
+	RevealList(tblGrid,tblVal,tblFlag,tblVal.Living)
+	local strFlagsFile = fhGetContextInfo("CI_APP_DATA_FOLDER").."\\Flags\\Flags.fha"
+	for strLine in io.lines(strFlagsFile) do													-- Search Flags.fha file
+		ptrRec:SetNull()
+		local strFlag = strLine:match("^Name=(.+)$")
+		if strFlag and not tblFlag[strFlag] then												-- Found unused Flag exception
+			ExceptionReport(ptrRec,ptrRec,
+			MarkCell(tblVal," All","Count","UnusedFlagEntry")..strFlag)
+		end
+	end
+
+	tblVal = tblGrid.Fac																			-- Calculate the Average Age & Age@ per Fact
+	for intRow, strRow in ipairs(tblVal.Row) do
+		local intNum = tblVal[intRow][tblVal.Col["Age"]]
+		local intAve = tblVal[intRow][tblVal.Col["Ave."]]
+		if intNum and intAve then
+			tblVal[intRow][tblVal.Col["Ave."]] = math.floor( intAve / intNum + 0.5 )
+		end
+		local intNum = tblVal[intRow][tblVal.Col["Age@"]]
+		local intAve = tblVal[intRow][tblVal.Col["Ave@"]]
+		if intNum and intAve then
+			tblVal[intRow][tblVal.Col["Ave@"]] = math.floor( intAve / intNum + 0.5 )
+		end
+	end
+
+	progbar.Close()																					-- Close the Progress Bar
+	ProgressBar = nil
+
+	return not isStop
+end -- function UpdateStatistics
+
+function ExportStatistics(tblGrid)																-- Export each Grid of statistics
+	local strFile = iup_gui.PublicPath.."\\"..iup_gui.Plugin.." ~ <Grid>.csv"			-- Filename template
+	local strLine = ""
+	for intGrid, strGrid in ipairs(tblGrid) do												-- Loop through all grid cells
+		local tblVal = tblGrid[strGrid:sub(1,3)]
+		local tblRow = tblVal.Row
+		local tblCol = tblVal.Col
+		strLine = strGrid																			-- CSV cell A1 is Grid name 
+		for intCol = 1, #tblCol do
+			strLine = strLine..","..tblCol[intCol]												-- CSV row 1 is Grid column headings
+		end
+		for intRow = 1, #tblRow do 
+			strLine = strLine.."\n"..tblRow[intRow]											-- CSV col A is Grid row heading
+			for intCol = 1, #tblCol do
+				local strBeg = ","
+				local strEnd = ""
+				if tblCol[intCol]:match("est Date$") then										-- Protect any Fact Earliest & Latest Date so Excel/Calc treats as strings 
+					strBeg = ",=\""
+					strEnd = "\""
+				end
+				strLine = strLine..strBeg..(tblVal[intRow][intCol] or "")..strEnd		-- CSV col B... are cell values
+			end
+			local strPath = strFile:gsub("<Grid>",strGrid)
+			general.SaveStringToFile(strLine.."\n",strFile:gsub("<Grid>",strGrid))
+		end
+	end
+	iup_gui.MemoDialogue("\n Export completed to CSV files : \n\n "..strFile:gsub("<Grid>","*").." \n")
+end -- function ExportStatistics
+
+-- Main Code Section Starts Here --
+
+	fhInitialise(5,0,7,"save_recommended")
+
+	PresetGlobalData()																				-- Preset global data definitions
+
+	ResetDefaultSettings()																			-- Preset default sticky settings
+
+	LoadSettings()																					-- Load sticky data settings
+
+	iup_gui.CheckVersionInStore()																-- Notify if later Version
+
+	GUI_MainDialogue()																				-- Invoke graphical user interface
+
+	SaveSettings()																					-- Save sticky data settings

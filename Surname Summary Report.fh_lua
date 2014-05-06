@@ -58,6 +58,7 @@ function inc(i,s)
     if i then i = i + s else i = s end
     return i
 end
+
 function daterange(ptr)
     local eventPtr = fhNewItemPtr()
     local famPtr = fhNewItemPtr()
@@ -84,6 +85,7 @@ function daterange(ptr)
     end
     return minyear,maxyear
 end
+
 function compdate(year,minyear,maxyear)
     iYear = tonumber(year)
     if iYear then

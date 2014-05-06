@@ -1,0 +1,51 @@
+--[[
+@Title: Set Automatic Record ID
+@Author: Jane Taubman
+@Version: 0.0
+@LastUpdated: March 2014 
+@Description: Creates/Sets the Automatic Record ID from the record ID and a start number.
+]]
+
+function main()
+    local sType = 0
+    local iStartNo = 1000
+    local strPrompt =
+[[
+Record Type: %l|INDI|FAM|SOUR|NOTE|OBJE|\n"
+Offset: %i
+    ]]
+    local rType = {"INDI","FAM","SOUR","NOTE","OBJE"}
+    bOK, sType,iStartNo =
+    iup.GetParam("Set/Create Automatic Record ID", param_action,strPrompt,
+    sType,iStartNo)
+    if bOK then
+        sType = sType + 1
+        local pAno = fhNewItemPtr()
+        for pi in records(rType[sType]) do
+            local id = fhGetRecordId(pi)
+            local aid = id + iStartNo
+            print (fhGetDisplayText(pi),id,aid)
+            pAno:MoveTo(pi,"~.RIN")
+            if pAno:IsNull() then
+                pAno = fhCreateItem("RIN", pi)
+            end
+            bOK2 = fhSetValueAsText(pAno, aid)
+            if not(bOK2) then
+                error()
+            end
+        end
+    end
+end
+
+function records(type)
+    local pi = fhNewItemPtr()
+    local p2 = fhNewItemPtr()
+    pi:MoveToFirstRecord(type)
+    return function ()
+        p2:MoveTo(pi)
+        pi:MoveNext()
+        if p2:IsNotNull() then return p2 end
+    end
+end
+-------------------------------------- main
+main()

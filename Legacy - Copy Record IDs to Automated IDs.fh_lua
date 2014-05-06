@@ -1,0 +1,59 @@
+--[[
+@Title: Legacy - Pre-Load Copy Record IDs to Automated IDs
+@Author: Jane Taubman
+@LastUpdated: Sept 2013
+@Description: Copy all Record ID's to Automated ID's in Gedcom File
+This MUST be done before the file is loaded into Family Historian
+]]
+
+function string.starts(String,Start)
+    return string.sub(String,1,string.len(Start))==Start
+end
+
+function splitfilename(strfilename)
+    -- Returns the Path Filename and extension as 3 values
+    return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
+end
+
+------------------------------------------------------  Main Program
+require 'iup'
+local strProjectFile = ''
+local strProjectFile,strReturn = iup.GetFile(strProjectFile)
+if strReturn ~= 0 then
+    return
+end
+
+
+local path,name,ext = splitfilename(strProjectFile)
+local NewProjectFile = path..'updated-'..name
+local tblData = {}
+local tblNew = {}
+local file = io.open(strProjectFile,'r')
+
+if file then
+    for line in file:lines() do
+        table.insert(tblData,line)
+    end
+    file:close()
+else
+    error('File Failed To Load')
+end
+local i = 1
+while tblData[i] ~= nil do
+    line = tblData[i]
+    table.insert(tblNew,line)
+    level,key = line:match('(.-) (.+)')
+    if level == '0' then
+        ref = key:match('(%d+)')
+        if ref then
+            print(line,ref)
+            table.insert(tblNew,'1 RIN '..ref)
+        end
+    end
+    i = i + 1
+end
+local data = table.concat(tblNew, "\n") .. "\n"
+local file = io.open(NewProjectFile,'w')
+file:write(data)
+file:close()
+fhMessageBox('File:'..NewProjectFile..' Created')

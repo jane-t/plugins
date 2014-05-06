@@ -1,0 +1,134 @@
+--[[
+@Title: Genes Reunited Date Exception Report
+@Author: Jane Taubman
+@LastUpdated: June 2013
+@Version: 1.0
+@Description: Search all Facts and list all Dates which contain:
+
+  Date Phrases rather than dates.
+  All dates for the current year
+  All future dates
+  Dates where the year is less than 1000 (ie 0171, 0019 or 0004)
+
+Very useful as a base to clean up badly formatted dates from imported GedCom files.
+
+Written for "My History"
+]]
+
+function mainfunction()
+    -- Define Result Set Titles and Columns
+    do
+    local _,strFile,_ = splitfilename(fhGetContextInfo('CI_GEDCOM_FILE'))
+    local phptr = fhNewItemPtr()
+    phptr:MoveToFirstRecord('HEAD')
+    phptr:MoveTo(phptr,'~.DATE')
+    if phptr:IsNotNull() then 
+       tDate = fhGetDisplayText(phptr)
+else
+tDate = ' '
+    end
+    local strSubTitle = strFile..tDate.." Printed: %#x"
+    local strTitle = "Genes Reunited Date Exception Report"
+    fhOutputResultSetTitles(strTitle,strTitle,strSubTitle)
+end
+local tblOutput,iC = createResultTable() -- Get Output table and line counter
+tblOutput.type = {title='Type',type='text',width=60,align='align_left',content={}}
+tblOutput.record = {title='Record',type='item',width=200,align='align_left',content={}}
+tblOutput.recordid = {title='Id',type='text',width=30,align='align_left',content={}}
+tblOutput.date = {title='Date',type='item',width=75,align='align_left',content={}}
+tblOutput.fact = {title='Fact',type='item',width=240,align='align_left',content={}}
+-- Work Variables
+local tblTypes = {"INDI","FAM"} -- Scan both Family and Individual Record Types
+local pi = fhNewItemPtr()
+local ptrFact = fhNewItemPtr() -- Fact Which Contains Date
+local ptrOwner = fhNewItemPtr() -- Owner Which Contains Fact
+local ptrAge = fhNewItemPtr() -- Age at Fact
+local today = fhCallBuiltInFunction('today')
+local curYear = today:GetYear()
+-- Loop all Individuals and Families
+for iType,strTypeDesc in ipairs(tblTypes) do
+    pi:MoveToFirstRecord(strTypeDesc)
+    while pi:IsNotNull() do
+        strType = fhGetTag(pi)
+        if strType == 'DATE' then
+            local reason = ''
+            dtDate = fhGetValueAsDate(pi)
+            strPhrase = dtDate:GetPhrase()
+            if (strPhrase ~= nil) and (strPhrase ~= "") then
+                reason = 'Phrase'
+            else
+                -- Look for Bad Years
+                local dp = dtDate:GetDatePt1()
+                local year = dp:GetYear()
+                if year == curYear then
+                    reason = 'Current Year'
+                elseif today:Compare(dp) == -1 then
+                    reason = 'Future Date'
+                elseif year < 1000 then
+                    reason = 'Early Date'
+                end
+            end
+            if reason ~= '' then
+                -- Add to Result Set
+                ptrFact:MoveToParentItem(pi)
+                ptrOwner:MoveToParentItem(ptrFact)
+                ptrAge:MoveTo(ptrFact,'~.AGE')
+                iC = iC + 1
+                -- Uncomment the line below when fixing so you can see the original value
+                tblOutput.date.content[iC] = pi:Clone()
+                tblOutput.recordid.content[iC] = string.sub(fhGetTag(ptrOwner),1,1)..fhGetRecordId(ptrOwner)
+                tblOutput.record.content[iC] = ptrOwner:Clone() -- Add to Owner Column
+                tblOutput.fact.content[iC] = ptrFact:Clone() -- Add to Fact Column               
+                tblOutput.type.content[iC] = reason
+            end
+        end
+        pi:MoveNextSpecial()
+    end
+end
+-- Send the Tables to Query Window.
+outputResultTable(tblOutput,iC,'No Date Phrases Found')
+end
+-------------------------------------------------------------------- Functions
+
+function createResultTable()
+-- create metatable
+local tblOutput_mt = {}
+tblOutput_mt.col = 0
+tblOutput_mt.seq = {}
+tblOutput_mt.__newindex = function (t,k,v)
+    rawset(t,k,v) -- update original table
+    local m = getmetatable(t)
+    m.col = m.col + 1
+    table.insert(m.seq,k)
+end
+tblOutput_mt.__call = function (t)
+    local i = 0
+    local m = getmetatable(t)
+    local n = table.getn(m.seq)
+    return function ()
+        i = i + 1
+        if i <= n then return t[m.seq[i]] end
+    end
+end
+local tblOutput = {} -- Define Columns Table
+setmetatable(tblOutput, tblOutput_mt)
+local iC = 0 -- Define count of lines
+return tblOutput,iC
+end
+
+function outputResultTable(tblOutput,iC,sMessage)
+if iC > 0 then
+    for t in tblOutput() do
+        fhOutputResultSetColumn(t.title, t.type, t.content, iC, t.width,t.align)
+    end
+else
+    fhMessageBox(sMessage,'MB_OK','MB_ICONINFORMATION')
+end
+end
+
+function splitfilename(strfilename)
+-- Returns the Path Filename and extension as 3 values
+return string.match(strfilename, "(.-)([^\\]-)([^%.]+)$")
+end
+-------------------------------------------------------------------- Call mainfunction
+mainfunction()

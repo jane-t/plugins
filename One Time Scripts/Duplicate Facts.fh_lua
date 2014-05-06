@@ -1,0 +1,35 @@
+local ptrData = fhNewItemPtr()										-- Loop Data Ref pointer
+local ptrFact = fhNewItemPtr()										-- Fact pointer
+local ptrDupl = fhNewItemPtr()
+local tblData = {}
+local tblFact = {}
+for intRec, strRec in ipairs({"INDI","FAM"}) do					-- Check all Individual & Family Records
+	ptrData:MoveToFirstRecord(strRec)
+	while ptrData:IsNotNull() do										-- Scan all Records
+		ptrFact:MoveToFirstChildItem(ptrData)
+		while ptrFact:IsNotNull() do		-- Scan all Facts
+			if fhIsFact(ptrFact) then
+				local strTag = fhGetTag(ptrFact)
+				ptrDupl:MoveTo(ptrData,"~."..strTag.."[2]")
+				if ptrDupl:IsNotNull() then
+					if fhGetValueAsText(fhGetItemPtr(ptrFact,'~.NOTE2')) == fhGetValueAsText(fhGetItemPtr(ptrDupl,'~.NOTE2'))
+					and fhGetValueAsText(fhGetItemPtr(ptrFact,'~.DATE')) == fhGetValueAsText(fhGetItemPtr(ptrDupl,'~.DATE'))
+					and fhGetValueAsText(fhGetItemPtr(ptrFact,'~.PLAC')) == fhGetValueAsText(fhGetItemPtr(ptrDupl,'~.PLAC'))
+					and fhGetValueAsText(fhGetItemPtr(ptrFact,'~.ADDR')) == fhGetValueAsText(fhGetItemPtr(ptrDupl,'~.ADDR'))
+					and fhGetValueAsText(fhGetItemPtr(ptrFact,'~.AGE'))  == fhGetValueAsText(fhGetItemPtr(ptrDupl,'~.AGE'))
+					and fhGetValueAsText(fhGetItemPtr(ptrFact)) == fhGetValueAsText(fhGetItemPtr(ptrDupl))
+					then
+						table.insert(tblData,ptrData:Clone())
+						table.insert(tblFact,ptrFact:Clone())
+					end
+					ptrFact:MoveNext()
+				end
+			end
+			ptrFact:MoveNext()
+		end
+		ptrData:MoveNext()
+	end
+end
+fhOutputResultSetTitles("Duplicate Facts")
+fhOutputResultSetColumn("Owner's Record", "item", tblData, #tblData, 200, "align_left", 1)
+fhOutputResultSetColumn("Duplicate Fact", "item", tblFact, #tblData, 200, "align_left", 2)

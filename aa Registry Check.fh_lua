@@ -1,0 +1,23 @@
+require "luacom"
+function getRegKey(key)
+    local sh = luacom.CreateObject "WScript.Shell"
+    local ans,res 
+res,msg = pcall(function () ans = sh:RegRead(key) end)
+print(msg)
+    if res then
+      return ans
+    else
+      return nil,true
+    end
+end
+
+local list = {
+"HKEY_CLASSES_ROOT\\Applications\\Ancestral Sources.exe\\shell\\open\\command\\",
+"HKEY_CURRENT_USER\\Software\\Classes\\Applications\\Ancestral Sources.exe\\shell\\open\\command\\",
+"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Ancestral Sources_is1\\Publisher\\"
+}
+
+for k,v in ipairs(list) do
+print(k,v)
+print(getRegKey(v))
+end

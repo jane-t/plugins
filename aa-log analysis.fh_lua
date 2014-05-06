@@ -1,0 +1,34 @@
+
+function main ()
+local file = [[D:\temp\as logs\ancestral.fhug.org.uk]]
+local tblList = fileToArray(file)
+local tblCount = {}
+for i,line in ipairs(tblList) do
+local f=line:match('GET /(.-exe)')
+if f then
+ tblCount[f] =  (tblCount[f] or 1) + 1
+end
+end
+for f,count in pairs(tblCount) do
+sSql = 'INSERT INTO download values("%s",%s);'
+
+print (string.format(sSql,f,count))
+end
+
+end
+
+function fileToArray(filename)
+    local file = io.open(filename)
+    local tbllines = {}
+    if file then
+        for line in file:lines() do
+            table.insert(tbllines,line)
+        end
+        file:close()
+        return tbllines
+    else
+        return false,'File Failed To Open'
+    end
+end
+
+main()
