@@ -1,7 +1,7 @@
 --[[
 @Title: Generations Gedcom - Pre-Load
 @Author: Jane Taubman
-@LastUpdated: Sept 2013
+@LastUpdated: March 2021
 @Description: Clean TEXT lines in sources so they don't get excluded.
 ]]
 function string.starts(String,Start)
@@ -11,7 +11,7 @@ function splitfilename(strfilename)
 -- Returns the Path Filename and extension as 3 values
 return string.match(strfilename, "(.-)([^\\]-([^%.]+))$")
 end
-require 'iup'
+require 'iuplua'
 strProjectFile = ''
 strProjectFile,strReturn = iup.GetFile(strProjectFile)
 if strReturn ~= 0 then
